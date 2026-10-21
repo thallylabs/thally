@@ -11,6 +11,7 @@ import TurndownService from 'turndown'
 import { unified } from 'unified'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
+import { hydrateUrlOpenApi } from './url-openapi.js'
 import { projectMintlifyIntegrations } from './analytics.js'
 import { parseMarkdownPage } from './mdx.js'
 import { mintlifyFontSources, selfHostedFontWarning } from './mintlify-extras.js'
@@ -107,6 +108,8 @@ export interface EmbeddedOpenApiFragment {
 
 export interface UrlMigrationOptions {
   sourceUrl: string
+  /** Explicit HTTPS OpenAPI specification when the publisher has no operation mirrors. */
+  openapiUrl?: string
   /** Explicit caller selection; omitted callers retain source auto-detection. */
   platform?: MigrationPlatform
   fetcher?: MigrationFetcher
@@ -850,9 +853,13 @@ function migratedHref(
       return `/${target.search}${target.hash}`
     }
     let path = target.pathname
+    const isMarkdown = path.endsWith('.md')
+    const machinePath = path.replace(/\/+$/, '')
+    if (['/llms.txt', '/llms-full.txt', '/openapi.json', '/openapi.yaml', '/robots.txt', '/sitemap.xml'].includes(machinePath)) return `${machinePath}${target.search}${target.hash}`
     if (scopePath !== '/' && (path === scopePath || path.startsWith(`${scopePath}/`))) {
       path = path.slice(scopePath.length)
     }
+    if (['/llms.txt', '/llms-full.txt', '/openapi.json', '/openapi.yaml', '/robots.txt', '/sitemap.xml'].includes(path)) return `${path}${target.search}${target.hash}`
     const id = pageIdFromReference(path.replace(/^\/+/, '') || 'introduction')
     const localizedId = id ? canonicalLocalizedPageId(id) : id
     const destinationId = localizedId === sourceHomePageId ? 'introduction' : localizedId
@@ -866,7 +873,7 @@ function migratedHref(
     }
     if (importedDestinationId) {
       const destination = importedDestinationId === 'introduction' ? '/' : `/${importedDestinationId}`
-      return `${destination}${target.search}${target.hash}`
+      return `${destination === '/' && isMarkdown ? '/introduction' : destination}${isMarkdown ? '.md' : ''}${target.search}${target.hash}`
     }
     // Same-origin marketing and intentionally missing example links remain
     // valid external URLs instead of becoming broken links in the new site.
@@ -2291,9 +2298,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       ],
     }
   }
-  if (platform === 'mintlify') docsConfig = addMintlifyDirectoryRedirects(docsConfig, pages)
+  if (platform === 'mintlify') docsConfig = { ...addMintlifyDirectoryRedirects(docsConfig, pages), markdown: { enabled: true } }
   docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), pages, warnings)
-  return {
+  const bundle: MigrationBundle = {
     sourceUrl: source.toString(),
     sourceKind: 'url',
     platform,
@@ -2313,4 +2320,20 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       skipped: Math.max(0, visited.size - pages.length),
     },
   }
+  // Only publisher-declared specification links are discovery evidence. Do not
+  // probe arbitrary well-known paths or fetch repository paths from HTML config.
+  const sourceHtml = scopedHtmlProbe ? load(scopedHtmlProbe.body) : undefined
+  const linkedSpecs = sourceHtml && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
+    ? [...new Set(sourceHtml('link[rel="service-desc"][href], a[href]').map((_index, element) => {
+      const href = sourceHtml(element).attr('href')
+      if (!href) return null
+      try {
+        const url = new URL(href, scopedHtmlProbe.finalUrl)
+        return url.protocol === 'https:' && /\/(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(url.pathname) ? url.toString() : null
+      } catch { return null }
+    }).get())]
+    : []
+  const specUrl = options.openapiUrl ?? (!openApiAsset && linkedSpecs.length === 1 ? linkedSpecs[0] : undefined)
+  if (!options.openapiUrl && linkedSpecs.length > 1) bundle.warnings.push({ code: 'unsupported-config', message: 'Multiple OpenAPI specifications were linked by the source. Select one explicitly with --openapi <https-url>.' })
+  return specUrl ? hydrateUrlOpenApi(bundle, specUrl, options.fetcher) : bundle
 }
