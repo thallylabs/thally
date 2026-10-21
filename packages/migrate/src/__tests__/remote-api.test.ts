@@ -548,7 +548,7 @@ describe('remote OpenAPI spec body links written with a trailing slash, a query 
     input.docsConfig = { ...input.docsConfig, redirects: [{ source: '/api-reference/scim/list-users/', destination: '/guide' }] }
     const scimSpec = JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths: { '/users': { get: { summary: 'List users', tags: ['SCIM'] } } } })
     const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: scimSpec, contentType: 'application/json' }))
-    expect(result.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users/', destination: '/guide' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users', destination: '/guide' }])
     expect(result.pages[0].body).toBe('[List users](/api-reference/scim/list-users)')
   })
 
