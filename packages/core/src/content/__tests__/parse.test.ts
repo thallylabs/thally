@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseMdxContent } from '../parse'
+import { parseMdxContent, parseMdxTree } from '../parse'
 import { slugify } from '../../slugify'
 
 const sample = `## Getting Started
@@ -132,6 +132,24 @@ describe('parseMdxContent step titles', () => {
   it('keeps the step title in the page text', () => {
     expect(parseMdxContent(source).text).toContain('Create a project')
   })
+
+  it.each(['"install-cli"', '`install-cli`'])('reads a step id written as %s as the string it is', (id) => {
+    const parsed = parseMdxContent(`<Steps titleSize="h3">\n<Step title="Install" id={${id}}>Run npm install.</Step>\n</Steps>\n\n## Install`)
+    expect(parsed.headings).toEqual([
+      { depth: 3, text: 'Install', id: 'install-cli' },
+      { depth: 2, text: 'Install', id: 'install' },
+    ])
+    expect(parsed.sections.map((section) => section.id)).toEqual(['install-cli', 'install'])
+  })
+
+  it.each(['{someId}', '{"a" + b}', '{`p-${n}`}'])('gives a step whose id is %s no anchor, and takes no id from the heading', (id) => {
+    const parsed = parseMdxContent(`<Steps titleSize="h3">\n<Step title="Install" id=${id}>Run npm install.</Step>\n</Steps>\n\n## Install`)
+    expect(parsed.headings).toEqual([{ depth: 2, text: 'Install', id: 'install' }])
+    expect(parsed.toc.map((item) => item.id)).toEqual(['install'])
+    expect(parsed.sections.map((section) => section.id)).toEqual(['', 'install'])
+    // The step stays in the page's prose, under the section before it.
+    expect(parsed.sections[0].text).toContain('Run npm install.')
+  })
 })
 
 describe('parseMdxContent JSX attribute prose', () => {
@@ -253,5 +271,21 @@ describe('code fence language tags', () => {
       ['text', false],
       ['text', true],
     ])
+  })
+})
+
+describe('parseMdxTree', () => {
+  type Node = { type: string; children?: Array<Node> }
+  const kinds = (node: Node): Array<string> => [node.type, ...(node.children ?? []).flatMap(kinds)]
+
+  it('reads GFM and MDX together, as the renderer does', () => {
+    const tree = parseMdxTree('## Param a~b~c[^1] <Badge>New</Badge>\n\n[^1]: The note.') as unknown as Node
+    expect(kinds(tree)).toEqual(expect.arrayContaining(['heading', 'delete', 'footnoteReference', 'footnoteDefinition', 'mdxJsxTextElement']))
+  })
+
+  it('reads a page MDX cannot as Markdown with GFM', () => {
+    const tree = parseMdxTree('## Param a~b~c\n\n<Broken') as unknown as Node
+    expect(kinds(tree)).toEqual(expect.arrayContaining(['heading', 'delete']))
+    expect(kinds(tree)).not.toContain('mdxJsxFlowElement')
   })
 })

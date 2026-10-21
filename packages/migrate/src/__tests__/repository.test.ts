@@ -164,10 +164,10 @@ describe('repository redirect finalization', () => {
     }))
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/docs/old-models', destination: '/docs/models' })
-    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models' })
-    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models/', destination: '/docs/models' })
-    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models?view=all' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/docs/old-models', destination: '/docs/models', permanent: true })
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models', permanent: true })
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models/', destination: '/docs/models', permanent: true })
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models?view=all', permanent: true })
     expect(bundle.warnings.filter((warning) => warning.message.startsWith('Self-redirect'))).toHaveLength(2)
     expect(bundle.warnings.map((warning) => warning.message)).toContain('Skipped 1 redirect that would send visitors in a circle: /docs/models -> /docs/models?view=all. Check these redirects in the source docs.')
   })
@@ -249,7 +249,7 @@ describe('Mintlify pages that link elsewhere', () => {
         { navigation: { pages: ['index', 'getting-started'] }, redirects: [{ source: '/', destination: '/getting-started' }] },
         { 'index.mdx': '---\ntitle: Home\nurl: https://example.com/welcome\n---\n\nHome.', 'getting-started.mdx': '---\ntitle: Start\n---\n\nStart.' },
       )
-      expect(rootSources(bundle)).toEqual([{ source: '/', destination: '/getting-started' }])
+      expect(rootSources(bundle)).toEqual([{ source: '/', destination: '/getting-started', permanent: true }])
       expect(bundle.docsConfig.redirects).toContainEqual({ source: '/introduction', ...external })
       expect(bundle.warnings.filter((warning) => /"introduction".*https:\/\/example\.com\/welcome.*"\/".*\/getting-started/.test(warning.message))).toHaveLength(1)
     })
@@ -553,7 +553,7 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     expect(redirects.filter((redirect) => pageUrls.has(redirect.source))).toEqual([])
     expect(redirects.filter((redirect) => redirect.destination.startsWith('/api/') || redirect.source.startsWith('/api/'))).toEqual([])
     // An authored redirect that targets a page is not sent through a second hop to the old /api/ route.
-    expect(redirects).toContainEqual({ source: '/old-create-key', destination: '/api-management/api-reference/keys/create-api-key' })
+    expect(redirects).toContainEqual({ source: '/old-create-key', destination: '/api-management/api-reference/keys/create-api-key', permanent: true })
     // What is left is Mintlify's directory behaviour: a folder with no page of its own opens on its first page.
     expect(redirects.find((redirect) => redirect.source === '/api-management/api-reference/keys')?.destination).toBe('/api-management/api-reference/keys/create-api-key')
   })
@@ -1476,7 +1476,8 @@ describe('Mintlify repository migration', () => {
       'images/setup.png',
       'openapi/service.openapi.yml',
     ]))
-    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
+    // The unsafe redirect is the only thing the migration reports, and it names its source.
+    expect(withoutDashboardWarning(bundle.warnings).map((warning) => warning.message)).toEqual([expect.stringContaining('Skipped 1 redirect from /unsafe:')])
 
     // Specs must never land under public/, which the host serves verbatim.
     const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
@@ -2740,7 +2741,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     expect(bundle.pages.map((page) => page.body).join('\n')).toContain('[Old](/ref/old-thing) and [Thing](/api/default/a/post) and [Lost](/api).')
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/ref/old-thing', destination: '/ref/things/create-a' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/ref/old-thing', destination: '/ref/things/create-a', permanent: true })
   })
 
   it('keeps every operation listed under a directory that two API tabs of one name share', () => {
@@ -4819,6 +4820,7 @@ navigation:
     expect(projected.docsConfig.redirects).toContainEqual({
       source: '/old/:path*',
       destination: '/new/:path*',
+      permanent: true,
     })
   })
 
@@ -4864,7 +4866,7 @@ navigation:
     expect(bundle.docsConfig.navbar?.links).toEqual([
       { label: 'GitHub', href: 'https://github.com/acme/acme', type: 'github' },
     ])
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install', permanent: true })
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
     expect(apiTab?.api?.source).toBe('openapi/openapi.yml')
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/logo.svg')
@@ -4964,7 +4966,7 @@ navigation:
     const body = bundle.pages.find((page) => page.id === 'guide')?.body ?? ''
     expect(body).toContain('[publish](/api-reference/publish-a-message)')
     expect(body).toContain('[other](/api)')
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/api-reference/publish-a-message', destination: '/guide' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/api-reference/publish-a-message', destination: '/guide', permanent: true })
   })
 
   it('matches Fern operation pages by their route (own node slug included) and by operationId method name, not just the summary', () => {

@@ -2411,9 +2411,9 @@ export function parseMarkdownPage(input: {
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
   const heading = leadingPageHeading(body)
-  const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
-    ? parsed.data.title.trim()
-    : heading?.title ?? titleFromId(identity.navigationId)
+  const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
+  const title = authoredTitle ?? titleFromId(identity.navigationId)
+  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
@@ -2444,22 +2444,21 @@ export function parseMarkdownPage(input: {
       ? sourceMode as MigrationPage['mode']
       : undefined
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
-  const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
-    ? parsed.data.description.trim()
-    // An API reference page is described by its operation, not by its prose.
-    : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
-      ? ''
-      : firstParagraph(body)
+  const authoredDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim() ? parsed.data.description.trim() : undefined
+  // An API reference page is described by its operation, not by its prose.
+  const description = authoredDescription ?? (namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
+    ...(authoredTitle === undefined && namesOperation ? { titleFromFileName: true as const } : {}),
     navTitle,
     icon,
     iconType,
     description,
-    ...(input.platform === 'docusaurus' || input.platform === 'fern'
+    // A description taken from the body is the paragraph the body already shows, so it must not also appear under the title.
+    ...(input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== '')
       ? { descriptionPlacement: 'body' as const }
       : {}),
     badge,

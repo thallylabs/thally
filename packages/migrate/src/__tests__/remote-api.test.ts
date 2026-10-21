@@ -1005,7 +1005,7 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     const pageUrls = new Set(result.pages.map((page) => `/${page.id}`))
     expect(redirects.filter((redirect) => pageUrls.has(redirect.source))).toEqual([])
     expect(redirects.filter((redirect) => redirect.source.startsWith('/api/') || redirect.destination.startsWith('/api/'))).toEqual([])
-    expect(redirects).toContainEqual({ source: '/old-create-key', destination: '/api-management/api-reference/keys/create-api-key' })
+    expect(redirects).toContainEqual({ source: '/old-create-key', destination: '/api-management/api-reference/keys/create-api-key', permanent: true })
     // A folder of pages with no page of its own opens on its first page, as for any other page of the navigation.
     expect(redirects.find((redirect) => redirect.source === '/api-management/api-reference/keys')?.destination).toBe('/api-management/api-reference/keys/create-api-key')
     expect(redirects.find((redirect) => redirect.source === '/platform/api-reference')?.destination).toBe('/platform/api-reference/domains/create-domain')

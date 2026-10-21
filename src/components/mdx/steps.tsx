@@ -39,7 +39,10 @@ export function Steps({ children, className, titleSize }: StepsProps) {
 interface StepProps {
   title: string
   titleSize?: StepTitleSize
-  /** Set by the page's heading pass for a title that is a heading, so the table of contents can list it and scroll to it. */
+  /**
+   * Set by the page's heading pass for a title that is a heading, so the table of contents can list it and scroll to it.
+   * A step whose title is plain text carries an authored id on the step itself, as Mintlify does.
+   */
   id?: string
   children?: ReactNode
 }
@@ -52,8 +55,10 @@ function StepTitle({ as: Title, id, children }: { as: StepTitleSize; id?: string
 
 export function Step({ title, titleSize, id, children }: StepProps) {
   const inherited = useContext(StepsTitleSizeContext)
+  const size = titleSize ?? inherited ?? 'h3'
   return (
     <div
+      id={size === 'p' ? id : undefined}
       className="thally-step relative grid grid-cols-[30px_minmax(0,1fr)] gap-x-5 pb-[34px] last:pb-0"
       style={{ counterIncrement: 'step 1' }}
     >
@@ -65,7 +70,7 @@ export function Step({ title, titleSize, id, children }: StepProps) {
 
       {/* Step content */}
       <div className="min-w-0 pt-1">
-        <StepTitle as={titleSize ?? inherited ?? 'h3'} id={id}>{title}</StepTitle>
+        <StepTitle as={size} id={id}>{title}</StepTitle>
         {children ? (
           <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-foreground/80">
             {children}

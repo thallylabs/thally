@@ -72,6 +72,16 @@ describe('step titles in the table of contents', () => {
     expect(await toc('<Steps>\n<Step title="One">x</Step>\n</Steps>\n\n<Steps titleSize="p">\n<Step title="Two">x</Step>\n</Steps>')).toEqual([])
   })
 
+  it('leaves the id an author gave a plain-text step on its container, out of the outline and the numbering', async () => {
+    const source = '## Deploy\n\n<Steps titleSize="p">\n<Step title="Add a new direct debit method" id="add-new-direct-debit-method">x</Step>\n</Steps>\n\n## Deploy'
+    const { default: Content } = await evaluate(source, { ...runtime, rehypePlugins: [rehypePlugins[2]] } as never)
+    const html = page(createElement(Content, { components: builtinMdxComponents }))
+    expect(html).toMatch(/<div id="add-new-direct-debit-method" class="thally-step /)
+    expect(html.match(/id="add-new-direct-debit-method"/g)).toHaveLength(1)
+    expect(headings(html).map((entry) => entry.id)).toEqual(['deploy', 'deploy-2'])
+    expect(parseMdxContent(source).headings.map((heading) => heading.id)).toEqual(['deploy', 'deploy-2'])
+  })
+
   it('numbers the steps a page repeats in every View, so each View carries its own ids', async () => {
     const steps = '<Steps titleSize="h3">\n<Step title="Create a key">x</Step>\n<Step title="Verify the key">x</Step>\n</Steps>'
     const entries = await toc(['curl', 'TypeScript', 'Go', 'Python'].map((title) => `<View title="${title}">\n${steps}\n</View>`).join('\n\n'))

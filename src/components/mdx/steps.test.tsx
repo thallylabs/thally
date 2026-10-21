@@ -50,10 +50,34 @@ describe('Step title element', () => {
     expect(h2).toContain('data-level="2"')
   })
 
-  it('never marks a plain-text title, even when handed an id', () => {
+  it('never marks a plain-text title as a heading, even when handed an id', () => {
     const html = renderToStaticMarkup(<Steps titleSize="p"><Step title="One" id="one" /></Steps>)
     expect(html).toMatch(/<p [^>]*>One<\/p>/)
-    expect(html).not.toMatch(/data-heading|\bid="one"/)
+    expect(html).not.toMatch(/<p [^>]*(data-heading|\bid=)/)
+    expect(html).not.toContain('data-heading')
+  })
+
+  // Mintlify puts the id of a step whose title is plain text on the step itself, so a link to it lands there.
+  it('puts the id of a plain-text step on the step container, once', () => {
+    for (const html of [
+      renderToStaticMarkup(<Steps titleSize="p"><Step title="Add a method" id="add-method">Body.</Step></Steps>),
+      renderToStaticMarkup(<Steps><Step title="Add a method" id="add-method" titleSize="p">Body.</Step></Steps>),
+    ]) {
+      expect(html).toMatch(/<div id="add-method" class="thally-step /)
+      expect(html.match(/id="add-method"/g)).toHaveLength(1)
+      expect(html).toMatch(/<p [^>]*>Add a method<\/p>/)
+    }
+  })
+
+  it('keeps the id of a heading title on the heading and off the container, once', () => {
+    const html = renderToStaticMarkup(<Steps titleSize="h3"><Step title="Add a method" id="add-method">Body.</Step></Steps>)
+    expect(html).toMatch(/<h3 [^>]*\bid="add-method"/)
+    expect(html).not.toMatch(/<div id="add-method"/)
+    expect(html.match(/id="add-method"/g)).toHaveLength(1)
+  })
+
+  it('renders no id on a step that was handed none', () => {
+    expect(renderToStaticMarkup(<Steps titleSize="p"><Step title="One" /></Steps>)).not.toContain(' id=')
   })
 
   it('renders a code span in the title as code, in plain-text and heading titles alike', () => {
