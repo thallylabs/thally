@@ -69,3 +69,26 @@ describe('Step title element', () => {
     expect(html).toMatch(/<h3 [^>]*\bid="run-the-cli-init-command"/)
   })
 })
+
+describe('Step without a title', () => {
+  it('renders the number and the content with no title element', () => {
+    const html = renderToStaticMarkup(<Steps><Step>Only the content.</Step></Steps>)
+    expect(html).toContain('thally-step-number')
+    expect(html).toContain('Only the content.')
+    expect(html).not.toMatch(/<(?:h[1-6]|p)\b/)
+  })
+
+  it.each([['an empty title', ''], ['a blank title', '   ']])('renders no title element for %s', (_name, title) => {
+    for (const titleSize of ['p', 'h2', 'h3', 'h4'] as const) {
+      const html = renderToStaticMarkup(<Steps titleSize={titleSize}><Step title={title} id="gone">Body.</Step></Steps>)
+      expect(html).toContain('Body.')
+      expect(html).not.toMatch(/<h[1-6]\b|data-heading/)
+    }
+  })
+
+  it('keeps the title of the other steps in the same list', () => {
+    const html = renderToStaticMarkup(<Steps><Step>First.</Step><Step title="Second">Next.</Step></Steps>)
+    expect(html).toMatch(/<h3 [^>]*>Second<\/h3>/)
+    expect(html.match(/thally-step-number/g)).toHaveLength(2)
+  })
+})
