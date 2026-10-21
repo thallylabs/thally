@@ -1341,7 +1341,36 @@ function normalizeFernFileTrees(body: string): string {
  * analysis too, before that pass ever gets a chance to run.
  */
 export function normalizeHtmlComments(body: string): string {
-  return replaceOutsideCode(body, (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => mdxComment(comment)))
+  return replaceOutsideCode(unwrapHtmlCommentInMdxComment(body), (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => mdxComment(comment)))
+}
+
+/**
+ * An MDX comment whose whole content is one HTML comment (`{/* <!-- note --> *\/}`) becomes an MDX comment with that text (`{/* note *\/}`),
+ * outside code. Converting the HTML comment inside it would nest one MDX comment in another: the first `*\/}` closes the outer comment
+ * and the rest of it shows on the page, where Mintlify renders nothing. Nothing else changes: an HTML comment that shares an MDX comment
+ * with other text is still converted as before. The text between the markers holds neither `-->` nor `*\/`.
+ */
+function unwrapHtmlCommentInMdxComment(body: string): string {
+  return replaceOutsideCode(body, (text) => {
+    const opener = /\{\s*\/\*\s*<!--/g
+    const closer = /\s*\*\/\s*\}/y
+    let out = ''
+    let copied = 0
+    // The next `-->` and `*/` at or after the current opener (-1: none left). Each is searched for again only once an opener has passed it, so the scan stays linear.
+    let dash = -2
+    let star = -2
+    for (let found = opener.exec(text); found; found = opener.exec(text)) {
+      const inner = opener.lastIndex
+      if (dash !== -1 && dash < inner) dash = text.indexOf('-->', inner)
+      if (dash === -1) break
+      if (star !== -1 && star < inner) star = text.indexOf('*/', inner)
+      closer.lastIndex = dash + 3
+      if ((star !== -1 && star < dash) || !closer.test(text)) continue
+      out += `${text.slice(copied, found.index)}{/*${text.slice(inner, dash)}*/}`
+      copied = opener.lastIndex = closer.lastIndex
+    }
+    return out + text.slice(copied)
+  })
 }
 
 /**
@@ -2271,6 +2300,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     rewritten = rewritten.replace(/^\n{2,}/, '\n')
   }
   if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
+  rewritten = unwrapHtmlCommentInMdxComment(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)
       .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => mdxComment(content))
