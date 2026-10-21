@@ -5850,6 +5850,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
+    /** The spec the repository scan found and bound to a hidden tab already: the page-only binding below skips it. */
+    let hiddenScanSource: string | undefined
     if (resolvedSpecs.length > 0) {
       const namedByPages = new Set(pages.filter((page) => !restrictedPages.has(page)).map((page) => specNamedByPage(page.openapi, resolvedSpecs)))
       for (const spec of resolvedSpecs) {
@@ -5950,7 +5952,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }
-          docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          // Mintlify finds this spec by itself and adds no tab for it: a page that names one of its operations renders it, so the
+          // spec is bound to a hidden tab, as a spec only pages name is. The renderer reads a bare `openapi: "GET /x"` from the first spec
+          // that publishes it, visible tabs first and then hidden ones in order, so this binding is made here, ahead of the page-only
+          // ones, where the visible tab stood: no bare reference reaches another spec. A remote spec bound later keeps the visible tab,
+          // which sits before it as it always did.
+          const namedByPage = remoteApiSpecs.length === 0 && pages.some((page) => {
+            const ref = !restrictedPages.has(page) && page.openapi ? splitOpenApiRef(page.openapi) : null
+            return Boolean(ref) && (!ref!.specRef || specNamedByPage(page.openapi, [fallbackSpec, ...allSpecs]) === fallbackSpec)
+          })
+          if (!namedByPage) docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          else {
+            docsConfig = injectOpenApiSpecs(docsConfig, [{ filename, sourcePath: fallback.relativePath, tabLabel: `OpenAPI: ${fallback.relativePath}`, hidden: true }])
+            hiddenScanSource = fallback.relativePath
+          }
           pageSpecs = [{ filename, sourcePath: fallback.relativePath }]
           if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath, pruned.excluded)
         }
@@ -5964,7 +5979,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     if (pageOnlySpecs.length > 0) {
-      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
+      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs.filter((spec) => spec.sourcePath !== hiddenScanSource), warnings)
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
     const notKeptPublic = [...new Set(unownedOperations.filter((operation) => withheldKeys.has(operationKey(operation))))]
