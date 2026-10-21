@@ -108,11 +108,20 @@ const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
 // real Git LFS repo, since a mocked child process can't exercise git's own
 // filter-driver resolution).
 const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>>, args: [] as Array<Array<string>> }))
+// Symlinks (relative path inside the submodule -> target) a fetched submodule brings into the checkout, by submodule path.
+const submoduleLinks = vi.hoisted(() => ({ byPath: {} as Record<string, Record<string, string>> }))
 vi.mock('node:child_process', () => {
   return {
-    spawn: (_command: string, args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
+    spawn: (_command: string, args: Array<string>, options: { env?: Record<string, string | undefined>; cwd?: string }) => {
       gitSpawnCalls.envs.push(options.env ?? {})
       gitSpawnCalls.args.push(args)
+      if (options.cwd && args.includes('submodule')) {
+        const submodule = args[args.length - 1]
+        for (const [path, target] of Object.entries(submoduleLinks.byPath[submodule] ?? {})) {
+          mkdirSync(dirname(join(options.cwd, submodule, path)), { recursive: true })
+          symlinkSync(target, join(options.cwd, submodule, path))
+        }
+      }
       const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void; destroy: () => void }; kill: () => void }
       child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {}, destroy: () => {} })
       child.kill = () => {
@@ -6026,6 +6035,139 @@ describe('cloneGitHubRepository retry', () => {
       targetDir,
     )).rejects.toThrow(/RPC failed/)
     expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+})
+
+describe('cloneGitHubRepository submodules and .mintignore', () => {
+  afterEach(() => {
+    cloneOutcomes.queue.length = 0
+    gitSpawnCalls.envs.length = 0
+    gitSpawnCalls.args.length = 0
+    submoduleLinks.byPath = {}
+  })
+
+  const acme = { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' }
+  const mintlifyConfig = JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['index'] } })
+  const gitmodules = (...paths: Array<string>): string => paths
+    .map((path) => `[submodule "${path}"]\n\tpath = ${path}\n\turl = https://github.com/acme/${path.split('/').pop()}.git`).join('\n')
+
+  /** The submodule paths git was asked to initialise for a clone of `files`, and the warnings it reported. */
+  async function fetchedSubmodules(files: Record<string, string>, options: { docsDir?: string; sourceDocsDir?: string; links?: Record<string, string>; fetchedLinks?: Record<string, Record<string, string>> } = {}) {
+    gitSpawnCalls.args.length = 0
+    submoduleLinks.byPath = options.fetchedLinks ?? {}
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-submodules-'))
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(targetDir, path)), { recursive: true })
+      writeFileSync(join(targetDir, path), content)
+    }
+    // Symlinks as written in the repository: the target is read from the link's own directory.
+    for (const [path, target] of Object.entries(options.links ?? {})) {
+      mkdirSync(dirname(join(targetDir, path)), { recursive: true })
+      symlinkSync(target, join(targetDir, path))
+    }
+    const warnings: Array<{ code: string; message: string }> = []
+    await cloneGitHubRepository({ ...acme, docsDir: options.sourceDocsDir ?? '' }, targetDir, warnings as never, options.docsDir === undefined ? {} : { docsDir: options.docsDir })
+    return {
+      fetched: gitSpawnCalls.args.filter((args) => args.includes('submodule')).map((args) => args[args.length - 1]),
+      warnings,
+    }
+  }
+
+  it('does not fetch a submodule whose directory .mintignore excludes, and still fetches the others', async () => {
+    const { fetched, warnings } = await fetchedSubmodules({
+      'docs.json': mintlifyConfig,
+      '.mintignore': 'turso/\n',
+      '.gitmodules': gitmodules('turso', 'shared'),
+    })
+    expect(fetched).toEqual(['shared'])
+    expect(warnings).toEqual([])
+  })
+
+  it.each(['turso/', '/turso', 'turso', '**/turso', 'tur*/', '# comment\n\nturso/'])('treats the .mintignore line %j as excluding the directory', async (line) => {
+    const { fetched } = await fetchedSubmodules({ 'docs.json': mintlifyConfig, '.mintignore': `${line}\n`, '.gitmodules': gitmodules('turso', 'shared') })
+    expect(fetched).toEqual(['shared'])
+  })
+
+  it.each(['turso/*', 'other/', 'turso/README.md', '!turso/', 'shared/\n!shared/'])('still fetches a submodule whose directory %j does not exclude', async (line) => {
+    const { fetched } = await fetchedSubmodules({ 'docs.json': mintlifyConfig, '.mintignore': `${line}\n`, '.gitmodules': gitmodules('turso') })
+    expect(fetched).toEqual(['turso'])
+  })
+
+  it('fetches every submodule when there is no .mintignore, or no Mintlify project to apply it to', async () => {
+    expect((await fetchedSubmodules({ 'docs.json': mintlifyConfig, '.gitmodules': gitmodules('turso', 'shared') })).fetched).toEqual(['turso', 'shared'])
+    expect((await fetchedSubmodules({ '.mintignore': 'turso/\n', '.gitmodules': gitmodules('turso', 'shared') })).fetched).toEqual(['turso', 'shared'])
+  })
+
+  it('matches the submodule path against the Mintlify project root, not the repository root', async () => {
+    const files = {
+      'docs/docs.json': mintlifyConfig,
+      'docs/.mintignore': 'turso/\n/vendor/\n',
+      '.gitmodules': gitmodules('docs/turso', 'turso', 'docs/vendor', 'vendor'),
+    }
+    for (const options of [{ docsDir: 'docs' }, { sourceDocsDir: 'docs' }, {}]) {
+      // `turso` and `vendor` at the repository root sit outside the project, so they are not excluded;
+      // the anchored `/vendor/` names the project's own `docs/vendor` only.
+      expect((await fetchedSubmodules(files, options)).fetched).toEqual(['turso', 'vendor'])
+    }
+  })
+
+  describe('with a symlink that points into an ignored submodule', () => {
+    const files = { 'docs.json': mintlifyConfig, '.mintignore': 'vendor/\n', '.gitmodules': gitmodules('vendor', 'shared') }
+
+    it.each([
+      ['a link to a directory of it', { api: 'vendor/docs' }],
+      ['a link to it', { api: 'vendor' }],
+      ['a link from a nested directory', { 'guides/api': '../vendor/docs' }],
+      ['a link written with ./ and a trailing slash', { api: './vendor/docs/' }],
+      ['a chain of links', { api: 'latest', latest: 'vendor/docs' }],
+      ['a link below a linked directory', { v1: 'vendor', 'guides/api': '../v1/docs' }],
+      ['a link to a directory that holds it', { all: '.' }],
+      ['a loop of links', { a: 'b', b: 'a', api: 'vendor' }],
+    ])('still fetches the submodule for %s, so the pages behind the link survive', async (_name, links) => {
+      expect((await fetchedSubmodules(files, { links })).fetched).toEqual(['shared', 'vendor'])
+    })
+
+    describe('that a fetched submodule brings', () => {
+      const withLinks = { 'docs.json': mintlifyConfig, '.mintignore': 'vendor/\n', '.gitmodules': gitmodules('vendor', 'links') }
+
+      it('fetches the ignored submodule after the others, since their links are not known before', async () => {
+        const { fetched } = await fetchedSubmodules(withLinks, { fetchedLinks: { links: { api: '../vendor/docs' } } })
+        expect(fetched).toEqual(['links', 'vendor'])
+      })
+
+      it('skips it when none of the links of the fetched submodules points into it', async () => {
+        const { fetched } = await fetchedSubmodules(withLinks, { fetchedLinks: { links: { latest: '../links/docs', up: '../../elsewhere' } } })
+        expect(fetched).toEqual(['links'])
+      })
+
+      it('follows a chain: an ignored submodule fetched for a link whose own links point into another ignored one', async () => {
+        const chain = { 'docs.json': mintlifyConfig, '.mintignore': 'b/\nc/\nd/\n', '.gitmodules': gitmodules('a', 'b', 'c', 'd') }
+        const { fetched } = await fetchedSubmodules(chain, { fetchedLinks: { a: { x: '../b' }, b: { y: '../c/docs' } } })
+        // d has no link to it, so it stays out; c is reached only once b's content is there.
+        expect(fetched).toEqual(['a', 'b', 'c'])
+      })
+
+      it('fetches each submodule once when ignored submodules link to each other', async () => {
+        const loop = { 'docs.json': mintlifyConfig, '.mintignore': 'b/\nc/\n', '.gitmodules': gitmodules('a', 'b', 'c') }
+        const { fetched } = await fetchedSubmodules(loop, { fetchedLinks: { a: { x: '../b' }, b: { y: '../c' }, c: { z: '../b' } } })
+        expect(fetched).toEqual(['a', 'b', 'c'])
+      })
+    })
+
+    it('skips the submodule when the links of the checkout point elsewhere', async () => {
+      const { fetched } = await fetchedSubmodules(files, { links: { latest: 'shared', 'guides/up': '../shared/docs', outside: '../../elsewhere', broken: 'nowhere' } })
+      expect(fetched).toEqual(['shared'])
+    })
+
+    it('does not look into .git', async () => {
+      const { fetched } = await fetchedSubmodules({ ...files, '.git/HEAD': 'ref: refs/heads/main' }, { links: { '.git/info/api': '../../vendor/docs' } })
+      expect(fetched).toEqual(['shared'])
+    })
+  })
+
+  it('reaches the same verdict for a path written with a leading ./', async () => {
+    const { fetched } = await fetchedSubmodules({ 'docs.json': mintlifyConfig, '.mintignore': 'turso/\n', '.gitmodules': gitmodules('./turso', 'shared') })
+    expect(fetched).toEqual(['shared'])
   })
 })
 

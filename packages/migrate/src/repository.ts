@@ -19,6 +19,7 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -894,6 +895,76 @@ function gitmoduleUrls(targetDir: string): Array<string> {
   return [...content.matchAll(/^\s*url\s*=\s*(.+?)\s*$/gm)].map((match) => match[1]).filter(Boolean)
 }
 
+/** Every symlink of a checkout (never into `.git`, never through a symlinked directory) with the path it points to, resolved from its own directory. File contents are not read. */
+function checkoutSymlinks(root: string): Map<string, string> {
+  const links = new Map<string, string>()
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolvePath(directory, entry.name)
+      if (entry.isSymbolicLink()) links.set(path, resolvePath(directory, readlinkSync(path)))
+      else if (entry.isDirectory() && entry.name !== '.git') walk(path)
+    }
+  }
+  walk(root)
+  return links
+}
+
+/** Whether a path inside `directory`, or one that holds it, is where following `links` from `start` ends up (a loop of links counts: fail closed). */
+function linkReaches(links: ReadonlyMap<string, string>, start: string, directory: string): boolean {
+  const within = (parent: string, child: string): boolean => child === parent || child.startsWith(`${parent}${sep}`)
+  let current = start
+  for (let hops = 0; hops <= links.size; hops++) {
+    if (within(directory, current) || within(current, directory)) return true
+    // A link at the path itself or at any directory above it sends the rest of the path elsewhere.
+    let ancestor = current
+    while (!links.has(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor)
+    const next = links.get(ancestor)
+    if (next === undefined) return false
+    current = resolvePath(next, relative(ancestor, current))
+  }
+  return true
+}
+
+/**
+ * The submodules whose whole directory the Mintlify project's `.mintignore`
+ * excludes. Mintlify never publishes them, so fetching one (turso-docs's
+ * `turso` submodule is the entire database repository) only costs time. Only
+ * a directory the file ignores outright counts: gitignore cannot re-include
+ * anything beneath one, whereas `turso/*` leaves the directory itself in play.
+ * Without a Mintlify project or a `.mintignore`, none is excluded. `initSubmodules`
+ * still fetches one that a symlink of the checkout points into: the migration
+ * follows a symlink that stays inside the repository, so its pages are
+ * reachable through the link.
+ */
+function mintignoredSubmodules(targetDir: string, paths: Array<string>, docsDir?: string): Set<string> {
+  try {
+    const projectRoot = findMintlifyProjectRoot(targetDir, docsDir)
+    const mintignore = projectRoot ? readMintignoreMatcher(projectRoot) : null
+    if (!projectRoot || !mintignore) return new Set()
+    const projectPrefix = relative(targetDir, projectRoot).replace(/\\/g, '/')
+    return new Set(paths.filter((path) => {
+      const inProject = posix.relative(projectPrefix, posix.normalize(path))
+      return inProject !== '' && inProject !== '..' && !inProject.startsWith('../') && !isAbsolute(inProject) && mintignore.ignores(`${inProject}/`)
+    }))
+  } catch {
+    return new Set() // an unusable docs directory is reported by the conversion, not by this best-effort pass
+  }
+}
+
+/** The paths of `candidates` that a symlink of the checkout points into. An unreadable checkout counts as reaching them all: fail closed. */
+function linkedSubmodules(targetDir: string, candidates: Array<string>): Array<string> {
+  let links: Map<string, string>
+  try {
+    links = checkoutSymlinks(targetDir)
+  } catch {
+    return candidates
+  }
+  return candidates.filter((path) => {
+    const directory = resolvePath(targetDir, path)
+    return [...links.values()].some((target) => linkReaches(links, target, directory))
+  })
+}
+
 /**
  * `--recurse-submodules` on the main clone (above) fails the *entire* clone
  * if any one submodule can't be fetched, which is worse than not having
@@ -902,19 +973,21 @@ function gitmoduleUrls(targetDir: string): Array<string> {
  * submodule doesn't take down the whole migration — it's just missing,
  * and named in a warning instead of silently absent.
  */
-async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>): Promise<void> {
+async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>, docsDir?: string): Promise<void> {
   const paths = gitmodulePaths(targetDir)
   if (paths.length === 0) return
   const urls = gitmoduleUrls(targetDir)
+  const ignored = mintignoredSubmodules(targetDir, paths, docsDir)
   const failed: Array<string> = []
-  for (const [index, path] of paths.entries()) {
+  const fetchSubmodule = async (index: number): Promise<void> => {
+    const path = paths[index]
     // A path or url beginning with `-` would be read as a git option
     // rather than a pathspec/URL once it reaches argv (even after `--`,
     // git's own pathspec parser treats a leading `-` as a flag), and
     // `.gitmodules` is attacker-controlled content from the cloned repo.
     if (path.startsWith('-') || (urls[index]?.startsWith('-') ?? false)) {
       failed.push(path)
-      continue
+      return
     }
     try {
       await runGit([
@@ -929,6 +1002,19 @@ async function initSubmodules(targetDir: string, warnings: Array<MigrationWarnin
     } catch {
       failed.push(path)
     }
+  }
+  for (const [index, path] of paths.entries()) {
+    if (!ignored.has(path)) await fetchSubmodule(index)
+  }
+  // A symlink anywhere in the checkout, one a fetched submodule brought included, can expose an ignored submodule's pages,
+  // so each one it points into is fetched after all. Its own links can point into another, hence the repeat: every round
+  // fetches at least one of the ignored submodules left, so it ends within their number.
+  let pending = paths.filter((path) => ignored.has(path))
+  while (pending.length > 0) {
+    const reached = linkedSubmodules(targetDir, pending)
+    if (reached.length === 0) break
+    for (const path of reached) await fetchSubmodule(paths.indexOf(path))
+    pending = pending.filter((path) => !reached.includes(path))
   }
   if (failed.length > 0) {
     warnings.push({
@@ -955,12 +1041,12 @@ export async function cloneGitHubRepository(
   targetDir: string,
   warnings?: Array<MigrationWarning>,
   /** Untrusted referenced repositories: never follow their `.gitmodules` to further remotes. */
-  options: { skipSubmodules?: boolean } = {},
+  options: { skipSubmodules?: boolean; /** The docs directory the migration will read; default: the one in the source URL. */ docsDir?: string } = {},
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
-      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [])
+      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [], options.docsDir ?? (source.docsDir || undefined))
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
