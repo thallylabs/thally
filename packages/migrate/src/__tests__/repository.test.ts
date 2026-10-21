@@ -6099,6 +6099,54 @@ describe('Mintlify snippet inlining hardening', () => {
     }
   })
 
+  describe('<Snippet file> against the legacy _snippets folder', () => {
+    it('resolves the file from _snippets/ when snippets/ has none, without a missing-snippet warning', () => {
+      const { page, warnings } = snippetFixture({ '_snippets/x.mdx': 'Legacy snippet body.\n' }, '<Snippet file="x.mdx" />')
+      expect(page?.body).toContain('Legacy snippet body.')
+      expect(page?.body).not.toContain('Missing snippet')
+      expect(warnings.filter((warning) => warning.code === 'missing-page')).toEqual([])
+    })
+
+    it('prefers snippets/ when both folders hold the file', () => {
+      const { page } = snippetFixture({ 'snippets/x.mdx': 'Current folder body.\n', '_snippets/x.mdx': 'Legacy folder body.\n' }, '<Snippet file="x.mdx" />')
+      expect(page?.body).toContain('Current folder body.')
+      expect(page?.body).not.toContain('Legacy folder body.')
+    })
+
+    it('resolves a nested path and a snippet nested in a _snippets snippet', () => {
+      const { page } = snippetFixture({
+        '_snippets/outer.mdx': 'Outer.\n\n<Snippet file="deep/inner.mdx" />\n',
+        '_snippets/deep/inner.mdx': 'Inner body.\n',
+      }, '<Snippet file="outer.mdx" />')
+      expect(page?.body).toContain('Outer.')
+      expect(page?.body).toContain('Inner body.')
+    })
+
+    it('still reports a file that neither folder holds', () => {
+      const { page, warnings } = snippetFixture({ '_snippets/x.mdx': 'Legacy snippet body.\n' }, '<Snippet file="nope.mdx" />')
+      expect(page?.body).toContain('Missing snippet: nope.mdx')
+      expect(warnings.filter((warning) => warning.code === 'missing-page' && /nope\.mdx/.test(warning.message))).toHaveLength(1)
+    })
+
+    it('does not inline an access-restricted _snippets file', () => {
+      const { page, warnings } = snippetFixture({ '_snippets/x.mdx': '---\ngroups: [admin]\n---\nTOPSECRET\n' }, '<Snippet file="x.mdx" />')
+      expect(page?.body).not.toContain('TOPSECRET')
+      expect(warnings.some((warning) => warning.code === 'gated-page' && warning.source === 'home.mdx')).toBe(true)
+    })
+
+    it('treats a _snippets directory symlinked outside the repository as missing', () => {
+      const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-outside-'))
+      writeFileSync(join(outside, 's.mdx'), 'leaked-value\n')
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-legacy-snippets-'))
+      symlinkSync(outside, join(root, '_snippets'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home'] } }))
+      writeFileSync(join(root, 'home.mdx'), '---\ntitle: Home\n---\n\n<Snippet file="s.mdx" />\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.pages.find((candidate) => candidate.id === 'home')?.body ?? '').not.toContain('leaked')
+      expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && /s\.mdx/.test(warning.message))).toBe(true)
+    })
+  })
+
   it('excludes a page whose dynamic import() uses a relative module the migration does not ship', () => {
     const files = { 'lib/m.ts': 'export const m = 1\n' }
     for (const body of [

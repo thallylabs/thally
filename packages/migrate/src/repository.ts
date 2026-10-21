@@ -186,9 +186,9 @@ const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"
 /**
  * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
  * above, this never needs a matching `import` statement — `file` is a path
- * relative to the project's `snippets/` directory (Mintlify's own
- * convention; see `resolveSnippetPath`'s sibling below for the actual
- * lookup). Both self-closing and paired spellings are matched; a paired
+ * relative to the project's `snippets/` directory, else its legacy
+ * `_snippets/` directory (Mintlify's own convention; see the lookup in
+ * `inlineMdxSnippets`). Both self-closing and paired spellings are matched; a paired
  * tag's own children (if any) are always discarded in favor of the
  * resolved snippet's real content, matching Mintlify's own renderer.
  */
@@ -3992,13 +3992,16 @@ function inlineMdxSnippets(
     return segment.replace(platform === 'fern' ? FERN_MARKDOWN_TAG_PATTERN : SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
       const filePath = (doubleQuoted ?? singleQuoted)!
       try {
-        // Mintlify's documented form is relative to `snippets/`; sites also write
-        // the full `/snippets/x.mdx` (or a page-relative) path.
+        // Mintlify's documented form is relative to `snippets/`, and its legacy
+        // `_snippets/` folder is searched next (`snippets/` wins when both hold
+        // the file); sites also write the full `/snippets/x.mdx` (or a
+        // page-relative) path.
         const candidate = (platform === 'fern' ? [
           // Fern's absolute include paths are rooted at fern/, never snippets/.
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ] : [
           () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
+          () => withinRealRoot(resolveWithin(siteRoot, `_snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ]).map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }
