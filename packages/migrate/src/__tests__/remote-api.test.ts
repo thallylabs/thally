@@ -329,6 +329,35 @@ describe('remote OpenAPI spec mounted under Mintlify directories', () => {
     expect(result.docsConfig.redirects).toContainEqual({ source: '/api-reference/projects/create-project', destination: '/api/default/v2/projects-createproject/post' })
   })
 
+  it('keeps a page link to an endpoint URL as the link its page wrote, instead of treating it as a redirect that hides the page', async () => {
+    const input = mountedBundle()
+    const target = '/compute/api-reference/projects/create-project'
+    input.pages.push({ id: 'jump', navigationId: 'jump', title: 'Jump', description: '', keywords: [], body: '', source: 'jump.mdx', noindex: true, externalUrl: target })
+    input.docsConfig.redirects = [...(input.docsConfig.redirects ?? []), { source: '/jump', destination: target, permanent: false }]
+    const result = await hydrateRemoteApiSpecs(input, fetcher)
+    expect(result.docsConfig.redirects).toContainEqual({ source: '/jump', destination: target, permanent: false })
+    expect(result.warnings.filter((warning) => warning.message.includes('/jump'))).toEqual([])
+  })
+
+  it('reports and drops a link that closes a loop with the redirects the download adds', async () => {
+    const input = mountedBundle()
+    const target = '/compute/api-reference/projects/create-project'
+    const endpoint = '/api/default/v2/projects-createproject/post'
+    input.pages.push({ id: 'jump', navigationId: 'jump', title: 'Jump', description: '', keywords: [], body: '', source: 'jump.mdx', noindex: true, externalUrl: target })
+    // The endpoint URL goes to the page that links back to it: after the download, endpoint -> /jump -> target -> endpoint.
+    input.docsConfig.redirects = [
+      ...(input.docsConfig.redirects ?? []),
+      { source: endpoint, destination: '/jump' },
+      { source: '/jump', destination: target, permanent: false },
+    ]
+    const result = await hydrateRemoteApiSpecs(input, fetcher)
+    const redirects = new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get(target)).toBe(endpoint)
+    expect(redirects.get(endpoint)).toBe('/jump')
+    expect(redirects.has('/jump')).toBe(false)
+    expect(result.warnings.filter((warning) => /circle/.test(warning.message) && warning.message.includes('/jump'))).toHaveLength(1)
+  })
+
   it('rewrites body links to endpoint URLs', async () => {
     const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
     expect(result.pages[0].body).toContain('[create](/api/default/v2/projects-createproject/post)')

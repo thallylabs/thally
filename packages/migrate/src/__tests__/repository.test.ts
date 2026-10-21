@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
@@ -186,7 +187,10 @@ describe('Mintlify pages that link elsewhere', () => {
   function bundleFor(docsJson: Record<string, unknown>, pages: Record<string, string>) {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-link-pages-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', ...docsJson }))
-    for (const [name, content] of Object.entries(pages)) writeFileSync(join(root, name), content)
+    for (const [name, content] of Object.entries(pages)) {
+      mkdirSync(dirname(join(root, name)), { recursive: true })
+      writeFileSync(join(root, name), content)
+    }
     return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
   }
   const navigation = { navigation: { groups: [{ group: 'Community', pages: ['introduction', 'github-repo', 'roadmap'] }] } }
@@ -218,6 +222,182 @@ describe('Mintlify pages that link elsewhere', () => {
     const bundle = bundleFor(navigation, { ...linkPages, 'roadmap.mdx': '---\ntitle: Roadmap\nurl: "javascript:alert(1)"\n---\n\nWhat is next.' })
     expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source)).not.toContain('/roadmap')
     expect(bundle.pages.find((page) => page.id === 'roadmap')?.noindex).toBeUndefined()
+  })
+
+  describe('when the url is a path of the site', () => {
+    const cliNavigation = { navigation: { groups: [{ group: 'Guides', pages: ['introduction', 'local-development', 'cli/dev'] }] } }
+    const guides = {
+      'introduction.mdx': '---\ntitle: Intro\n---\n\nHello.',
+      'local-development.mdx': '---\ntitle: Local development\n---\n\n## Turso CLI\n\nRun it.',
+    }
+    const cliPage = (url: string) => ({ 'cli/dev.mdx': `---\ntitle: Dev\nurl: ${url}\n---\n` })
+    /** The errors Next.js reports for a redirect config: `next build` validates every redirect with this function and exits when one is invalid. */
+    function nextErrors(redirects: ReadonlyArray<{ source: string; destination: string; permanent?: boolean }> = []): Array<string> {
+      const errors: Array<string> = []
+      const log = vi.spyOn(console, 'error').mockImplementation((...parts: Array<unknown>) => { errors.push(parts.join(' ')) })
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit') }) as never)
+      try {
+        checkCustomRoutes(redirects.map((redirect) => ({ source: redirect.source, destination: redirect.destination, permanent: redirect.permanent ?? false })), 'redirect')
+      } catch { /* the exit is the verdict; the messages say why */ } finally {
+        log.mockRestore()
+        exit.mockRestore()
+      }
+      return errors
+    }
+
+    it('checks against the validation Next.js applies: it refuses a route-syntax character in the fragment', () => {
+      expect(nextErrors([{ source: '/cli/dev', destination: '/local-development#turso-cli' }])).toEqual([])
+      for (const destination of ['/a#x*', '/a#frag(1)', '/a#x+', '/a#:id', '/a#x{1}']) {
+        expect(nextErrors([{ source: '/cli/dev', destination }]).join('\n'), destination).toMatch(/destination/)
+      }
+    })
+
+    it('sends the page path to that path with its fragment, keeps the entry and keeps the page out of the sitemap', () => {
+      const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage('/local-development#turso-cli') })
+      expect(bundle.docsConfig.redirects).toContainEqual({ source: '/cli/dev', destination: '/local-development#turso-cli', permanent: false })
+      expect(bundle.pages.find((page) => page.id === 'cli/dev')).toMatchObject({ noindex: true, externalUrl: '/local-development#turso-cli' })
+      expect(JSON.stringify(bundle.docsConfig.tabs)).toContain('"cli/dev"')
+      expect(bundle.warnings.filter((warning) => /circle|hide|url/.test(warning.message))).toEqual([])
+      const rendered = renderMigrationFiles(bundle).find((file) => file.path === 'src/content/cli/dev.mdx')?.content.toString() ?? ''
+      expect(rendered).toContain('noindex: true')
+      expect(rendered).not.toContain('url:')
+    })
+
+    it.each(['/local-development', '/local-development?tab=cli', '/local-development/?tab=cli#turso-cli', '/'])('keeps the whole destination %s', (url) => {
+      const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage(`"${url}"`) })
+      expect(bundle.docsConfig.redirects).toContainEqual({ source: '/cli/dev', destination: url, permanent: false })
+      expect(nextErrors(bundle.docsConfig.redirects)).toEqual([])
+    })
+
+    it.each([
+      '/local-development#turso-cli',
+      '/search?q=c',
+      '/search?q=a%20b&r=2&flag',
+      '/a/b_c/d.e~f-g/',
+      '/a?x=1&y=2#top',
+      '/a?',
+      '/.hidden/..dots/a..b/...',
+      '/a?q=%3A%2f#Id_1.x~y',
+      `/${'a'.repeat(1999)}`,
+    ])('links the url %s as written, and Next.js accepts the redirect', (url) => {
+      const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage(JSON.stringify(url)) })
+      expect(bundle.docsConfig.redirects).toContainEqual({ source: '/cli/dev', destination: url, permanent: false })
+      expect(bundle.pages.find((page) => page.id === 'cli/dev')?.externalUrl).toBe(url)
+      expect(bundle.warnings.filter((warning) => /"url" frontmatter/.test(warning.message))).toEqual([])
+      expect(nextErrors(bundle.docsConfig.redirects), url.slice(0, 40)).toEqual([])
+    })
+
+    it.each([
+      ['a pathname with repeated slashes', '/a//b'],
+      ['a pathname with repeated slashes and a fragment', '/a///b#top'],
+      ['repeated slashes after dot segments', '/x/..//a'],
+      ['dot segments between slashes', '/a//../b'],
+      ['an encoded dot segment and a double slash', '/x/%2e%2e//a'],
+      ['a dot segment', '/a/./b'],
+      ['a trailing dot segment', '/a/b/..'],
+      ['a dot segment above the root', '/../a'],
+      ['an encoded dot segment', '/%2e%2e/a'],
+      ['Next.js\'s internal escape marker in the fragment', '/target#__ESC_COLON_id'],
+      ['Next.js\'s internal escape marker in the pathname', '/__ESC_COLON_id'],
+      ['Next.js\'s internal escape marker in the query', '/a?q=__ESC_COLON_id'],
+      ['a fragment longer than Next.js accepts', `/target#${'x'.repeat(4100)}`],
+      ['a value one character over the limit', `/${'a'.repeat(2000)}`],
+      ['a query with a protocol and slashes', '/search?q=https://example.com'],
+      ['a plus in the query', '/search?q=c++'],
+      ['a route parameter in the query', '/search?q=:name'],
+      ['a slash in the query', '/search?q=a/b'],
+      ['a second question mark', '/search?q=a?b'],
+      ['a broken percent escape in the query', '/a?q=%zz'],
+      ['a bare percent in the query', '/a?q=50%'],
+      ['parentheses in the fragment', '/a#frag(1)'],
+      ['a wildcard in the fragment', '/a#x*'],
+      ['a route parameter in the fragment', '/a#:id'],
+      ['an empty fragment', '/a#'],
+      ['a second fragment', '/a#b#c'],
+      ['a percent escape in the fragment', '/a#x%20y'],
+      ['a non-ASCII letter in the pathname', '/caf\u00e9'],
+      ['a non-ASCII letter in the fragment', '/a#\u00e9'],
+    ])('keeps the page as content and says so for %s', (_name, url) => {
+      const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage(JSON.stringify(url)) })
+      expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source) ?? []).not.toContain('/cli/dev')
+      expect(bundle.pages.map((page) => page.id)).toContain('cli/dev')
+      const page = bundle.pages.find((entry) => entry.id === 'cli/dev')!
+      expect(page.externalUrl).toBeUndefined()
+      expect(page.noindex).toBeUndefined()
+      const warnings = bundle.warnings.filter((warning) => warning.source === 'cli/dev.mdx' && /"url" frontmatter/.test(warning.message))
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toMatch(/^Page "cli\/dev": its "url" frontmatter ".*" was not turned into a link, so the page was kept with its own content\. Only a site path made of letters/)
+      expect(warnings[0].message.length).toBeLessThan(400)
+    })
+
+    it.each([
+      ['a protocol-relative address', '//evil.example/x'],
+      ['a protocol-relative address with a backslash', '/\\evil.example'],
+      ['a backslash', '/a\\b'],
+      ['whitespace', '/a b'],
+      ['a tab', '/\t/evil.example'],
+      ['a newline', '/a\nb'],
+      ['an encoded leading double slash', '/%2f%2fevil.example'],
+      ['an encoded leading backslash', '/%5cevil.example'],
+      ['a route parameter', '/docs/:slug'],
+      ['a wildcard', '/docs/*'],
+      ['parentheses', '/docs/(group)'],
+      ['brackets', '/docs/[id]'],
+      ['braces', '/docs/{id}'],
+      ['a plus', '/docs/a+'],
+      ['a route parameter before a query', '/docs/:slug?q=1'],
+      ['parentheses before a fragment', '/docs/(group)#top'],
+      ['whitespace in the query', '/search?q=a b'],
+      ['a backslash in the fragment', '/search#a\\b'],
+    ])('does not link to a url with %s, and says so', (_name, url) => {
+      const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage(JSON.stringify(url)) })
+      expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source) ?? []).not.toContain('/cli/dev')
+      const page = bundle.pages.find((entry) => entry.id === 'cli/dev')!
+      expect(page.externalUrl).toBeUndefined()
+      expect(page.noindex).toBeUndefined()
+      expect(bundle.warnings.filter((warning) => warning.source === 'cli/dev.mdx' && /"url" frontmatter/.test(warning.message))).toHaveLength(1)
+    })
+
+    it('does not make a page that points at itself a self-redirect, and says so', () => {
+      for (const url of ['/cli/dev', '/cli/dev#turso-cli', '/cli/dev/?x=1', '/CLI/dev']) {
+        const bundle = bundleFor(cliNavigation, { ...guides, ...cliPage(JSON.stringify(url)) })
+        expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source) ?? [], url).not.toContain('/cli/dev')
+        expect(bundle.pages.map((page) => page.id), url).toContain('cli/dev')
+        expect(bundle.warnings.filter((warning) => /circle/.test(warning.message) && warning.message.includes('/cli/dev')), url).toHaveLength(1)
+      }
+    })
+
+    it('keeps the first of two pages that point at each other and reports the other', () => {
+      const bundle = bundleFor(
+        { navigation: { pages: ['introduction', 'a', 'b'] } },
+        { ...guides, 'a.mdx': '---\ntitle: A\nurl: /b\n---\n', 'b.mdx': '---\ntitle: B\nurl: /a\n---\n' },
+      )
+      const sources = (bundle.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+      expect(sources.filter((source) => source === '/a' || source === '/b')).toHaveLength(1)
+      expect(bundle.warnings.filter((warning) => /circle/.test(warning.message))).toHaveLength(1)
+    })
+
+    it('still follows a link to a page that is itself a link to another address', () => {
+      const bundle = bundleFor(
+        { navigation: { pages: ['introduction', 'a', 'b'] } },
+        { ...guides, 'a.mdx': '---\ntitle: A\nurl: /b\n---\n', 'b.mdx': '---\ntitle: B\nurl: https://example.com/b\n---\n' },
+      )
+      expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+        { source: '/a', destination: '/b', permanent: false },
+        { source: '/b', destination: 'https://example.com/b', permanent: false },
+      ]))
+      expect(bundle.warnings.filter((warning) => /circle/.test(warning.message))).toEqual([])
+    })
+
+    it('sends both the site root and /introduction to the path when the home page links to it', () => {
+      const bundle = bundleFor(
+        { navigation: { pages: ['introduction', 'local-development'] } },
+        { 'introduction.mdx': '---\ntitle: Home\nurl: /local-development\n---\n', 'local-development.mdx': guides['local-development.mdx'] },
+      )
+      const external = { destination: '/local-development', permanent: false }
+      expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([{ source: '/', ...external }, { source: '/introduction', ...external }]))
+      expect((bundle.docsConfig.redirects ?? []).filter((redirect) => redirect.source === '/')).toHaveLength(1)
+    })
   })
 
   describe('on the home page', () => {

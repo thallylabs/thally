@@ -58,7 +58,7 @@ import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, specRefMatches, withheldOperationKeys, withoutByteOrderMark } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
-import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
+import { mainSiteLinkTarget, mountedLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { canonicalSpecRef } from './openapi-ref.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars, cssColorToHex } from './css-colors.js'
 import {
@@ -6178,7 +6178,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const linkIndex = rootLinkIndex()
     const resolveLink = (target: string): string | undefined => mainSiteLinkTarget(target, ref.mountPath, linkIndex, unresolvedLinks)
     for (const sourcePage of ref.pages) {
-      const page = { ...sourcePage, body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink) }
+      const page = {
+        ...sourcePage,
+        body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink),
+        // A link to a path of the sub-site is placed like a root-absolute link in its body.
+        ...(sourcePage.externalUrl?.startsWith('/') ? { externalUrl: mountedLinkTarget(sourcePage.externalUrl, ref.mountPath, resolveLink) } : {}),
+      }
       if (taken.has(page.id)) {
         warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} page "${page.id}" already exists in this site and was skipped.` })
         continue
@@ -6272,7 +6277,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       linkRedirects.push({ source, destination: page.externalUrl, permanent: false })
     }
   }
-  if (linkRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }
+  // A link to a path of this site can send visitors in a circle (back to its own page, to another link, or through a
+  // redirect). The earlier redirects win and the loop is reported; no page list is passed because a link hides its page on purpose.
+  if (linkRedirects.length > 0) docsConfig = dropConflictingRedirects({ ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }, [], warnings)
 
   if (pages.length === 0) {
     const reasons = warnings.map((warning) => warning.message)

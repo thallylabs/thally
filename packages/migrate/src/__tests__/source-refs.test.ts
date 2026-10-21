@@ -196,6 +196,19 @@ describe('migrateRepository with sourceRefs', () => {
     expect(bundle.warnings.some((warning) => /branding, colors and redirects were ignored/.test(warning.message))).toBe(true)
   })
 
+  it('sends a mounted page whose frontmatter url is a path of its own site to that path under the mount', () => {
+    const imported = importSourceRef(MAPPING, sdkRepo({
+      'docs/docs.json': JSON.stringify({ navigation: { pages: ['overview', 'jump', 'jump-fragment'] } }),
+      'docs/jump.mdx': '---\ntitle: Jump\nurl: /overview\n---\n',
+      'docs/jump-fragment.mdx': '---\ntitle: Jump fragment\nurl: "/overview#install"\n---\n',
+    }))
+    const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/client-sdks/typescript/jump', destination: '/client-sdks/typescript/overview', permanent: false },
+      { source: '/client-sdks/typescript/jump-fragment', destination: '/client-sdks/typescript/overview#install', permanent: false },
+    ]))
+  })
+
   it('redirects a mounted page whose frontmatter url is another address, from its mounted path', () => {
     const imported = importSourceRef(MAPPING, sdkRepo({
       'docs/docs.json': JSON.stringify({ navigation: { pages: ['overview', 'github', { group: 'Community', pages: ['community/index', 'community/roadmap'] }] } }),

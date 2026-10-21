@@ -182,15 +182,20 @@ export function mainSiteLinkTarget(target: string, mountPath: string, index: Roo
   return undefined
 }
 
+/** One root-absolute target of a sub-site page: under the mount path, unless it already is or `resolve` places it elsewhere. */
+export function mountedLinkTarget(target: string, mountPath: string, resolve?: (target: string) => string | undefined): string {
+  const mounted = `/${mountPath}`
+  // A link already under the mount path is left alone: prefixing it again would break it.
+  if (target === mounted || ['/', '?', '#'].some((next) => target.startsWith(mounted + next))) return target
+  return resolve?.(target) ?? `${mounted}${target}`
+}
+
 /**
  * Prefix every root-absolute link/image/asset target in a page body with the mount path, unless `resolve` places it elsewhere.
  * Component source passes `markdown: false` so code that merely resembles a Markdown link is left alone.
  */
 export function prefixRootLinks(body: string, mountPath: string, resolve?: (target: string) => string | undefined, markdown = true): string {
-  const mounted = `/${mountPath}`
-  // A link already under the mount path is left alone: prefixing it again would break it.
-  const alreadyMounted = (target: string): boolean => target === mounted || ['/', '?', '#'].some((next) => target.startsWith(mounted + next))
-  const fix = (target: string): string => alreadyMounted(target) ? target : resolve?.(target) ?? `${mounted}${target}`
+  const fix = (target: string): string => mountedLinkTarget(target, mountPath, resolve)
   return replaceOutsideCodeAndComments(body, (text) => text
     .replace(markdown ? /(\]\(<?)(\/(?!\/)[^\s)>]*)/g : /(?!)/g, (_match, before: string, target: string) => `${before}${fix(target)}`)
     .replace(/(\b(?:href|src|to|poster)=(['"]))(\/(?!\/)[^'"\n]*)\2/g, (_match, before: string, quote: string, target: string) => `${before}${fix(target)}${quote}`)
