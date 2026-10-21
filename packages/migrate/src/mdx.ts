@@ -80,6 +80,35 @@ function firstParagraph(content: string): string {
   }
 }
 
+interface PositionedNode extends DescriptionNode {
+  position?: { start: { offset?: number }; end: { offset?: number } }
+}
+
+// Plain CommonMark: a description is not MDX, so `<` and `{` in it must not fail the parse, and a bare address is not a link.
+const linkParser = unified().use(remarkParse)
+
+/**
+ * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code, emphasis and
+ * everything else stay as written. A link is read the way Markdown reads it, so one inside a code span, an escaped bracket, an image
+ * and a bracket pair with no `(url)` are not links. Unchanged when it has none.
+ */
+function withoutMarkdownLinks(text: string): string {
+  const links: Array<{ start: number; end: number; textStart: number; textEnd: number }> = []
+  const collect = (node: PositionedNode): void => {
+    if (node.type === 'link') {
+      const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
+      const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) links.push({ start, end, textStart: first ?? start, textEnd: last ?? start })
+      return
+    }
+    for (const child of node.children ?? []) collect(child)
+  }
+  collect(linkParser.parse(text) as PositionedNode)
+  return links.reduceRight((result, link) => result.slice(0, link.start) + result.slice(link.textStart, link.textEnd) + result.slice(link.end), text)
+}
+
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
   if (kind === 'danger') return 'Error'
   if (kind === 'info') return 'Info'
@@ -2534,6 +2563,13 @@ export function parseMarkdownPage(input: {
     body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
+  }
+  // Thally shows an authored description as plain text (with inline code), so the raw `[text](url)` of a link would be shown as typed.
+  const writtenDescription = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
+  const plainDescription = withoutMarkdownLinks(writtenDescription)
+  if (plainDescription !== writtenDescription) {
+    page.description = plainDescription
+    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; the link text was kept.`)
   }
   resolvePageDisplayHeading(page, input.platform)
   return page
