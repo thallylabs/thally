@@ -391,6 +391,20 @@ const MAX_REF_EXPANSIONS = 200_000
 const MAX_CYCLE_ENTRIES = 1000
 
 /**
+ * A `$ref` node's own `description` and `title` win over the ones on the schema it points at, as Mintlify shows
+ * `{ "$ref": "#/components/schemas/Group", "description": "The newly created group" }`. Any other sibling of a `$ref` is still ignored.
+ * `resolved` is shared by every reference to that schema, so the override is applied to a copy.
+ */
+function withRefSiblings(node: RawObject, resolved: RawObject): RawObject {
+  if (typeof node.$ref !== 'string' || resolved === node) return resolved
+  const text = (value: unknown): string | undefined => (typeof value === 'string' && value.trim() ? value : undefined)
+  const title = text(node.title)
+  const description = text(node.description)
+  if (title === undefined && description === undefined) return resolved
+  return { ...resolved, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }) }
+}
+
+/**
  * Builds a schema deep-resolver bound to one spec document. Resolves every
  * $ref pointer it finds — including refs inside properties, items, and
  * allOf/anyOf/oneOf members — recursively. Circular references are broken by
@@ -445,7 +459,7 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
     if (depth >= MAX_DEPTH) return { type: 'object', description: '[Too deeply nested to show]' }
     depth++
     try {
-      return resolveNode(schema)
+      return withRefSiblings(schema, resolveNode(schema))
     } finally {
       depth--
     }
