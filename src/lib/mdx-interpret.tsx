@@ -249,9 +249,9 @@ function evaluateStaticExpression(node: unknown, scope: Record<string, unknown>)
  * dynamic evaluate to nothing instead of throwing.
  *
  * `childExpressions` holds the expressions authored in child position
- * (`{…}` between tags). Only those must not yield a plain object: attribute
- * values such as `style={{ … }}` or a component's `config={{ … }}` are
- * objects by design.
+ * (`{…}` between tags). Only those must be renderable nodes: attribute values
+ * such as `style={{ … }}` are objects by design and are vetted per prop name
+ * by `sanitizeProps`.
  */
 function createStaticEvaluater(components: Record<string, unknown>, childExpressions: WeakSet<object>) {
   return () => ({
@@ -259,9 +259,9 @@ function createStaticEvaluater(components: Record<string, unknown>, childExpress
       const value = evaluateStaticExpression(expression, components)
       // React throws on a plain object in child position ("Objects are not
       // valid as a React child"), which would take the whole route down over
-      // one authored `{{ a: 1 }}`. Component objects (memo/forwardRef carry
-      // `$$typeof`) are legitimate element types and must pass through; other
-      // objects render as nothing, matching this module's failure contract.
+      // one authored `{{ a: 1 }}`. Such values render as nothing, matching
+      // this module's failure contract.
+      // `$$typeof` marks component objects (memo/forwardRef), which must pass.
       if (
         value !== null &&
         typeof value === 'object' &&
@@ -302,13 +302,50 @@ function dropEmptyExpressions(tree: Root): WeakSet<object> {
   return childExpressions
 }
 
+/** Props that load a document or script; their string values are vetted for the scheme. */
+const URL_PROPS = new Set(['href', 'src', 'action', 'formaction', 'data', 'xlinkhref', 'xlink:href'])
+/** Schemes React leaves in place that can still run or frame authored markup. */
+const UNSAFE_URL = /^(?:vbscript:|data:text\/html)/i
+const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemotion'])
+
+/**
+ * The one gate every element and component created from remote content passes,
+ * whether the tag is authored at the top level or nested in an attribute value.
+ * Returns the props to render with, or null when the element must not exist.
+ *
+ * Content here is untrusted, so it must not be able to run script in the page's
+ * origin or crash the render. React already drops string `on*` handlers and
+ * neutralises `javascript:` URLs; this gate covers what reaches the DOM:
+ * scripts, `<base>`, `<meta http-equiv>`, `srcDoc` (an iframe that inherits the
+ * page's origin), raw-HTML props, `vbscript:` / `data:text/html` URLs, and SVG
+ * animations that retarget a link or event attribute. A string `style` is
+ * dropped because React throws on it.
+ */
+function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
+  const tag = typeof type === 'string' ? type.toLowerCase() : ''
+  if (tag === 'script' || tag === 'base') return null
+  const clean: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(props)) {
+    const name = key.toLowerCase()
+    if (tag === 'meta' && name.replace('-', '') === 'httpequiv') return null
+    if (name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
+    if (key === 'style' && typeof value === 'string') continue
+    if (typeof value === 'string') {
+      if (URL_PROPS.has(name) && UNSAFE_URL.test(value.replace(/[\u0000-\u0020]/g, ''))) continue
+      if (name === 'attributename' && ANIMATION_TAGS.has(tag) && /^(?:on|(?:xlink:)?href$)/i.test(value.trim())) continue
+    }
+    clean[key] = value
+  }
+  return clean
+}
+
 /**
  * Wrap the JSX runtime so authored mistakes degrade instead of 500ing the
  * route. Under the assets source there is no build-time MDX validation
  * between an author's push and a live render, so an unknown component
  * (`<Nope>`) or an HTML-style string `style` attribute — both fatal to React —
  * must not be able to take a page down. Unknown types render their children;
- * string styles and raw-HTML props are dropped.
+ * props are vetted by `sanitizeProps`.
  */
 function createLenientJsx<T extends typeof jsx>(create: T): T {
   return ((type: unknown, props: Record<string, unknown>, key?: string) => {
@@ -316,18 +353,11 @@ function createLenientJsx<T extends typeof jsx>(create: T): T {
       typeof type === 'string' ||
       typeof type === 'function' ||
       (typeof type === 'object' && type !== null && '$$typeof' in type)
-    if (props && typeof props.style === 'string') {
-      const { style: _dropped, ...rest } = props
-      props = rest
-    }
-    // Object attributes now reach elements, so raw-HTML injection stays an
-    // explicit non-feature of remote content, as it was when objects dropped.
-    if (props && props.dangerouslySetInnerHTML !== undefined) {
-      props = { ...props, dangerouslySetInnerHTML: undefined }
-    }
+    const safe = sanitizeProps(type, props ?? {})
+    if (!safe) return null
     return create(
       (isRenderable ? type : Fragment) as Parameters<T>[0],
-      props as Parameters<T>[1],
+      safe as Parameters<T>[1],
       key,
     )
   }) as T

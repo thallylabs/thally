@@ -379,6 +379,102 @@ describe('paragraphs that hold only JSX', () => {
   })
 })
 
+describe('markup that remote content must not be able to create', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', null, icon as ReactNode)
+  const run = async (source: string) =>
+    render((await interpretMDX({ source, components: { Card } })).content)
+
+  it.each([
+    ["<iframe srcDoc={'<script>alert(1)</script>'} />", '<iframe></iframe>'],
+    ['<iframe srcdoc="<b>x</b>" />', '<iframe></iframe>'],
+    ['<iframe SRCDOC="<b>x</b>" />', '<iframe></iframe>'],
+    ["<iframe {...{ srcDoc: '<b>x</b>' }} />", '<iframe></iframe>'],
+    ["<Card icon={<iframe srcDoc={'<b>x</b>'} />} />", '<span><iframe></iframe></span>'],
+  ])('strips srcDoc from %s', async (source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it('strips srcDoc from a component prop', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('div', { 'data-src-doc': String(props.srcDoc), 'data-srcdoc': String(props.srcdoc) })
+    const { content } = await interpretMDX({ source: '<Probe srcDoc="<b>x</b>" srcdoc="<b>y</b>" />', components: { Probe } })
+    expect(render(content)).toBe('<div data-src-doc="undefined" data-srcdoc="undefined"></div>')
+  })
+
+  it('strips raw HTML props from nested elements too', async () => {
+    expect(await run("<Card icon={<b dangerouslySetInnerHTML={{ __html: '<img src=x>' }} />} />")).toBe('<span><b></b></span>')
+  })
+
+  it('keeps an ordinary embedded iframe', async () => {
+    const html = await run('<iframe src="https://www.youtube.com/embed/abc" title="Video" frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen />')
+    expect(html).toBe('<iframe src="https://www.youtube.com/embed/abc" title="Video" frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen=""></iframe>')
+  })
+
+  it('leaves string event handlers and javascript: URLs to React, which neutralises them', async () => {
+    const html = await run(
+      [
+        '<div onClick="alert(1)" onclick="alert(2)" ONCLICK="alert(3)">x</div>',
+        '<img src="x" onError="alert(4)" />',
+        '<a href="javascript:alert(5)">a</a>',
+        '<a href={\' jav\\tascript:alert(6)\'}>b</a>',
+        '<iframe src="javascript:alert(7)" />',
+        '<form action="javascript:alert(8)"><button formAction="javascript:alert(9)">b</button></form>',
+        '<svg><a xlinkHref="javascript:alert(10)"><text>t</text></a></svg>',
+      ].join('\n\n'),
+    )
+    expect(html).not.toMatch(/\bon(click|error)=/i)
+    expect(html).not.toMatch(/(href|src|action|formAction)="javascript:alert/i)
+    expect(html).toContain('React has blocked a javascript: URL')
+  })
+
+  it.each([
+    ['href', '<a href="vbscript:msgbox(1)">a</a>', '<a>a</a>'],
+    ['href', '<a href="data:text/html,<script>alert(1)</script>">a</a>', '<a>a</a>'],
+    ['href', '<a href=" DaTa:\ntext/html;base64,PHNjcmlwdD4=">a</a>', '<a>a</a>'],
+    ['src', '<iframe src="data:text/html,<b>x</b>" />', '<iframe></iframe>'],
+    ['data', '<object data="data:text/html,<b>x</b>" type="text/html" />', '<object type="text/html"></object>'],
+    ['xlinkHref', '<svg><a xlinkHref="vbscript:x"><text>t</text></a></svg>', '<svg><a><text>t</text></a></svg>'],
+    ['action', '<form action="VBScript:x"></form>', '<form></form>'],
+    ['formAction', '<button formAction="data:text/html,x">b</button>', '<button>b</button>'],
+  ])('drops an unsafe scheme from %s', async (_name, source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it('keeps data images and ordinary links', async () => {
+    const html = await run('<a href="https://example.com/a?b=c">a</a>\n\n<img src="data:image/png;base64,AAAA" alt="" />')
+    expect(html).toContain('<a href="https://example.com/a?b=c">a</a>')
+    expect(html).toContain('src="data:image/png;base64,AAAA"')
+  })
+
+  it.each([
+    '<script>alert(1)</script>',
+    '<script src="https://evil.test/x.js"></script>',
+    '<sCript>alert(1)</sCript>',
+    '<svg><script>alert(1)</script></svg>',
+    '<base href="https://evil.test/" />',
+    '<meta httpEquiv="refresh" content="0;url=https://evil.test" />',
+    '<meta http-equiv="refresh" content="0;url=https://evil.test" />',
+    '<Card icon={<script>alert(1)</script>} />',
+  ])('renders nothing for %s', async (source) => {
+    const html = await run(source)
+    expect(html).not.toMatch(/<(script|base|meta)/i)
+    expect(html).not.toContain('alert(1)')
+  })
+
+  it('keeps an ordinary meta element', async () => {
+    expect(await run('<meta name="description" content="ok" />')).toContain('name="description"')
+  })
+
+  it('stops an SVG animation from retargeting a link or an event attribute', async () => {
+    const html = await run(
+      '<svg><a><animate attributeName="href" values="javascript:alert(1)" /><text>t</text></a><set attributeName="onmouseover" to="alert(2)" /><animate attributeName="opacity" values="0;1" /></svg>',
+    )
+    expect(html).not.toMatch(/attributeName="(href|onmouseover)"/)
+    expect(html).toContain('attributeName="opacity"')
+  })
+})
+
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
 function substitute(node: ReactNode, value: string): ReactNode {
   if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)
