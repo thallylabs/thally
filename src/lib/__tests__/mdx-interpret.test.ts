@@ -283,6 +283,59 @@ describe('object-valued JSX attributes', () => {
   })
 })
 
+describe('paragraphs that hold only JSX', () => {
+  it('does not wrap a lone inline element in a paragraph', async () => {
+    const Badge: ComponentType<Record<string, unknown>> = ({ children }) =>
+      createElement('span', { 'data-badge': true }, children as ReactNode)
+    const { content } = await interpretMDX({
+      source: '<Badge>New</Badge>\n\nText with <Badge>inline</Badge> stays in a paragraph.',
+      components: { Badge },
+    })
+    expect(render(content)).toBe(
+      '<span data-badge="true">New</span>\n<p>Text with <span data-badge="true">inline</span> stays in a paragraph.</p>',
+    )
+  })
+
+  it('keeps a block-level component out of a paragraph', async () => {
+    // `<p><aside>` is re-parented by the HTML parser before React hydrates,
+    // which fails hydration (React error 418) on every page with such a callout.
+    const { content } = await interpretMDX({
+      source: '<Note title="One">Careful now.</Note>\n\nBody text.\n\n<Note title="Two">Also careful.</Note>',
+      components: { Note },
+    })
+    const html = render(content)
+    expect(html).not.toContain('<p><aside')
+    expect(html).toBe(
+      '<aside data-note="true" data-title="One">Careful now.</aside>\n<p>Body text.</p>\n<aside data-note="true" data-title="Two">Also careful.</aside>',
+    )
+  })
+
+  it('keeps SVG children as direct children when lines mix elements, text and comments', async () => {
+    // A line such as `<text x="1">label</text>` carries text, so remark-mdx reads
+    // it as inline JSX inside a paragraph. Left wrapped, the `<p>` makes the
+    // browser close the surrounding <svg>, which then renders blank.
+    const source = [
+      '<svg viewBox="0 0 10 10">',
+      '  {/* State 1 */}',
+      '  <g id="s1">',
+      '    <text x="1" y="2">label</text>',
+      '    {/* Row 1 */}',
+      '    <g><rect x="1"/><text x="2">1</text></g>',
+      '',
+      '    <g><rect x="3"/><text x="4">2</text></g>',
+      '  </g>',
+      '',
+      '  {/* Arrow */}',
+      '  <g id="arrow"><line x1="1"/></g>',
+      '</svg>',
+    ].join('\n')
+    const { content } = await interpretMDX({ source, components: {} })
+    expect(render(content)).toBe(
+      '<svg viewBox="0 0 10 10"><g id="s1"><text x="1" y="2">label</text><g><rect x="1"></rect><text x="2">1</text></g><g><rect x="3"></rect><text x="4">2</text></g></g><g id="arrow"><line x1="1"></line></g></svg>',
+    )
+  })
+})
+
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
 function substitute(node: ReactNode, value: string): ReactNode {
   if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)

@@ -252,9 +252,52 @@ function createLenientJsx<T extends typeof jsx>(create: T): T {
   }) as T
 }
 
+/**
+ * A paragraph that holds only inline JSX and whitespace becomes flow content,
+ * so `<text x="1">label</text>` between SVG tags is not wrapped in a `<p>`.
+ * `@mdx-js/mdx` applies this rule in its own pipeline but keeps the plugin
+ * internal, so the interpreter repeats it; without it a `<p>` inside `<svg>`
+ * makes the browser end the SVG, and a `<p>` around a block element is
+ * re-parented before hydration.
+ */
+function remarkUnravelJsxParagraphs() {
+  type MdastNode = { type: string; value?: string; children?: Array<MdastNode> }
+  const unravel = (parent: MdastNode) => {
+    const siblings = parent.children
+    if (!siblings) return
+    for (let index = 0; index < siblings.length; index++) {
+      const node = siblings[index]
+      const children = node.children ?? []
+      const holdsOnlyJsx =
+        node.type === 'paragraph' &&
+        children.some((child) => child.type === 'mdxJsxTextElement' || child.type === 'mdxTextExpression') &&
+        children.every(
+          (child) =>
+            child.type === 'mdxJsxTextElement' ||
+            child.type === 'mdxTextExpression' ||
+            (child.type === 'text' && /^[\t\n\f\r ]*$/.test(child.value ?? '')),
+        )
+      if (!holdsOnlyJsx) {
+        unravel(node)
+        continue
+      }
+      const flow = children
+        .filter((child) => child.type !== 'text')
+        .map((child) => ({
+          ...child,
+          type: child.type === 'mdxJsxTextElement' ? 'mdxJsxFlowElement' : 'mdxFlowExpression',
+        }))
+      siblings.splice(index, 1, ...flow)
+      index += flow.length - 1
+    }
+  }
+  return unravel
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkMdx)
+  .use(remarkUnravelJsxParagraphs)
   .use(remarkPlugins)
   .use(remarkRehype, { passThrough: [...MDX_NODE_TYPES] })
   .use(rehypePlugins)
