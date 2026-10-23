@@ -683,6 +683,17 @@ describe('data props of components', () => {
   })
 })
 
+describe('void elements', () => {
+  it.each(['<br>text</br>', '<img src="/x.png">text</img>', '<input>text</input>', '<hr>text</hr>'])(
+    'render without their children instead of failing the page: %s',
+    async (source) => {
+      const html = render((await interpretMDX({ source, components: {} })).content)
+      expect(html).not.toContain('text')
+      expect(html).toMatch(/<(br|img|input|hr)\b/)
+    },
+  )
+})
+
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
 function substitute(node: ReactNode, value: string): ReactNode {
   if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)

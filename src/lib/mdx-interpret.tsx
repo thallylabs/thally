@@ -318,6 +318,8 @@ const NODE_PROPS = new Set([
 const DISPLAY_TEXT_PROPS = new Set(['title', 'description', 'label', 'alt'])
 /** Schemes a browser would run, or frame as markup authored in the URL. */
 const UNSAFE_SCHEME = /^(?:javascript:|vbscript:|data:text\/html)/i
+/** Elements React refuses to render with children. */
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr'])
 const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemotion'])
 
 /** Browsers ignore ASCII whitespace and control characters around and inside a URL scheme. */
@@ -363,7 +365,8 @@ function isPlainData(value: unknown, depth = 0): boolean {
  * dropped receives an empty string, as it would for an authored empty value,
  * so it renders its fallback instead of failing on `undefined`. A string
  * `style` is dropped because React throws, and a style object keeps only its
- * string and number entries.
+ * string and number entries. A void element such as `<br>` loses its children,
+ * which React refuses to render.
  *
  * Objects and arrays are the other way a page fails: React throws on one drawn
  * as a node, and a component calls string methods on a prop it expects to be
@@ -381,6 +384,7 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
     const name = key.toLowerCase()
     if (tag === 'meta' && name.replace('-', '') === 'httpequiv') return null
     if (name.startsWith('on') || name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
+    if (key === 'children' && VOID_TAGS.has(tag)) continue
     if (key === 'style') {
       if (typeof value === 'object' && value !== null && !Array.isArray(value) && !isValidElement(value)) {
         clean[key] = Object.fromEntries(
