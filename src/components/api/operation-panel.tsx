@@ -484,17 +484,22 @@ function resolveDefault(schema?: Record<string, unknown>): string | undefined {
   return typeof schema.default === 'object' ? JSON.stringify(schema.default) : String(schema.default)
 }
 
-/** A field's allowed values: its own enum, its array items' enum, or that of the first oneOf/anyOf member that lists any. */
+/**
+ * A field's allowed values: its own enum or its array items' enum. A oneOf/anyOf lists values only when every member is
+ * an enum or null, as one list in member order, so a branch is never shown as if it were all of them.
+ */
 function enumOptions(schema?: Record<string, unknown>): Array<string> | null {
   if (!schema) return null
   const flat = flattenSchema(schema)
   if (Array.isArray(flat.enum)) return flat.enum.map(String)
   if (flat.type === 'array' && flat.items && typeof flat.items === 'object') return enumOptions(flat.items as Record<string, unknown>)
-  for (const variant of unionVariants(flat) ?? []) {
-    const values = enumOptions(variant.schema)
-    if (values) return values
+  const values = new Set<unknown>()
+  for (const { schema: member } of unionVariants(flat) ?? []) {
+    if (Array.isArray(member.enum)) member.enum.forEach((value) => values.add(value))
+    else if (member.type === 'null') values.add(null)
+    else return null
   }
-  return null
+  return values.size ? [...values].map(String) : null
 }
 
 /** The value schema of a map (`additionalProperties`), when it says anything. */

@@ -55,7 +55,17 @@ describe('body field rows', () => {
     expect(html).toContain('Allowed: read, db:create')
   })
 
-  it('list the allowed values of the first union member that has any', () => {
+  it('list the allowed values of a union of enums in member order, once each', () => {
+    const html = render(body({ role: { oneOf: [{ type: 'string', enum: ['admin'] }, { type: 'string', enum: ['member', 'admin'] }] } }))
+    expect(html).toContain('Allowed: admin, member<')
+  })
+
+  it('include null in the allowed values of a nullable union', () => {
+    const html = render(body({ role: { anyOf: [{ type: 'string', enum: ['a', 'b'] }, { type: 'null' }] } }))
+    expect(html).toContain('Allowed: a, b, null<')
+  })
+
+  it('list no values for a union that has a member that is not an enum', () => {
     const html = render(
       body({
         extensions: {
@@ -66,8 +76,7 @@ describe('body field rows', () => {
         },
       }),
     )
-    expect(html).toContain('Allowed: all<')
-    expect(html).not.toContain('vector')
+    expect(html).not.toContain('Allowed:')
   })
 
   it('still list the values of a plain enum once', () => {
