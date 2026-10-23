@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { interpretMDX } from '@/lib/mdx-interpret'
 import { Code, Pre } from '@/components/mdx/code-blocks'
+import { useMDXComponents } from '@/components/mdx/mdx-components'
 
 function render(node: ReactNode): string {
   return renderToStaticMarkup(createElement(function Wrapper() {
@@ -477,7 +478,7 @@ describe('markup that remote content must not be able to create', () => {
     expect(html).toBe('<iframe src="https://www.youtube.com/embed/abc" title="Video" frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen=""></iframe>')
   })
 
-  it('leaves string event handlers and javascript: URLs to React, which neutralises them', async () => {
+  it('drops string event handlers and javascript: URLs', async () => {
     const html = await run(
       [
         '<div onClick="alert(1)" onclick="alert(2)" ONCLICK="alert(3)">x</div>',
@@ -490,8 +491,7 @@ describe('markup that remote content must not be able to create', () => {
       ].join('\n\n'),
     )
     expect(html).not.toMatch(/\bon(click|error)=/i)
-    expect(html).not.toMatch(/(href|src|action|formAction)="javascript:alert/i)
-    expect(html).toContain('React has blocked a javascript: URL')
+    expect(html).not.toMatch(/javascript:/i)
   })
 
   it.each([
@@ -538,6 +538,86 @@ describe('markup that remote content must not be able to create', () => {
     )
     expect(html).not.toMatch(/attributeName="(href|onmouseover)"/)
     expect(html).toContain('attributeName="opacity"')
+  })
+})
+
+describe('the gate does not depend on attribute case, entities or element kind', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', null, icon as ReactNode)
+  const Note: ComponentType<Record<string, unknown>> = () => createElement('aside')
+  const run = async (source: string) =>
+    render((await interpretMDX({ source, components: { Card, Note } })).content)
+
+  it.each([
+    ['<iframe SRC="javascript:alert(1)" />', '<iframe></iframe>'],
+    ['<iframe sRc="javascript:alert(1)" />', '<iframe></iframe>'],
+    ['<iframe src="  &#x09;JaVaScRiPt:alert(1)" />', '<iframe></iframe>'],
+    ["<iframe {...{ SRC: 'javascript:alert(1)' }} />", '<iframe></iframe>'],
+    ['<iframe src="vbscript:x" />', '<iframe></iframe>'],
+    ['<a HREF="javascript:alert(1)">x</a>', '<a>x</a>'],
+    ['<a Href="java&#x09;script:alert(1)">x</a>', '<a>x</a>'],
+    ['<a HREF="  &#x09;javascript:alert(1)" target="_self">x</a>', '<a target="_self">x</a>'],
+    ['<form ACTION="javascript:alert(1)"><button>x</button></form>', '<form><button>x</button></form>'],
+    ['<form><button formaction="javascript:alert(1)">x</button></form>', '<form><button>x</button></form>'],
+    ['<form><button FORMACTION="javascript:alert(1)">x</button></form>', '<form><button>x</button></form>'],
+    ['<form><input type="submit" formaction="javascript:alert(1)" /></form>', '<form><input type="submit"/></form>'],
+    ['<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a XLINK:HREF="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a xlink:href="java&#x09;script:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a HREF="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<map><area HREF="javascript:alert(1)" /></map>', '<map><area/></map>'],
+    ['<math><mi HREF="javascript:alert(1)">x</mi></math>', '<math><mi>x</mi></math>'],
+    ['<object DATA="data:text/html,x" />', '<object></object>'],
+  ])('drops an unsafe URL under any key case: %s', async (source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it.each([
+    '<x-a onfocus="alert(1)" tabindex="0" autofocus>x</x-a>',
+    '<x-a onclick="alert(1)">x</x-a>',
+    '<x-a ONCLICK="alert(1)">x</x-a>',
+    "<x-a {...{ onclick: 'alert(1)' }}>x</x-a>",
+    '<Card icon={<x-a onclick="alert(1)">i</x-a>} />',
+    '<Card icon={<iframe SRC="javascript:alert(1)" />} />',
+    '<Card onclick="alert(1)" HREF="javascript:alert(1)" />',
+  ])('keeps event handlers and unsafe URLs out of %s', async (source) => {
+    expect(await run(source)).not.toMatch(/\bon[a-z]+=|javascript:/i)
+  })
+
+  it('keeps the safe attributes of an element whose handler was dropped', async () => {
+    expect(await run('<x-a onfocus="alert(1)" tabindex="0">x</x-a>')).toBe('<x-a tabindex="0">x</x-a>')
+  })
+
+  it('hands a component an empty string where it expected a URL, so it renders as before', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('code', null, String((props.src as string).length))
+    const { content } = await interpretMDX({ source: '<Probe src="data:text/html,x" />', components: { Probe } })
+    expect(render(content)).toBe('<code>0</code>')
+  })
+
+  it.each([
+    ['<Embed src="data:text/html,x" />', ''],
+    ['<Embed src="vbscript:x" />', ''],
+    ['<Video src="data:text/html,x" />', '<code></code>'],
+    ['<Video src="vbscript:x" />', '<code></code>'],
+  ])('renders the builtin %s without failing the page', async (source, expected) => {
+    const { content } = await interpretMDX({ source, components: useMDXComponents({}) as never })
+    expect(render(content)).toBe(expected)
+  })
+
+  it('keeps display text that merely starts like a scheme', async () => {
+    const html = await run('<a href="/x" title="JavaScript: the language">x</a>\n\n<Card title="data:text/html in docs" />')
+    expect(html).toContain('title="JavaScript: the language"')
+  })
+
+  it('keeps only string and number values in a style object', async () => {
+    expect(await run("<div style={{ color: Note, width: 5, height: '1px', margin: { a: 1 } }}>x</div>")).toBe(
+      '<div style="width:5px;height:1px">x</div>',
+    )
+  })
+
+  it.each(['<plaintext>x</plaintext>', '<svg><svg:script>alert(1)</svg:script></svg>'])('renders nothing for %s', async (source) => {
+    expect(await run(source)).not.toMatch(/plaintext|script/i)
   })
 })
 

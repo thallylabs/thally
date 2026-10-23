@@ -307,11 +307,16 @@ function isRenderableNode(value: unknown): boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || isValidElement(value)
 }
 
-/** Props that load a document or script; their string values are vetted for the scheme. */
-const URL_PROPS = new Set(['href', 'src', 'action', 'formaction', 'data', 'xlinkhref', 'xlink:href'])
-/** Schemes React leaves in place that can still run or frame authored markup. */
-const UNSAFE_URL = /^(?:vbscript:|data:text\/html)/i
+/** Text that is displayed, never loaded, so a leading scheme-like word is only words. */
+const DISPLAY_TEXT_PROPS = new Set(['title', 'description', 'label', 'alt'])
+/** Schemes a browser would run, or frame as markup authored in the URL. */
+const UNSAFE_SCHEME = /^(?:javascript:|vbscript:|data:text\/html)/i
 const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemotion'])
+
+/** Browsers ignore ASCII whitespace and control characters around and inside a URL scheme. */
+function hasUnsafeScheme(value: string): boolean {
+  return UNSAFE_SCHEME.test(value.replace(/[\u0000-\u0020]/g, ''))
+}
 
 /**
  * The one gate every element and component created from remote content passes,
@@ -319,24 +324,38 @@ const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemo
  * Returns the props to render with, or null when the element must not exist.
  *
  * Content here is untrusted, so it must not be able to run script in the page's
- * origin or crash the render. React already drops string `on*` handlers and
- * neutralises `javascript:` URLs; this gate covers what reaches the DOM:
- * scripts, `<base>`, `<meta http-equiv>`, `srcDoc` (an iframe that inherits the
- * page's origin), raw-HTML props, `vbscript:` / `data:text/html` URLs, and SVG
- * animations that retarget a link or event attribute. Object values survive
- * only as `style`, and `children` only when React can render it. String `style`
- * is dropped because React throws on it.
+ * origin or crash the render. MDX hands attribute names over exactly as
+ * authored, while React only recognises the canonical spelling of a URL prop
+ * and keeps `on*` strings on custom elements, so nothing here may depend on a
+ * key's case: the surviving key is emitted unchanged, and the checks look at
+ * the lowercased name and at the value.
+ *
+ * Dropped: every `on*` prop, `srcDoc`, raw-HTML props, any string value (under
+ * any key, bar display text) that begins with `javascript:`, `vbscript:` or
+ * `data:text/html` once whitespace and control characters are removed,
+ * `<script>`, `<base>`, `<plaintext>`, `<meta http-equiv>`, and SVG animations
+ * that retarget a link or event attribute. A component whose URL prop is
+ * dropped receives an empty string, as it would for an authored empty value,
+ * so it renders its fallback instead of failing on `undefined`. Object values
+ * survive only as `style` (string and number entries), and `children` only
+ * when React can render it. String `style` is dropped because React throws.
  */
 function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
-  const tag = typeof type === 'string' ? type.toLowerCase() : ''
-  if (tag === 'script' || tag === 'base') return null
+  const isElement = typeof type === 'string'
+  // A namespace prefix does not make `<svg:script>` anything but a script.
+  const tag = isElement ? type.toLowerCase().replace(/^.*:/, '') : ''
+  if (tag === 'script' || tag === 'base' || tag === 'plaintext') return null
   const clean: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(props)) {
     const name = key.toLowerCase()
     if (tag === 'meta' && name.replace('-', '') === 'httpequiv') return null
-    if (name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
+    if (name.startsWith('on') || name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
     if (key === 'style') {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value) && !isValidElement(value)) clean[key] = value
+      if (typeof value === 'object' && value !== null && !Array.isArray(value) && !isValidElement(value)) {
+        clean[key] = Object.fromEntries(
+          Object.entries(value).filter(([, entry]) => typeof entry === 'string' || typeof entry === 'number'),
+        )
+      }
       continue
     }
     if (key === 'children') {
@@ -345,7 +364,10 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
     }
     if (typeof value === 'object' && value !== null && typeof (value as { $$typeof?: unknown }).$$typeof !== 'symbol') continue
     if (typeof value === 'string') {
-      if (URL_PROPS.has(name) && UNSAFE_URL.test(value.replace(/[\u0000-\u0020]/g, ''))) continue
+      if (!DISPLAY_TEXT_PROPS.has(name) && hasUnsafeScheme(value)) {
+        if (!isElement) clean[key] = ''
+        continue
+      }
       if (name === 'attributename' && ANIMATION_TAGS.has(tag) && /^(?:on|(?:xlink:)?href$)/i.test(value.trim())) continue
     }
     clean[key] = value
