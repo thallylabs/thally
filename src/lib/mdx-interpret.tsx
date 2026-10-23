@@ -166,8 +166,13 @@ function evaluateStaticExpression(node: unknown, scope: Record<string, unknown>)
  * against the components map; static literals evaluate; programs (leftover
  * `export` statements — imports are stripped before parsing) and everything
  * dynamic evaluate to nothing instead of throwing.
+ *
+ * `childExpressions` holds the expressions authored in child position
+ * (`{…}` between tags). Only those must not yield a plain object: attribute
+ * values such as `style={{ … }}` or a component's `config={{ … }}` are
+ * objects by design.
  */
-function createStaticEvaluater(components: Record<string, unknown>) {
+function createStaticEvaluater(components: Record<string, unknown>, childExpressions: WeakSet<object>) {
   return () => ({
     evaluateExpression: (expression: unknown) => {
       const value = evaluateStaticExpression(expression, components)
@@ -176,7 +181,14 @@ function createStaticEvaluater(components: Record<string, unknown>) {
       // one authored `{{ a: 1 }}`. Component objects (memo/forwardRef carry
       // `$$typeof`) are legitimate element types and must pass through; other
       // objects render as nothing, matching this module's failure contract.
-      if (value !== null && typeof value === 'object' && !('$$typeof' in value)) return undefined
+      if (
+        value !== null &&
+        typeof value === 'object' &&
+        !('$$typeof' in value) &&
+        childExpressions.has(expression as object)
+      ) {
+        return undefined
+      }
       return value
     },
     evaluatePattern: () => undefined,
@@ -189,17 +201,24 @@ function createStaticEvaluater(components: Record<string, unknown>) {
  * parses to an estree Program with an empty body, and
  * `hast-util-to-jsx-runtime` reads `program.body[0].type` unguarded, throwing
  * before the evaluater is ever consulted. Comments are ordinary in authored
- * content, so they must render as nothing rather than 500 the page.
+ * content, so they must render as nothing rather than 500 the page. Returns
+ * the expressions that remain in child position for the evaluater.
  */
-function dropEmptyExpressions(tree: Root): void {
+function dropEmptyExpressions(tree: Root): WeakSet<object> {
+  const childExpressions = new WeakSet<object>()
   visit(tree, (node, index, parent) => {
     if (index === undefined || !parent) return
     if (node.type !== 'mdxFlowExpression' && node.type !== 'mdxTextExpression') return
-    const program = (node.data as { estree?: { body?: Array<unknown> } } | undefined)?.estree
-    if (program && (program.body?.length ?? 0) > 0) return
+    const program = (node.data as { estree?: { body?: Array<{ expression?: object }> } } | undefined)?.estree
+    const expression = program?.body?.[0]?.expression
+    if (expression) {
+      childExpressions.add(expression)
+      return
+    }
     parent.children.splice(index, 1)
     return [SKIP, index]
   })
+  return childExpressions
 }
 
 /**
@@ -208,7 +227,7 @@ function dropEmptyExpressions(tree: Root): void {
  * between an author's push and a live render, so an unknown component
  * (`<Nope>`) or an HTML-style string `style` attribute — both fatal to React —
  * must not be able to take a page down. Unknown types render their children;
- * string styles are dropped.
+ * string styles and raw-HTML props are dropped.
  */
 function createLenientJsx<T extends typeof jsx>(create: T): T {
   return ((type: unknown, props: Record<string, unknown>, key?: string) => {
@@ -219,6 +238,11 @@ function createLenientJsx<T extends typeof jsx>(create: T): T {
     if (props && typeof props.style === 'string') {
       const { style: _dropped, ...rest } = props
       props = rest
+    }
+    // Object attributes now reach elements, so raw-HTML injection stays an
+    // explicit non-feature of remote content, as it was when objects dropped.
+    if (props && props.dangerouslySetInnerHTML !== undefined) {
+      props = { ...props, dangerouslySetInnerHTML: undefined }
     }
     return create(
       (isRenderable ? type : Fragment) as Parameters<T>[0],
@@ -250,14 +274,14 @@ export async function interpretMDX(input: InterpretMdxInput): Promise<InterpretM
 
   const parsed = processor.parse(body)
   const tree = (await processor.run(parsed)) as Root
-  dropEmptyExpressions(tree)
+  const childExpressions = dropEmptyExpressions(tree)
 
   const content = toJsxRuntime(tree, {
     Fragment,
     jsx: createLenientJsx(jsx),
     jsxs: createLenientJsx(jsxs),
     components: input.components as Parameters<typeof toJsxRuntime>[1]['components'],
-    createEvaluater: createStaticEvaluater(input.components),
+    createEvaluater: createStaticEvaluater(input.components, childExpressions),
     elementAttributeNameCase: 'react',
   })
 

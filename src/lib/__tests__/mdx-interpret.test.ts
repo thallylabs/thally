@@ -242,6 +242,47 @@ describe('interpretMDX', () => {
   })
 })
 
+describe('object-valued JSX attributes', () => {
+  it('keeps a style object on HTML and SVG elements', async () => {
+    const { content } = await interpretMDX({
+      source: '<div id="viz" style={{ padding: \'1rem 0.5rem\' }}>\n  <svg viewBox="0 0 10 10" style={{ width: \'100%\', maxWidth: \'620px\' }}>\n    <g id="s1" style={{ transition: \'opacity 0.3s\' }} />\n  </svg>\n</div>',
+      components: {},
+    })
+    const html = render(content)
+    expect(html).toContain('<div id="viz" style="padding:1rem 0.5rem">')
+    expect(html).toContain('<svg viewBox="0 0 10 10" style="width:100%;max-width:620px">')
+    expect(html).toContain('<g id="s1" style="transition:opacity 0.3s"></g>')
+  })
+
+  it('passes object and array literals to a component prop', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('div', { 'data-config': JSON.stringify(props.config), 'data-items': JSON.stringify(props.items) })
+    const { content } = await interpretMDX({
+      source: '<Probe config={{ cols: 2, nested: { on: true } }} items={[1, \'two\']} />',
+      components: { Probe },
+    })
+    const html = render(content)
+    expect(html).toContain('data-config="{&quot;cols&quot;:2,&quot;nested&quot;:{&quot;on&quot;:true}}"')
+    expect(html).toContain('data-items="[1,&quot;two&quot;]"')
+  })
+
+  it('spreads an object literal into the element props', async () => {
+    const { content } = await interpretMDX({
+      source: '<div {...{ id: \'spread\', style: { color: \'red\' } }}>x</div>',
+      components: {},
+    })
+    expect(render(content)).toContain('<div id="spread" style="color:red">x</div>')
+  })
+
+  it('never lets an authored object inject raw HTML', async () => {
+    const { content } = await interpretMDX({
+      source: '<div dangerouslySetInnerHTML={{ __html: \'<img src=x onerror=alert(1)>\' }} />',
+      components: {},
+    })
+    expect(render(content)).not.toContain('<img')
+  })
+})
+
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
 function substitute(node: ReactNode, value: string): ReactNode {
   if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)
