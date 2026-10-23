@@ -101,6 +101,13 @@ describe('map fields (additionalProperties)', () => {
     expect(html.indexOf('>total<')).toBeLessThan(html.indexOf('>{key}<'))
   })
 
+  it('keep a real property named {key} and add no synthetic row beside it', () => {
+    const html = response({ type: 'object', properties: { '{key}': { type: 'integer', description: 'A real field.' } }, additionalProperties: { type: 'string' } })
+    expect(html.match(/>\{key\}</g)).toHaveLength(1)
+    expect(html).toContain('A real field.')
+    expect(html).toMatch(/>\{key\}<\/code><span[^>]*>integer</)
+  })
+
   it('open a map of objects through the same nested rows', () => {
     const html = response({ type: 'object', additionalProperties: { type: 'object', properties: { name: { type: 'string' } } } })
     expect(html).toContain('>{key}<')

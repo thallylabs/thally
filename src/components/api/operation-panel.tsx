@@ -521,7 +521,8 @@ function getNestedSchema(schema: Record<string, unknown>): Record<string, unknow
   if (flat.type === 'array' && flat.items && typeof flat.items === 'object') {
     return getNestedSchema(flat.items as Record<string, unknown>)
   }
-  // A map lists its value schema as one `{key}` row, after any fixed properties.
+  // A map lists its value schema as one `{key}` row, after any fixed properties; a real property of that name stays.
   const value = mapValueSchema(flat)
-  return value ? { ...flat, properties: { ...(flat.properties as Record<string, unknown> | undefined), '{key}': value } } : flat
+  const fixed = flat.properties as Record<string, unknown> | undefined
+  return value && !(fixed && '{key}' in fixed) ? { ...flat, properties: { ...fixed, '{key}': value } } : flat
 }
