@@ -278,12 +278,14 @@ function normalizeParameters(
   deduped.forEach((param) => {
     const location = param.in
     if (location === 'path' || location === 'query' || location === 'header' || location === 'cookie') {
+      const schema = typeof param.schema === 'object' ? (param.schema as Record<string, unknown>) : undefined
       const normalizedParameter: NormalizedParameter = {
         name: param.name as string,
         in: location,
         required: Boolean(param.required),
-        description: typeof param.description === 'string' ? param.description : undefined,
-        schema: typeof param.schema === 'object' ? (param.schema as Record<string, unknown>) : undefined,
+        // The parameter's own description wins; some specs only put it on the schema.
+        description: typeof param.description === 'string' ? param.description : typeof schema?.description === 'string' ? schema.description : undefined,
+        schema,
       }
       grouped[location].push(normalizedParameter)
       prefill[location][normalizedParameter.name] = buildParameterSampleValue(normalizedParameter.schema, resolveRef, normalizedParameter.required)
