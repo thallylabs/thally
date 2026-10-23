@@ -82,6 +82,14 @@ describe('authSchemes when the spec declares no security', () => {
     }
   })
 
+  it('keeps the configured credential when a spec component has the same name', () => {
+    apiMdx = { servers: [], auth: { method: 'basic' } }
+    expect(summary(operationFor({ Authorization: bearerAuth }, undefined))).toEqual([{ name: 'Authorization', kind: 'basic', where: 'header', paramName: 'Authorization' }])
+    apiMdx = { servers: [], auth: { method: 'key', name: 'X-Key' } }
+    expect(summary(operationFor({ 'X-Key': { type: 'apiKey', in: 'query', name: 'key' } }, undefined))).toEqual([{ name: 'X-Key', kind: 'apiKey', where: 'header', paramName: 'X-Key' }])
+    apiMdx = { servers: [] }
+  })
+
   it('never overrides declared security, including an explicit empty list', () => {
     apiMdx = { servers: [], auth: { method: 'bearer' } }
     expect(operationFor({ bearerAuth }, []).authSchemes).toEqual([])

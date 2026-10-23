@@ -34,7 +34,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
     securitySchemes && typeof securitySchemes.securitySchemes === 'object'
       ? (securitySchemes.securitySchemes as Record<string, RawObject>)
       : {}
-  const implicitAuth = implicitAuthFor(rawSecuritySchemes)
+  const implicitAuth = implicitAuthFor()
   const operations: Array<NormalizedOperation> = []
 
   const paths = (resolved.document as RawObject).paths
@@ -587,12 +587,12 @@ interface ImplicitAuth {
  * the site's docs.json `api.mdx.auth`, which the site author declared for every API page. Nothing is inferred from
  * the spec's own components. A spec that declares `security` (even `[]`, a public operation) never reaches this.
  */
-function implicitAuthFor(schemes: Record<string, RawObject>): ImplicitAuth | null {
+function implicitAuthFor(): ImplicitAuth | null {
   const auth = getApiMdxConfig().auth
   const name = auth?.method === 'key' ? auth.name : 'Authorization'
   if (!auth || !name) return null
   const scheme = auth.method === 'key' ? { type: 'apiKey', in: 'header', name } : { type: 'http', scheme: auth.method }
-  return { security: [{ [name]: [] }], schemes: { [name]: scheme, ...schemes } }
+  return { security: [{ [name]: [] }], schemes: { [name]: scheme } }
 }
 
 function normalizeSecurity(raw: unknown): Array<Array<NormalizedSecurityRequirement>> {
