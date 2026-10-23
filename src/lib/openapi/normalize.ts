@@ -584,18 +584,15 @@ interface ImplicitAuth {
 
 /**
  * The credential for operations whose spec has no `security` at root or on the operation, as Mintlify shows it:
- * the site's docs.json `api.mdx.auth`, else the spec's only security scheme. A spec that declares `security`
- * (even `[]`, a public operation) never reaches this.
+ * the site's docs.json `api.mdx.auth`, which the site author declared for every API page. Nothing is inferred from
+ * the spec's own components. A spec that declares `security` (even `[]`, a public operation) never reaches this.
  */
 function implicitAuthFor(schemes: Record<string, RawObject>): ImplicitAuth | null {
   const auth = getApiMdxConfig().auth
   const name = auth?.method === 'key' ? auth.name : 'Authorization'
-  if (auth && name) {
-    const scheme = auth.method === 'key' ? { type: 'apiKey', in: 'header', name } : { type: 'http', scheme: auth.method }
-    return { security: [{ [name]: [] }], schemes: { [name]: scheme, ...schemes } }
-  }
-  const names = Object.keys(schemes)
-  return !auth && names.length === 1 ? { security: [{ [names[0]]: [] }], schemes } : null
+  if (!auth || !name) return null
+  const scheme = auth.method === 'key' ? { type: 'apiKey', in: 'header', name } : { type: 'http', scheme: auth.method }
+  return { security: [{ [name]: [] }], schemes: { [name]: scheme, ...schemes } }
 }
 
 function normalizeSecurity(raw: unknown): Array<Array<NormalizedSecurityRequirement>> {

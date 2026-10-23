@@ -74,10 +74,12 @@ describe('authSchemes when the spec declares no security', () => {
     apiMdx = { servers: [] }
   })
 
-  it('falls back to the spec only scheme when docs.json configures none', () => {
-    expect(summary(operationFor({ bearerAuth }, undefined))).toEqual([{ name: 'bearerAuth', kind: 'bearer', where: 'header', paramName: 'Authorization' }])
-    expect(operationFor({ bearerAuth, other: bearerAuth }, undefined).authSchemes).toEqual([])
-    expect(operationFor({}, undefined).authSchemes).toEqual([])
+  it('invents no credential from the spec components when docs.json configures none', () => {
+    for (const schemes of [{ bearerAuth }, { bearerAuth, other: bearerAuth }, {}]) {
+      const op = operationFor(schemes, undefined)
+      expect(op.authSchemes).toEqual([])
+      expect(op.security).toEqual([])
+    }
   })
 
   it('never overrides declared security, including an explicit empty list', () => {
