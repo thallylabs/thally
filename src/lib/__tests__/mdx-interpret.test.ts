@@ -254,16 +254,20 @@ describe('object-valued JSX attributes', () => {
     expect(html).toContain('<g id="s1" style="transition:opacity 0.3s"></g>')
   })
 
-  it('passes object and array literals to a component prop', async () => {
+  it('keeps a style object on a component prop and drops other object and array props', async () => {
+    // A component may render any prop as a node, and React throws on a plain
+    // object there, so only `style` keeps an object value.
     const Probe: ComponentType<Record<string, unknown>> = (props) =>
-      createElement('div', { 'data-config': JSON.stringify(props.config), 'data-items': JSON.stringify(props.items) })
+      createElement('div', {
+        style: props.style as never,
+        'data-config': JSON.stringify(props.config ?? null),
+        'data-items': JSON.stringify(props.items ?? null),
+      })
     const { content } = await interpretMDX({
-      source: '<Probe config={{ cols: 2, nested: { on: true } }} items={[1, \'two\']} />',
+      source: "<Probe style={{ color: 'red' }} config={{ cols: 2 }} items={[1, 'two']} />",
       components: { Probe },
     })
-    const html = render(content)
-    expect(html).toContain('data-config="{&quot;cols&quot;:2,&quot;nested&quot;:{&quot;on&quot;:true}}"')
-    expect(html).toContain('data-items="[1,&quot;two&quot;]"')
+    expect(render(content)).toBe('<div style="color:red" data-config="null" data-items="null"></div>')
   })
 
   it('spreads an object literal into the element props', async () => {
@@ -376,6 +380,37 @@ describe('paragraphs that hold only JSX', () => {
     expect(render(content)).toBe(
       '<svg viewBox="0 0 10 10"><g id="s1"><text x="1" y="2">label</text><g><rect x="1"></rect><text x="2">1</text></g><g><rect x="3"></rect><text x="4">2</text></g></g><g id="arrow"><line x1="1"></line></g></svg>',
     )
+  })
+})
+
+describe('props that would crash React', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ title, icon }) =>
+    createElement('div', null, createElement('span', null, icon as ReactNode), title as string)
+
+  it('renders a card whose icon is an object literal', async () => {
+    const { content } = await interpretMDX({ source: '<Card title="T" icon={{ a: 1 }} />', components: { Card } })
+    expect(render(content)).toBe('<div><span></span>T</div>')
+  })
+
+  it('drops a spread children that is not a valid node and keeps one that is', async () => {
+    const { content } = await interpretMDX({
+      source: "<div {...{ children: { a: 1 } }} />\n\n<p {...{ children: ['A', 'B'] }} />\n\n<b {...{ children: 'ok' }} />",
+      components: {},
+    })
+    expect(render(content)).toBe('<div></div>\n<p>AB</p>\n<b>ok</b>')
+  })
+
+  it('renders an object that forges the React element marker as nothing', async () => {
+    const { content } = await interpretMDX({
+      source: 'Before {{ "$$typeof": 1 }} after <Card title="T" icon={{ "$$typeof": 1 }} />',
+      components: { Card },
+    })
+    expect(render(content)).toContain('Before')
+  })
+
+  it('renders an array of valid nodes in child position', async () => {
+    const { content } = await interpretMDX({ source: "<b>{['A', 'B', 3]}</b>", components: {} })
+    expect(render(content)).toBe('<b>AB3</b>')
   })
 })
 

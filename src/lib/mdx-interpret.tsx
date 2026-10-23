@@ -20,7 +20,7 @@
  */
 import type { Root } from 'hast'
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime'
-import type { ReactNode } from 'react'
+import { isValidElement, type ReactNode } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
@@ -231,7 +231,7 @@ function evaluateStaticExpression(node: unknown, scope: Record<string, unknown>)
             : entry.key.type === 'Literal'
               ? String(entry.key.value)
               : undefined
-        if (key === undefined || key === '__proto__') return undefined
+        if (key === undefined || key === '__proto__' || key === '$$typeof') return undefined
         result[key] = evaluateStaticExpression(entry.value, scope)
       }
       return result
@@ -261,15 +261,7 @@ function createStaticEvaluater(components: Record<string, unknown>, childExpress
       // valid as a React child"), which would take the whole route down over
       // one authored `{{ a: 1 }}`. Such values render as nothing, matching
       // this module's failure contract.
-      // `$$typeof` marks component objects (memo/forwardRef), which must pass.
-      if (
-        value !== null &&
-        typeof value === 'object' &&
-        !('$$typeof' in value) &&
-        childExpressions.has(expression as object)
-      ) {
-        return undefined
-      }
+      if (childExpressions.has(expression as object) && !isRenderableNode(value)) return undefined
       return value
     },
     evaluatePattern: () => undefined,
@@ -302,6 +294,13 @@ function dropEmptyExpressions(tree: Root): WeakSet<object> {
   return childExpressions
 }
 
+/** What React accepts as a child; any other object throws when it is rendered. */
+function isRenderableNode(value: unknown): boolean {
+  if (value === null || value === undefined) return true
+  if (Array.isArray(value)) return value.every(isRenderableNode)
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || isValidElement(value)
+}
+
 /** Props that load a document or script; their string values are vetted for the scheme. */
 const URL_PROPS = new Set(['href', 'src', 'action', 'formaction', 'data', 'xlinkhref', 'xlink:href'])
 /** Schemes React leaves in place that can still run or frame authored markup. */
@@ -318,8 +317,9 @@ const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemo
  * neutralises `javascript:` URLs; this gate covers what reaches the DOM:
  * scripts, `<base>`, `<meta http-equiv>`, `srcDoc` (an iframe that inherits the
  * page's origin), raw-HTML props, `vbscript:` / `data:text/html` URLs, and SVG
- * animations that retarget a link or event attribute. A string `style` is
- * dropped because React throws on it.
+ * animations that retarget a link or event attribute. Object values survive
+ * only as `style`, and `children` only when React can render it. String `style`
+ * is dropped because React throws on it.
  */
 function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
   const tag = typeof type === 'string' ? type.toLowerCase() : ''
@@ -329,7 +329,15 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
     const name = key.toLowerCase()
     if (tag === 'meta' && name.replace('-', '') === 'httpequiv') return null
     if (name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
-    if (key === 'style' && typeof value === 'string') continue
+    if (key === 'style') {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value) && !isValidElement(value)) clean[key] = value
+      continue
+    }
+    if (key === 'children') {
+      if (isRenderableNode(value)) clean[key] = value
+      continue
+    }
+    if (typeof value === 'object' && value !== null && typeof (value as { $$typeof?: unknown }).$$typeof !== 'symbol') continue
     if (typeof value === 'string') {
       if (URL_PROPS.has(name) && UNSAFE_URL.test(value.replace(/[\u0000-\u0020]/g, ''))) continue
       if (name === 'attributename' && ANIMATION_TAGS.has(tag) && /^(?:on|(?:xlink:)?href$)/i.test(value.trim())) continue
