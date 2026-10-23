@@ -12,7 +12,7 @@ import type {
   OperationOverride,
   ResolvedSpec,
 } from '@/lib/openapi/types'
-import { getApiPlaygroundCredentials } from '@/data/docs'
+import { getApiMdxConfig, getApiPlaygroundCredentials } from '@/data/docs'
 import { HTTP_METHODS, buildOperationKey, isExtensionSet } from '@/lib/openapi/operation-keys'
 import { buildSchemaExample } from '@/lib/openapi/schema-example'
 import { isObj, operationVisibility, viewPathEntry } from '@/lib/openapi/path-items'
@@ -34,6 +34,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
     securitySchemes && typeof securitySchemes.securitySchemes === 'object'
       ? (securitySchemes.securitySchemes as Record<string, RawObject>)
       : {}
+  const implicitAuth = implicitAuthFor(rawSecuritySchemes)
   const operations: Array<NormalizedOperation> = []
 
   const paths = (resolved.document as RawObject).paths
@@ -70,6 +71,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             config: resolved.config,
             documentSecurity: (resolved.document as RawObject).security,
             securitySchemes: rawSecuritySchemes,
+            implicitAuth,
             hidden: visibility === 'hidden',
             isWebhook: false,
             resolveRef,
@@ -147,6 +149,8 @@ interface NormalizeOperationOptions {
   specServers: Array<NormalizedServer>
   documentSecurity?: unknown
   securitySchemes: Record<string, RawObject>
+  /** Credentials for an operation whose spec declares no `security` at all; never given to webhooks. */
+  implicitAuth?: ImplicitAuth | null
   config: ApiSpecConfig
   hidden: boolean
   isWebhook: boolean
@@ -173,8 +177,10 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
   const { groupedParameters, parameterPrefill } = normalizeParameters([...pathLevelParameters, ...operationParameters], options.resolveRef)
   const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef, options.deepResolve)
   const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef, options.deepResolve)
-  const security = normalizeSecurity(options.rawOperation.security ?? options.documentSecurity)
-  const authSchemes = buildAuthSchemes(security, options.securitySchemes, options.resolveRef)
+  const declaredSecurity = options.rawOperation.security ?? options.documentSecurity
+  const implicit = declaredSecurity === undefined || declaredSecurity === null ? options.implicitAuth : undefined
+  const security = normalizeSecurity(implicit ? implicit.security : declaredSecurity)
+  const authSchemes = buildAuthSchemes(security, implicit?.schemes ?? options.securitySchemes, options.resolveRef)
 
   const operationServers = normalizeServers(options.rawOperation.servers)
   const servers =
@@ -567,6 +573,27 @@ function normalizeExamples(raw: unknown): Array<{ key: string; summary?: string;
       value: 'value' in example ? example.value : example,
     }))
     .filter((example) => example.value !== undefined)
+}
+
+interface ImplicitAuth {
+  security: Array<RawObject>
+  schemes: Record<string, RawObject>
+}
+
+/**
+ * The credential for operations whose spec has no `security` at root or on the operation, as Mintlify shows it:
+ * the site's docs.json `api.mdx.auth`, else the spec's only security scheme. A spec that declares `security`
+ * (even `[]`, a public operation) never reaches this.
+ */
+function implicitAuthFor(schemes: Record<string, RawObject>): ImplicitAuth | null {
+  const auth = getApiMdxConfig().auth
+  const name = auth?.method === 'key' ? auth.name : 'Authorization'
+  if (auth && name) {
+    const scheme = auth.method === 'key' ? { type: 'apiKey', in: 'header', name } : { type: 'http', scheme: auth.method }
+    return { security: [{ [name]: [] }], schemes: { [name]: scheme, ...schemes } }
+  }
+  const names = Object.keys(schemes)
+  return !auth && names.length === 1 ? { security: [{ [names[0]]: [] }], schemes } : null
 }
 
 function normalizeSecurity(raw: unknown): Array<Array<NormalizedSecurityRequirement>> {
