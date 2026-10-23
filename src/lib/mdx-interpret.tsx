@@ -70,6 +70,7 @@ interface JsxEstree {
   property?: JsxEstree
   value?: unknown
   expression?: unknown
+  argument?: unknown
   openingElement?: { name: JsxEstree; attributes: Array<JsxEstree> }
   children?: Array<JsxEstree>
 }
@@ -118,7 +119,7 @@ function evaluateJsxElement(estree: unknown, scope: Record<string, unknown>): un
       if (text) children.push(text)
     } else if (child.type === 'JSXExpressionContainer') {
       const value = evaluateStaticExpression(child.expression, scope)
-      if (value !== undefined && (value === null || typeof value !== 'object' || '$$typeof' in value)) children.push(value)
+      if (value !== undefined && isRenderableNode(value)) children.push(value)
     } else if (child.type === 'JSXElement' || child.type === 'JSXFragment') {
       children.push(evaluateJsxElement(child, scope))
     }
@@ -126,6 +127,11 @@ function evaluateJsxElement(estree: unknown, scope: Record<string, unknown>): un
   const type = node.type === 'JSXFragment' ? Fragment : resolveJsxName(node.openingElement?.name, scope)
   const props: Record<string, unknown> = {}
   for (const attribute of node.openingElement?.attributes ?? []) {
+    if (attribute.type === 'JSXSpreadAttribute') {
+      const spread = evaluateStaticExpression(attribute.argument, scope)
+      if (typeof spread === 'object' && spread !== null && !Array.isArray(spread) && !isValidElement(spread)) Object.assign(props, spread)
+      continue
+    }
     if (attribute.type !== 'JSXAttribute' || typeof attribute.name !== 'object' || attribute.name.type !== 'JSXIdentifier') continue
     const value = attribute.value as JsxEstree | null | undefined
     props[attribute.name.name as string] =
@@ -135,7 +141,7 @@ function evaluateJsxElement(estree: unknown, scope: Record<string, unknown>): un
   }
   if (children.length === 1) props.children = children[0]
   else if (children.length > 1) props.children = children
-  return lenientJsx(
+  return (children.length > 1 ? lenientJsxs : lenientJsx)(
     (type ?? Fragment) as Parameters<typeof jsx>[0],
     props as Parameters<typeof jsx>[1],
   )
@@ -414,6 +420,7 @@ function remarkUnravelJsxParagraphs() {
 }
 
 const lenientJsx = createLenientJsx(jsx)
+const lenientJsxs = createLenientJsx(jsxs)
 
 const processor = unified()
   .use(remarkParse)

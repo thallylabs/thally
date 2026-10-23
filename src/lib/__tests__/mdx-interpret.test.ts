@@ -414,6 +414,37 @@ describe('props that would crash React', () => {
   })
 })
 
+describe('JSX elements inside attribute values keep spreads and arrays', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', { 'data-icon': true }, icon as ReactNode)
+
+  it('applies a spread attribute on a nested element', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<svg><path {...{ d: 'M0 0L10 10', stroke: 'red', style: { fill: 'none' } }} /></svg>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe(
+      '<span data-icon="true"><svg><path d="M0 0L10 10" stroke="red" style="fill:none"></path></svg></span>',
+    )
+  })
+
+  it('renders an array of strings and elements as the children of a nested element', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<span>{['A', 'B', <i key=\"c\">C</i>]}</span>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe('<span data-icon="true"><span>AB<i>C</i></span></span>')
+  })
+
+  it('drops an array that holds a plain object', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<span>x{['A', { a: 1 }]}</span>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe('<span data-icon="true"><span>x</span></span>')
+  })
+})
+
 describe('markup that remote content must not be able to create', () => {
   const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
     createElement('span', null, icon as ReactNode)
