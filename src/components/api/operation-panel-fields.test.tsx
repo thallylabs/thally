@@ -75,3 +75,37 @@ describe('body field rows', () => {
     expect(html.match(/Allowed: admin, member/g)).toHaveLength(1)
   })
 })
+
+describe('map fields (additionalProperties)', () => {
+  const response = (schema: Record<string, unknown>) =>
+    render({ responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { locations: schema } } } } } } })
+
+  it('list the value schema as a {key} row under the map', () => {
+    const html = response({ type: 'object', description: 'Location codes to names.', additionalProperties: { type: 'string' } })
+    expect(html).toContain('locations properties')
+    expect(html).toMatch(/<code[^>]*>\{key\}<\/code>.*?string/)
+  })
+
+  it('keep the fixed properties and add the {key} row after them', () => {
+    const html = response({ type: 'object', properties: { total: { type: 'integer' } }, additionalProperties: { type: 'string' } })
+    expect(html.indexOf('>total<')).toBeGreaterThan(-1)
+    expect(html.indexOf('>total<')).toBeLessThan(html.indexOf('>{key}<'))
+  })
+
+  it('open a map of objects through the same nested rows', () => {
+    const html = response({ type: 'object', additionalProperties: { type: 'object', properties: { name: { type: 'string' } } } })
+    expect(html).toContain('>{key}<')
+    expect(html).toContain('>name<')
+  })
+
+  it('show a map that is a oneOf variant', () => {
+    const html = response({ oneOf: [{ type: 'object', title: 'Named', additionalProperties: { type: 'string' } }, { type: 'string' }] })
+    expect(html).toContain('>{key}<')
+  })
+
+  it('add no row for an open map without a value schema', () => {
+    const html = response({ type: 'object', additionalProperties: true })
+    expect(html).not.toContain('>{key}<')
+    expect(html).not.toContain('locations properties')
+  })
+})

@@ -437,7 +437,7 @@ function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; d
       ) : null}
       {description ? <Markdown className={cn(markdownProse, 'mb-2 text-sm text-foreground/70')}>{description}</Markdown> : null}
       {hasFields ? (
-        <SchemaAsResponseFields schema={current.schema} depth={depth} />
+        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} />
       ) : (
         <p className="text-xs text-foreground/60">
           {t('type')}: <code>{resolveSchemaType(current.schema) ?? 'any'}</code>
@@ -497,9 +497,15 @@ function enumOptions(schema?: Record<string, unknown>): Array<string> | null {
   return null
 }
 
+/** The value schema of a map (`additionalProperties`), when it says anything. */
+function mapValueSchema(flat: Record<string, unknown>): Record<string, unknown> | null {
+  const value = flat.additionalProperties
+  return value && typeof value === 'object' && Object.keys(value).length > 0 ? (value as Record<string, unknown>) : null
+}
+
 function getNestedProperties(schema: Record<string, unknown>): boolean {
   const flat = flattenSchema(schema)
-  if (flat.properties) return true
+  if (flat.properties || mapValueSchema(flat)) return true
   const variants = unionVariants(flat)
   if (variants) return variants.some((variant) => getNestedProperties(variant.schema))
   return flat.type === 'array' && Boolean(flat.items) && typeof flat.items === 'object' && getNestedProperties(flat.items as Record<string, unknown>)
@@ -510,5 +516,7 @@ function getNestedSchema(schema: Record<string, unknown>): Record<string, unknow
   if (flat.type === 'array' && flat.items && typeof flat.items === 'object') {
     return getNestedSchema(flat.items as Record<string, unknown>)
   }
-  return flat
+  // A map lists its value schema as one `{key}` row, after any fixed properties.
+  const value = mapValueSchema(flat)
+  return value ? { ...flat, properties: { ...(flat.properties as Record<string, unknown> | undefined), '{key}': value } } : flat
 }
