@@ -63,6 +63,84 @@ interface InterpretMdxResult {
   frontmatter: Record<string, unknown>
 }
 
+interface JsxEstree {
+  type: string
+  name?: string | JsxEstree
+  object?: JsxEstree
+  property?: JsxEstree
+  value?: unknown
+  expression?: unknown
+  openingElement?: { name: JsxEstree; attributes: Array<JsxEstree> }
+  children?: Array<JsxEstree>
+}
+
+/** The text rules of JSX: lines are trimmed and blank lines vanish. */
+function cleanJsxText(value: string): string {
+  const lines = value.split(/\r\n|\n|\r/)
+  const lastFilled = lines.findLastIndex((line) => /[^ \t]/.test(line))
+  let text = ''
+  lines.forEach((line, index) => {
+    let trimmed = line.replace(/\t/g, ' ')
+    if (index > 0) trimmed = trimmed.replace(/^ +/, '')
+    if (index < lines.length - 1) trimmed = trimmed.replace(/ +$/, '')
+    if (trimmed) text += index === lastFilled ? trimmed : `${trimmed} `
+  })
+  return text
+}
+
+/** A lowercase name is an intrinsic tag; anything else resolves in the components map. */
+function resolveJsxName(name: JsxEstree | undefined, scope: Record<string, unknown>): unknown {
+  if (!name) return undefined
+  if (name.type === 'JSXMemberExpression') {
+    const object = resolveJsxName(name.object, scope)
+    const key = (name.property as JsxEstree | undefined)?.name
+    // Own properties only, as in `evaluateStaticExpression`.
+    return typeof key === 'string' && (typeof object === 'function' || (typeof object === 'object' && object !== null)) && Object.hasOwn(object, key)
+      ? (object as Record<string, unknown>)[key]
+      : undefined
+  }
+  if (name.type !== 'JSXIdentifier' || typeof name.name !== 'string') return undefined
+  if (/^[a-z]/.test(name.name)) return name.name
+  return Object.hasOwn(scope, name.name) ? scope[name.name] : undefined
+}
+
+/**
+ * Build the React element of a JSX expression such as `icon={<svg>…</svg>}`.
+ * Component props like these are plain JSX in the compiled page, so the
+ * interpreter builds them the same way, from the same literal-only attributes.
+ */
+function evaluateJsxElement(estree: unknown, scope: Record<string, unknown>): unknown {
+  const node = estree as JsxEstree
+  const children: Array<unknown> = []
+  for (const child of node.children ?? []) {
+    if (child.type === 'JSXText') {
+      const text = cleanJsxText(String(child.value ?? ''))
+      if (text) children.push(text)
+    } else if (child.type === 'JSXExpressionContainer') {
+      const value = evaluateStaticExpression(child.expression, scope)
+      if (value !== undefined && (value === null || typeof value !== 'object' || '$$typeof' in value)) children.push(value)
+    } else if (child.type === 'JSXElement' || child.type === 'JSXFragment') {
+      children.push(evaluateJsxElement(child, scope))
+    }
+  }
+  const type = node.type === 'JSXFragment' ? Fragment : resolveJsxName(node.openingElement?.name, scope)
+  const props: Record<string, unknown> = {}
+  for (const attribute of node.openingElement?.attributes ?? []) {
+    if (attribute.type !== 'JSXAttribute' || typeof attribute.name !== 'object' || attribute.name.type !== 'JSXIdentifier') continue
+    const value = attribute.value as JsxEstree | null | undefined
+    props[attribute.name.name as string] =
+      value == null ? true
+        : value.type === 'JSXExpressionContainer' ? evaluateStaticExpression(value.expression, scope)
+          : evaluateStaticExpression(value, scope)
+  }
+  if (children.length === 1) props.children = children[0]
+  else if (children.length > 1) props.children = children
+  return lenientJsx(
+    (type ?? Fragment) as Parameters<typeof jsx>[0],
+    props as Parameters<typeof jsx>[1],
+  )
+}
+
 /**
  * Statically evaluate an estree expression produced by remark-mdx.
  * Only literal shapes are supported — there is deliberately no code
@@ -128,6 +206,9 @@ function evaluateStaticExpression(node: unknown, scope: Record<string, unknown>)
     case 'TemplateLiteral':
       if ((expression.expressions?.length ?? 0) > 0) return undefined
       return (expression.quasis ?? []).map((quasi) => quasi.value?.cooked ?? '').join('')
+    case 'JSXElement':
+    case 'JSXFragment':
+      return evaluateJsxElement(expression, scope)
     case 'ArrayExpression':
       return (expression.elements ?? []).map((element) => evaluateStaticExpression(element, scope))
     case 'ObjectExpression': {
@@ -293,6 +374,8 @@ function remarkUnravelJsxParagraphs() {
   }
   return unravel
 }
+
+const lenientJsx = createLenientJsx(jsx)
 
 const processor = unified()
   .use(remarkParse)

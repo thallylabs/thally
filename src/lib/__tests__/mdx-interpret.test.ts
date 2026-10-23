@@ -283,6 +283,49 @@ describe('object-valued JSX attributes', () => {
   })
 })
 
+describe('JSX elements as attribute values', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ title, icon }) =>
+    createElement('div', { 'data-card': true }, createElement('span', { 'data-icon': true }, icon as ReactNode), title as string)
+
+  it('renders an inline svg passed as a prop, as the compiled page does', async () => {
+    const source = [
+      '<Card',
+      '  title="Android"',
+      '  icon={',
+      '    <svg enable-background="new 0 0 24 24" viewBox="0 0 24 24" fill="#1ebca1">',
+      '      <path d="m0 0v12" />',
+      '      <path d="m1 1" strokeWidth={2} style={{ color: \'red\' }}>',
+      '        label',
+      '      </path>',
+      '    </svg>',
+      '  }',
+      '/>',
+    ].join('\n')
+    const { content } = await interpretMDX({ source, components: { Card } })
+    expect(render(content)).toBe(
+      '<div data-card="true"><span data-icon="true"><svg enable-background="new 0 0 24 24" viewBox="0 0 24 24" fill="#1ebca1"><path d="m0 0v12"></path><path d="m1 1" stroke-width="2" style="color:red">label</path></svg></span>Android</div>',
+    )
+  })
+
+  it('resolves a capitalized element in the value through the components map', async () => {
+    const Badge: ComponentType<Record<string, unknown>> = ({ children }) =>
+      createElement('b', null, children as ReactNode)
+    const { content } = await interpretMDX({
+      source: '<Card title="T" icon={<Badge>new</Badge>} />',
+      components: { Card, Badge },
+    })
+    expect(render(content)).toContain('<span data-icon="true"><b>new</b></span>')
+  })
+
+  it('renders an unknown component in the value as its children', async () => {
+    const { content } = await interpretMDX({
+      source: '<Card title="T" icon={<Nope>inner</Nope>} />',
+      components: { Card },
+    })
+    expect(render(content)).toContain('<span data-icon="true">inner</span>')
+  })
+})
+
 describe('paragraphs that hold only JSX', () => {
   it('does not wrap a lone inline element in a paragraph', async () => {
     const Badge: ComponentType<Record<string, unknown>> = ({ children }) =>
