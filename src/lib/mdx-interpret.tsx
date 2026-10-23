@@ -307,8 +307,11 @@ function isRenderableNode(value: unknown): boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || isValidElement(value)
 }
 
-/** Props the builtin components read as data (a list or an object) rather than as text. */
-const DATA_PROPS = new Set(['tags', 'pre', 'post', 'defaultValue', 'actions', 'value'])
+/** Props the builtin components call string methods on; an object or array there fails the page. */
+const STRING_PROPS = new Set([
+  'code', 'color', 'colorDark', 'content', 'date', 'filename', 'href', 'img', 'language',
+  'name', 'placeholder', 'repo', 'src', 'tag', 'titleSize', 'type',
+])
 /** Props components draw directly as a node, which React can only do for a renderable value. */
 const NODE_PROPS = new Set([
   'children', 'icon', 'cta', 'tip', 'headline', 'title', 'description', 'default',
@@ -369,10 +372,11 @@ function isPlainData(value: unknown, depth = 0): boolean {
  * which React refuses to render.
  *
  * Objects and arrays are the other way a page fails: React throws on one drawn
- * as a node, and a component calls string methods on a prop it expects to be
- * text. So a component keeps one only under a prop it reads as data and only
- * if it is plain data; the node props (`children`, `icon`, ...) keep only
- * renderable values; a DOM element keeps none apart from `style`.
+ * as a node, and a builtin component calls string methods on a prop it expects
+ * to be text. So the node props (`children`, `icon`, ...) keep only renderable
+ * values, the string props keep neither, any other component prop keeps plain
+ * data (a carousel's `images`, a config object), and a DOM element keeps none
+ * apart from `style`.
  */
 function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
   const isElement = typeof type === 'string'
@@ -395,7 +399,7 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
     }
     if (typeof value === 'object' && value !== null) {
       const isNode = typeof (value as { $$typeof?: unknown }).$$typeof === 'symbol' || (NODE_PROPS.has(key) && isRenderableNode(value))
-      if (isNode || (!isElement && DATA_PROPS.has(key) && isPlainData(value))) clean[key] = value
+      if (isNode || (!isElement && !NODE_PROPS.has(key) && !STRING_PROPS.has(key) && isPlainData(value))) clean[key] = value
       continue
     }
     if (typeof value === 'string' && key !== 'children') {

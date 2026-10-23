@@ -255,9 +255,7 @@ describe('object-valued JSX attributes', () => {
     expect(html).toContain('<g id="s1" style="transition:opacity 0.3s"></g>')
   })
 
-  it('keeps a style object on a component prop and drops other object and array props', async () => {
-    // A component may render any prop as a node, and React throws on a plain
-    // object there, so only `style` keeps an object value.
+  it('keeps a style object and plain data on a component prop', async () => {
     const Probe: ComponentType<Record<string, unknown>> = (props) =>
       createElement('div', {
         style: props.style as never,
@@ -268,7 +266,9 @@ describe('object-valued JSX attributes', () => {
       source: "<Probe style={{ color: 'red' }} config={{ cols: 2 }} items={[1, 'two']} />",
       components: { Probe },
     })
-    expect(render(content)).toBe('<div style="color:red" data-config="null" data-items="null"></div>')
+    expect(render(content)).toBe(
+      '<div style="color:red" data-config="{&quot;cols&quot;:2}" data-items="[1,&quot;two&quot;]"></div>',
+    )
   })
 
   it('spreads an object literal into the element props', async () => {
@@ -669,10 +669,32 @@ describe('data props of components', () => {
     expect(await html(`<Probe ${attribute} />`, { Probe })).toBe('<div data-props="{}"></div>')
   })
 
-  it('keeps data only on components and only under the data props', async () => {
-    expect(await html("<Probe config={{ a: 1 }} items={['a']} /><div tags={['a']} value={{ a: 1 }} data-x={{ a: 1 }}>x</div>", { Probe })).toBe(
-      '<div data-props="{}"></div>\n<div>x</div>',
+  it('keeps data only on components, and not under a prop the builtins read as text', async () => {
+    expect(
+      await html(
+        "<Probe config={{ a: 1 }} items={['a']} href={{ a: 1 }} src={['a']} name={{ a: 1 }} /><div tags={['a']} value={{ a: 1 }} data-x={{ a: 1 }}>x</div>",
+        { Probe },
+      ),
+    ).toBe(
+      '<div data-props="{&quot;config&quot;:{&quot;a&quot;:1},&quot;items&quot;:[&quot;a&quot;]}"></div>\n<div>x</div>',
     )
+  })
+
+  it('keeps the image list of a custom carousel component', async () => {
+    const Carousel: ComponentType<Record<string, unknown>> = ({ images }) =>
+      createElement(
+        'div',
+        null,
+        ((images ?? []) as Array<{ src: string; alt: string }>).map((image) =>
+          createElement('img', { key: image.src, src: image.src, alt: image.alt }),
+        ),
+      )
+    expect(
+      await html(
+        "<Carousel images={[{ src: '/a.png', alt: 'A' }, { src: 'https://assets.test/b.png', alt: 'B' }]} />",
+        { Carousel },
+      ),
+    ).toContain('<img src="/a.png" alt="A"/><img src="https://assets.test/b.png" alt="B"/>')
   })
 
   it('accepts only renderable values where a component draws the prop as a node', async () => {
