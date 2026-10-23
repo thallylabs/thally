@@ -174,7 +174,7 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
 
   const pathLevelParameters = options.sharedParameters
   const operationParameters = extractParameters(options.rawOperation.parameters)
-  const { groupedParameters, parameterPrefill } = normalizeParameters([...pathLevelParameters, ...operationParameters], options.resolveRef)
+  const { groupedParameters, parameterPrefill } = normalizeParameters([...pathLevelParameters, ...operationParameters], options.resolveRef, options.deepResolve)
   const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef, options.deepResolve)
   const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef, options.deepResolve)
   const declaredSecurity = options.rawOperation.security ?? options.documentSecurity
@@ -247,6 +247,7 @@ function extractParameters(raw: unknown): Array<RawObject> {
 function normalizeParameters(
   params: Array<RawObject>,
   resolveRef: (ref: string) => RawObject | null,
+  deepResolve: (schema: RawObject) => RawObject,
 ): {
   groupedParameters: Record<'path' | 'query' | 'header' | 'cookie', Array<NormalizedParameter>>
   parameterPrefill: Record<'path' | 'query' | 'header' | 'cookie', Record<string, string>>
@@ -278,7 +279,8 @@ function normalizeParameters(
   deduped.forEach((param) => {
     const location = param.in
     if (location === 'path' || location === 'query' || location === 'header' || location === 'cookie') {
-      const schema = typeof param.schema === 'object' ? (param.schema as Record<string, unknown>) : undefined
+      // Resolved like a body schema, so a `$ref` schema shows its own type, description and values.
+      const schema = isObj(param.schema) ? deepResolve(param.schema) : undefined
       const normalizedParameter: NormalizedParameter = {
         name: param.name as string,
         in: location,

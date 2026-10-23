@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { operationFrom } from '@/components/api/test-fixtures'
 
-const render = (operation: Record<string, unknown>) =>
+const render = (operation: Record<string, unknown>, document: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     <OperationPanel
       operation={operationFrom({
@@ -11,6 +11,7 @@ const render = (operation: Record<string, unknown>) =>
         info: { title: 'T', version: '1' },
         servers: [{ url: 'https://api.example.com' }],
         paths: { '/things/{email}': { post: { summary: 'Thing', responses: {}, ...operation } } },
+        ...document,
       })}
     />,
   )
@@ -29,6 +30,21 @@ describe('parameter rows', () => {
     })
     expect(html).toContain('Parameter text.')
     expect(html).not.toContain('Schema text.')
+  })
+
+  it('read the description and values of a parameter schema that is a $ref', () => {
+    const components = { components: { schemas: { Role: { type: 'string', description: 'The role.', enum: ['admin', 'member'] } } } }
+    const html = render({ parameters: [{ name: 'role', in: 'query', schema: { $ref: '#/components/schemas/Role' } }] }, components)
+    expect(html).toContain('The role.')
+    expect(html).toContain('Allowed: admin, member')
+    expect(html).toContain('enum&lt;string&gt;')
+  })
+
+  it('let a description next to the $ref win over the referenced one', () => {
+    const components = { components: { schemas: { Role: { type: 'string', description: 'The role.', enum: ['admin'] } } } }
+    const html = render({ parameters: [{ name: 'role', in: 'query', schema: { $ref: '#/components/schemas/Role', description: 'Own text.' } }] }, components)
+    expect(html).toContain('Own text.')
+    expect(html).not.toContain('The role.')
   })
 
   it('add no empty description block to a parameter that has neither description nor values', () => {
