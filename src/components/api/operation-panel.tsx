@@ -145,7 +145,12 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
                       header={group.location === 'header'}
                       default={resolveDefault(param.schema)}
                     >
-                      {param.description ? <Markdown>{param.description}</Markdown> : null}
+                      {param.description || enumOptions(param.schema) ? (
+                        <>
+                          {param.description ? <Markdown>{param.description}</Markdown> : null}
+                          <AllowedValues schema={param.schema} />
+                        </>
+                      ) : null}
                     </ParamField>
                   ))}
                 </div>
@@ -237,7 +242,6 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
         const defaultVal = resolveDefault(flatProp)
         const isRequired = required.includes(name)
         const nested = getNestedProperties(flatProp)
-        const enumValues = Array.isArray(flatProp.enum) ? (flatProp.enum as unknown[]).map(String) : null
 
         return (
           <ParamField
@@ -250,11 +254,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             body
           >
             {description ? <Markdown>{description}</Markdown> : null}
-            {enumValues ? (
-              <p className="mt-1 text-xs text-foreground/50">
-                {t('allowed')}: {enumValues.join(', ')}
-              </p>
-            ) : null}
+            <AllowedValues schema={flatProp} />
             {flatProp.const !== undefined ? (
               <p className="mt-1 text-xs text-foreground/50">
                 {t('allowedValue')}: <code>{JSON.stringify(flatProp.const)}</code>
@@ -270,6 +270,17 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
       })}
     </>
   )
+}
+
+/** The `Allowed:` line under a field that lists its values. */
+function AllowedValues({ schema }: { schema?: Record<string, unknown> }) {
+  const t = useApiLabels()
+  const values = enumOptions(schema)
+  return values ? (
+    <p className="mt-1 text-xs text-foreground/50">
+      {t('allowed')}: {values.join(', ')}
+    </p>
+  ) : null
 }
 
 // ---------------------------------------------------------------------------
@@ -352,16 +363,11 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
         const description = typeof flatProp.description === 'string' ? flatProp.description : undefined
         const isRequired = required.includes(name)
         const nested = depth < MAX_NESTING && getNestedProperties(flatProp)
-        const enumValues = Array.isArray(flatProp.enum) ? (flatProp.enum as unknown[]).map(String) : null
 
         return (
           <ResponseField key={name} name={name} type={type} required={isRequired} deprecated={flatProp.deprecated === true}>
             {description ? <Markdown>{description}</Markdown> : null}
-            {enumValues ? (
-              <p className="mt-1 text-xs text-foreground/50">
-                {t('allowed')}: {enumValues.join(', ')}
-              </p>
-            ) : null}
+            <AllowedValues schema={flatProp} />
             {flatProp.const !== undefined ? (
               <p className="mt-1 text-xs text-foreground/50">
                 {t('allowedValue')}: <code>{JSON.stringify(flatProp.const)}</code>
@@ -476,6 +482,19 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
 function resolveDefault(schema?: Record<string, unknown>): string | undefined {
   if (!schema || schema.default === undefined) return undefined
   return typeof schema.default === 'object' ? JSON.stringify(schema.default) : String(schema.default)
+}
+
+/** A field's allowed values: its own enum, its array items' enum, or that of the first oneOf/anyOf member that lists any. */
+function enumOptions(schema?: Record<string, unknown>): Array<string> | null {
+  if (!schema) return null
+  const flat = flattenSchema(schema)
+  if (Array.isArray(flat.enum)) return flat.enum.map(String)
+  if (flat.type === 'array' && flat.items && typeof flat.items === 'object') return enumOptions(flat.items as Record<string, unknown>)
+  for (const variant of unionVariants(flat) ?? []) {
+    const values = enumOptions(variant.schema)
+    if (values) return values
+  }
+  return null
 }
 
 function getNestedProperties(schema: Record<string, unknown>): boolean {

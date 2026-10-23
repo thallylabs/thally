@@ -30,4 +30,48 @@ describe('parameter rows', () => {
     expect(html).toContain('Parameter text.')
     expect(html).not.toContain('Schema text.')
   })
+
+  it('add no empty description block to a parameter that has neither description nor values', () => {
+    const html = render({ parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer' } }] })
+    expect(html).toContain('limit')
+    expect(html).not.toContain('mt-2.5')
+  })
+
+  it('list the allowed values of a query parameter', () => {
+    const html = render({
+      parameters: [{ name: 'type', in: 'query', schema: { type: 'string', enum: ['all', 'upcoming', 'issued'] } }],
+    })
+    expect(html).toContain('Allowed: all, upcoming, issued')
+  })
+})
+
+describe('body field rows', () => {
+  const body = (properties: Record<string, unknown>) => ({
+    requestBody: { content: { 'application/json': { schema: { type: 'object', properties } } } },
+  })
+
+  it('list the allowed values of an array of enum items', () => {
+    const html = render(body({ scopes: { type: 'array', items: { type: 'string', enum: ['read', 'db:create'] } } }))
+    expect(html).toContain('Allowed: read, db:create')
+  })
+
+  it('list the allowed values of the first union member that has any', () => {
+    const html = render(
+      body({
+        extensions: {
+          oneOf: [
+            { type: 'string', enum: ['all'] },
+            { type: 'array', items: { type: 'string', enum: ['vector', 'uuid'] } },
+          ],
+        },
+      }),
+    )
+    expect(html).toContain('Allowed: all<')
+    expect(html).not.toContain('vector')
+  })
+
+  it('still list the values of a plain enum once', () => {
+    const html = render(body({ role: { type: 'string', enum: ['admin', 'member'] } }))
+    expect(html.match(/Allowed: admin, member/g)).toHaveLength(1)
+  })
 })
