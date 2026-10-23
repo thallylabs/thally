@@ -19,6 +19,7 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -57,7 +58,7 @@ import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, specRefMatches, withheldOperationKeys, withoutByteOrderMark } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
-import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
+import { mainSiteLinkTarget, mountedLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { canonicalSpecRef } from './openapi-ref.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars, cssColorToHex } from './css-colors.js'
 import {
@@ -186,9 +187,9 @@ const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"
 /**
  * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
  * above, this never needs a matching `import` statement — `file` is a path
- * relative to the project's `snippets/` directory (Mintlify's own
- * convention; see `resolveSnippetPath`'s sibling below for the actual
- * lookup). Both self-closing and paired spellings are matched; a paired
+ * relative to the project's `snippets/` directory, else its legacy
+ * `_snippets/` directory (Mintlify's own convention; see the lookup in
+ * `inlineMdxSnippets`). Both self-closing and paired spellings are matched; a paired
  * tag's own children (if any) are always discarded in favor of the
  * resolved snippet's real content, matching Mintlify's own renderer.
  */
@@ -894,6 +895,76 @@ function gitmoduleUrls(targetDir: string): Array<string> {
   return [...content.matchAll(/^\s*url\s*=\s*(.+?)\s*$/gm)].map((match) => match[1]).filter(Boolean)
 }
 
+/** Every symlink of a checkout (never into `.git`, never through a symlinked directory) with the path it points to, resolved from its own directory. File contents are not read. */
+function checkoutSymlinks(root: string): Map<string, string> {
+  const links = new Map<string, string>()
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolvePath(directory, entry.name)
+      if (entry.isSymbolicLink()) links.set(path, resolvePath(directory, readlinkSync(path)))
+      else if (entry.isDirectory() && entry.name !== '.git') walk(path)
+    }
+  }
+  walk(root)
+  return links
+}
+
+/** Whether a path inside `directory`, or one that holds it, is where following `links` from `start` ends up (a loop of links counts: fail closed). */
+function linkReaches(links: ReadonlyMap<string, string>, start: string, directory: string): boolean {
+  const within = (parent: string, child: string): boolean => child === parent || child.startsWith(`${parent}${sep}`)
+  let current = start
+  for (let hops = 0; hops <= links.size; hops++) {
+    if (within(directory, current) || within(current, directory)) return true
+    // A link at the path itself or at any directory above it sends the rest of the path elsewhere.
+    let ancestor = current
+    while (!links.has(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor)
+    const next = links.get(ancestor)
+    if (next === undefined) return false
+    current = resolvePath(next, relative(ancestor, current))
+  }
+  return true
+}
+
+/**
+ * The submodules whose whole directory the Mintlify project's `.mintignore`
+ * excludes. Mintlify never publishes them, so fetching one (turso-docs's
+ * `turso` submodule is the entire database repository) only costs time. Only
+ * a directory the file ignores outright counts: gitignore cannot re-include
+ * anything beneath one, whereas `turso/*` leaves the directory itself in play.
+ * Without a Mintlify project or a `.mintignore`, none is excluded. `initSubmodules`
+ * still fetches one that a symlink of the checkout points into: the migration
+ * follows a symlink that stays inside the repository, so its pages are
+ * reachable through the link.
+ */
+function mintignoredSubmodules(targetDir: string, paths: Array<string>, docsDir?: string): Set<string> {
+  try {
+    const projectRoot = findMintlifyProjectRoot(targetDir, docsDir)
+    const mintignore = projectRoot ? readMintignoreMatcher(projectRoot) : null
+    if (!projectRoot || !mintignore) return new Set()
+    const projectPrefix = relative(targetDir, projectRoot).replace(/\\/g, '/')
+    return new Set(paths.filter((path) => {
+      const inProject = posix.relative(projectPrefix, posix.normalize(path))
+      return inProject !== '' && inProject !== '..' && !inProject.startsWith('../') && !isAbsolute(inProject) && mintignore.ignores(`${inProject}/`)
+    }))
+  } catch {
+    return new Set() // an unusable docs directory is reported by the conversion, not by this best-effort pass
+  }
+}
+
+/** The paths of `candidates` that a symlink of the checkout points into. An unreadable checkout counts as reaching them all: fail closed. */
+function linkedSubmodules(targetDir: string, candidates: Array<string>): Array<string> {
+  let links: Map<string, string>
+  try {
+    links = checkoutSymlinks(targetDir)
+  } catch {
+    return candidates
+  }
+  return candidates.filter((path) => {
+    const directory = resolvePath(targetDir, path)
+    return [...links.values()].some((target) => linkReaches(links, target, directory))
+  })
+}
+
 /**
  * `--recurse-submodules` on the main clone (above) fails the *entire* clone
  * if any one submodule can't be fetched, which is worse than not having
@@ -902,19 +973,21 @@ function gitmoduleUrls(targetDir: string): Array<string> {
  * submodule doesn't take down the whole migration — it's just missing,
  * and named in a warning instead of silently absent.
  */
-async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>): Promise<void> {
+async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>, docsDir?: string): Promise<void> {
   const paths = gitmodulePaths(targetDir)
   if (paths.length === 0) return
   const urls = gitmoduleUrls(targetDir)
+  const ignored = mintignoredSubmodules(targetDir, paths, docsDir)
   const failed: Array<string> = []
-  for (const [index, path] of paths.entries()) {
+  const fetchSubmodule = async (index: number): Promise<void> => {
+    const path = paths[index]
     // A path or url beginning with `-` would be read as a git option
     // rather than a pathspec/URL once it reaches argv (even after `--`,
     // git's own pathspec parser treats a leading `-` as a flag), and
     // `.gitmodules` is attacker-controlled content from the cloned repo.
     if (path.startsWith('-') || (urls[index]?.startsWith('-') ?? false)) {
       failed.push(path)
-      continue
+      return
     }
     try {
       await runGit([
@@ -929,6 +1002,19 @@ async function initSubmodules(targetDir: string, warnings: Array<MigrationWarnin
     } catch {
       failed.push(path)
     }
+  }
+  for (const [index, path] of paths.entries()) {
+    if (!ignored.has(path)) await fetchSubmodule(index)
+  }
+  // A symlink anywhere in the checkout, one a fetched submodule brought included, can expose an ignored submodule's pages,
+  // so each one it points into is fetched after all. Its own links can point into another, hence the repeat: every round
+  // fetches at least one of the ignored submodules left, so it ends within their number.
+  let pending = paths.filter((path) => ignored.has(path))
+  while (pending.length > 0) {
+    const reached = linkedSubmodules(targetDir, pending)
+    if (reached.length === 0) break
+    for (const path of reached) await fetchSubmodule(paths.indexOf(path))
+    pending = pending.filter((path) => !reached.includes(path))
   }
   if (failed.length > 0) {
     warnings.push({
@@ -955,12 +1041,12 @@ export async function cloneGitHubRepository(
   targetDir: string,
   warnings?: Array<MigrationWarning>,
   /** Untrusted referenced repositories: never follow their `.gitmodules` to further remotes. */
-  options: { skipSubmodules?: boolean } = {},
+  options: { skipSubmodules?: boolean; /** The docs directory the migration will read; default: the one in the source URL. */ docsDir?: string } = {},
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
-      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [])
+      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [], options.docsDir ?? (source.docsDir || undefined))
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
@@ -3992,13 +4078,16 @@ function inlineMdxSnippets(
     return segment.replace(platform === 'fern' ? FERN_MARKDOWN_TAG_PATTERN : SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
       const filePath = (doubleQuoted ?? singleQuoted)!
       try {
-        // Mintlify's documented form is relative to `snippets/`; sites also write
-        // the full `/snippets/x.mdx` (or a page-relative) path.
+        // Mintlify's documented form is relative to `snippets/`, and its legacy
+        // `_snippets/` folder is searched next (`snippets/` wins when both hold
+        // the file); sites also write the full `/snippets/x.mdx` (or a
+        // page-relative) path.
         const candidate = (platform === 'fern' ? [
           // Fern's absolute include paths are rooted at fern/, never snippets/.
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ] : [
           () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
+          () => withinRealRoot(resolveWithin(siteRoot, `_snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ]).map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }
@@ -5761,6 +5850,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
+    /** The spec the repository scan found and bound to a hidden tab already: the page-only binding below skips it. */
+    let hiddenScanSource: string | undefined
     if (resolvedSpecs.length > 0) {
       const namedByPages = new Set(pages.filter((page) => !restrictedPages.has(page)).map((page) => specNamedByPage(page.openapi, resolvedSpecs)))
       for (const spec of resolvedSpecs) {
@@ -5861,7 +5952,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }
-          docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          // Mintlify finds this spec by itself and adds no tab for it: a page that names one of its operations renders it, so the
+          // spec is bound to a hidden tab, as a spec only pages name is. The renderer reads a bare `openapi: "GET /x"` from the first spec
+          // that publishes it, visible tabs first and then hidden ones in order, so this binding is made here, ahead of the page-only
+          // ones, where the visible tab stood: no bare reference reaches another spec. A remote spec bound later keeps the visible tab,
+          // which sits before it as it always did.
+          const namedByPage = remoteApiSpecs.length === 0 && pages.some((page) => {
+            const ref = !restrictedPages.has(page) && page.openapi ? splitOpenApiRef(page.openapi) : null
+            return Boolean(ref) && (!ref!.specRef || specNamedByPage(page.openapi, [fallbackSpec, ...allSpecs]) === fallbackSpec)
+          })
+          if (!namedByPage) docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          else {
+            docsConfig = injectOpenApiSpecs(docsConfig, [{ filename, sourcePath: fallback.relativePath, tabLabel: `OpenAPI: ${fallback.relativePath}`, hidden: true }])
+            hiddenScanSource = fallback.relativePath
+          }
           pageSpecs = [{ filename, sourcePath: fallback.relativePath }]
           if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath, pruned.excluded)
         }
@@ -5875,7 +5979,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     if (pageOnlySpecs.length > 0) {
-      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
+      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs.filter((spec) => spec.sourcePath !== hiddenScanSource), warnings)
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
     const notKeptPublic = [...new Set(unownedOperations.filter((operation) => withheldKeys.has(operationKey(operation))))]
@@ -6089,7 +6193,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const linkIndex = rootLinkIndex()
     const resolveLink = (target: string): string | undefined => mainSiteLinkTarget(target, ref.mountPath, linkIndex, unresolvedLinks)
     for (const sourcePage of ref.pages) {
-      const page = { ...sourcePage, body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink) }
+      const page = {
+        ...sourcePage,
+        body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink),
+        // A link to a path of the sub-site is placed like a root-absolute link in its body.
+        ...(sourcePage.externalUrl?.startsWith('/') ? { externalUrl: mountedLinkTarget(sourcePage.externalUrl, ref.mountPath, resolveLink) } : {}),
+      }
       if (taken.has(page.id)) {
         warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} page "${page.id}" already exists in this site and was skipped.` })
         continue
@@ -6183,7 +6292,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       linkRedirects.push({ source, destination: page.externalUrl, permanent: false })
     }
   }
-  if (linkRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }
+  // A link to a path of this site can send visitors in a circle (back to its own page, to another link, or through a
+  // redirect). The earlier redirects win and the loop is reported; no page list is passed because a link hides its page on purpose.
+  if (linkRedirects.length > 0) docsConfig = dropConflictingRedirects({ ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }, [], warnings)
 
   if (pages.length === 0) {
     const reasons = warnings.map((warning) => warning.message)

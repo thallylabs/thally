@@ -125,8 +125,16 @@ describe('parseMdxContent step titles', () => {
     ['titleSize="p"', '<Steps titleSize="p">\n<Step title="One">x</Step>\n</Steps>'],
     ['a titleSize expression', '<Steps titleSize={size}>\n<Step title="One">x</Step>\n</Steps>'],
     ['a title expression', '<Steps titleSize="h3">\n<Step title={"One"}>x</Step>\n</Steps>'],
+    ['no title', '<Steps titleSize="h3">\n<Step>x</Step>\n</Steps>'],
+    ['a blank title', '<Steps titleSize="h3">\n<Step title="   " id="gone">x</Step>\n</Steps>'],
   ])('lists nothing for steps with %s', (_name, body) => {
     expect(parseMdxContent(body).headings).toEqual([])
+  })
+
+  it('keeps the content of a step with no title in the page text', () => {
+    const parsed = parseMdxContent('<Steps titleSize="h3">\n<Step>Only content.</Step>\n</Steps>')
+    expect(parsed.text).toContain('Only content.')
+    expect(parsed.toc).toEqual([])
   })
 
   it('keeps the step title in the page text', () => {

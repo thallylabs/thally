@@ -80,6 +80,35 @@ function firstParagraph(content: string): string {
   }
 }
 
+interface PositionedNode extends DescriptionNode {
+  position?: { start: { offset?: number }; end: { offset?: number } }
+}
+
+// Plain CommonMark: a description is not MDX, so `<` and `{` in it must not fail the parse, and a bare address is not a link.
+const linkParser = unified().use(remarkParse)
+
+/**
+ * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code, emphasis and
+ * everything else stay as written. A link is read the way Markdown reads it, so one inside a code span, an escaped bracket, an image
+ * and a bracket pair with no `(url)` are not links. Unchanged when it has none.
+ */
+function withoutMarkdownLinks(text: string): string {
+  const links: Array<{ start: number; end: number; textStart: number; textEnd: number }> = []
+  const collect = (node: PositionedNode): void => {
+    if (node.type === 'link') {
+      const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
+      const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) links.push({ start, end, textStart: first ?? start, textEnd: last ?? start })
+      return
+    }
+    for (const child of node.children ?? []) collect(child)
+  }
+  collect(linkParser.parse(text) as PositionedNode)
+  return links.reduceRight((result, link) => result.slice(0, link.start) + result.slice(link.textStart, link.textEnd) + result.slice(link.end), text)
+}
+
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
   if (kind === 'danger') return 'Error'
   if (kind === 'info') return 'Info'
@@ -1341,7 +1370,36 @@ function normalizeFernFileTrees(body: string): string {
  * analysis too, before that pass ever gets a chance to run.
  */
 export function normalizeHtmlComments(body: string): string {
-  return replaceOutsideCode(body, (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => mdxComment(comment)))
+  return replaceOutsideCode(unwrapHtmlCommentInMdxComment(body), (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => mdxComment(comment)))
+}
+
+/**
+ * An MDX comment whose whole content is one HTML comment (`{/* <!-- note --> *\/}`) becomes an MDX comment with that text (`{/* note *\/}`),
+ * outside code. Converting the HTML comment inside it would nest one MDX comment in another: the first `*\/}` closes the outer comment
+ * and the rest of it shows on the page, where Mintlify renders nothing. Nothing else changes: an HTML comment that shares an MDX comment
+ * with other text is still converted as before. The text between the markers holds neither `-->` nor `*\/`.
+ */
+function unwrapHtmlCommentInMdxComment(body: string): string {
+  return replaceOutsideCode(body, (text) => {
+    const opener = /\{\s*\/\*\s*<!--/g
+    const closer = /\s*\*\/\s*\}/y
+    let out = ''
+    let copied = 0
+    // The next `-->` and `*/` at or after the current opener (-1: none left). Each is searched for again only once an opener has passed it, so the scan stays linear.
+    let dash = -2
+    let star = -2
+    for (let found = opener.exec(text); found; found = opener.exec(text)) {
+      const inner = opener.lastIndex
+      if (dash !== -1 && dash < inner) dash = text.indexOf('-->', inner)
+      if (dash === -1) break
+      if (star !== -1 && star < inner) star = text.indexOf('*/', inner)
+      closer.lastIndex = dash + 3
+      if ((star !== -1 && star < dash) || !closer.test(text)) continue
+      out += `${text.slice(copied, found.index)}{/*${text.slice(inner, dash)}*/}`
+      copied = opener.lastIndex = closer.lastIndex
+    }
+    return out + text.slice(copied)
+  })
 }
 
 /**
@@ -2271,6 +2329,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     rewritten = rewritten.replace(/^\n{2,}/, '\n')
   }
   if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
+  rewritten = unwrapHtmlCommentInMdxComment(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)
       .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => mdxComment(content))
@@ -2358,9 +2417,33 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   return normalizeFlowParagraphContainers(normalized)
 }
 
-/** A Mintlify page whose frontmatter `url` is a web address is a link in the sidebar: visiting its path leaves for that address. */
+/**
+ * The root-relative `url` values that become a link: the whole value must match, nothing is rewritten.
+ * - pathname: `/` and then plain segments (`[A-Za-z0-9._~-]+`) separated by single slashes, with an optional trailing slash;
+ * - query (optional): `?` and plain `key=value` text, where `%` is only ever a valid `%XX` escape;
+ * - fragment (optional): `#` and an element id (`[A-Za-z0-9._~-]+`).
+ * Anything else (`//`, `:`, `+`, `*`, parentheses, braces, an encoded slash, `?q=https://x`) keeps the page as content:
+ * Next.js reads path-to-regexp syntax in a redirect destination's pathname and fragment, reads `:name` in its query,
+ * and collapses repeated slashes, so a value outside this grammar cannot be judged, or served, safely.
+ */
+const SITE_PATH_LINK = /^\/(?:[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*\/?)?(?:\?(?:[A-Za-z0-9._~=&-]|%[0-9A-Fa-f]{2})*)?(?:#[A-Za-z0-9._~-]+)?$/
+/** Next.js builds a redirect destination longer than 4096 characters into an error; the grammar's own values are far shorter. */
+const MAX_SITE_PATH_LINK_LENGTH = 2000
+
+/** The `url` as a link to a path of this site, or undefined when it is outside the grammar above. */
+function sitePathLink(url: string): string | undefined {
+  // `__ESC_` is Next.js's own escape marker: a destination holding it passes the build check and then fails when a request reaches it.
+  if (url.length > MAX_SITE_PATH_LINK_LENGTH || url.includes('__ESC_') || !SITE_PATH_LINK.test(url)) return undefined
+  return url.split(/[?#]/, 1)[0].split('/').some((segment) => segment === '.' || segment === '..') ? undefined : url
+}
+
+/**
+ * A Mintlify page whose frontmatter `url` is a web address, or a path of its own site (`/local-development#turso-cli`),
+ * is a link in the sidebar: visiting its path leaves for that address.
+ */
 function externalPageUrl(value: unknown): string | undefined {
   const url = typeof value === 'string' ? value.trim() : ''
+  if (url.startsWith('/')) return sitePathLink(url)
   if (!/^https?:\/\/[^\s]+$/i.test(url)) return undefined
   try {
     new URL(url)
@@ -2443,6 +2526,11 @@ export function parseMarkdownPage(input: {
     : ['default', 'wide', 'custom', 'center', 'home'].includes(sourceMode ?? '')
       ? sourceMode as MigrationPage['mode']
       : undefined
+  // A `url` that starts like a path of this site but is outside the grammar of `SITE_PATH_LINK` is reported; the page keeps its own content.
+  if (input.platform === 'mintlify' && typeof parsed.data.url === 'string' && parsed.data.url.trim().startsWith('/') && !externalPageUrl(parsed.data.url)) {
+    const shown = parsed.data.url.trim()
+    input.warn?.(`Page "${identity.id}": its "url" frontmatter ${JSON.stringify(shown.length > 80 ? `${shown.slice(0, 80)}...` : shown)} was not turned into a link, so the page was kept with its own content. Only a site path made of letters, digits and . _ ~ - segments, with an optional ?key=value query and #id fragment, can become a link.`)
+  }
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
   const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
     ? parsed.data.description.trim()
@@ -2475,6 +2563,13 @@ export function parseMarkdownPage(input: {
     body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
+  }
+  // Thally shows an authored description as plain text (with inline code), so the raw `[text](url)` of a link would be shown as typed.
+  const writtenDescription = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
+  const plainDescription = withoutMarkdownLinks(writtenDescription)
+  if (plainDescription !== writtenDescription) {
+    page.description = plainDescription
+    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; the link text was kept.`)
   }
   resolvePageDisplayHeading(page, input.platform)
   return page
