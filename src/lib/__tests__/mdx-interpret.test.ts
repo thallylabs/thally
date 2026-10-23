@@ -621,6 +621,68 @@ describe('the gate does not depend on attribute case, entities or element kind',
   })
 })
 
+describe('data props of components', () => {
+  const builtin = useMDXComponents({}) as never
+  const html = async (source: string, components: Record<string, unknown> = builtin) =>
+    render((await interpretMDX({ source, components: components as never })).content)
+
+  it('keeps the tags of an Update', async () => {
+    const out = await html('<Update label="v1" description="d" tags={["Added", "Fixed"]}>x</Update>')
+    expect(out).toContain('Added')
+    expect(out).toContain('Fixed')
+  })
+
+  it('keeps the light and dark values of a Color.Item', async () => {
+    const out = await html('<Color.Item name="n" value={{ light: "#fff", dark: "#000" }} />')
+    expect(out).toContain('background-color:#fff')
+    expect(out).toContain('background-color:#000')
+  })
+
+  it('keeps the open state of an AccordionGroup', async () => {
+    const out = await html(
+      '<AccordionGroup defaultValue={["a"]}><Accordion title="a">A</Accordion><Accordion title="b">B</Accordion></AccordionGroup>',
+    )
+    expect(out).toMatch(/<details id="a"[^>]* open=""/)
+    expect(out).not.toMatch(/<details id="b"[^>]* open=""/)
+  })
+
+  const Probe: ComponentType<Record<string, unknown>> = (props) =>
+    createElement('div', { 'data-props': JSON.stringify(props) })
+
+  it('passes nested plain data to the props that carry data', async () => {
+    const out = await html(
+      "<Probe tags={['a', 'JavaScript: tips']} pre={['p']} post={['q']} defaultValue={['d']} value={{ light: '#fff', n: [1, true, null] }} actions={[{ label: 'go', href: '/x' }]} />",
+      { Probe },
+    )
+    expect(out).toContain(
+      '{&quot;tags&quot;:[&quot;a&quot;,&quot;JavaScript: tips&quot;],&quot;pre&quot;:[&quot;p&quot;],&quot;post&quot;:[&quot;q&quot;],&quot;defaultValue&quot;:[&quot;d&quot;],&quot;value&quot;:{&quot;light&quot;:&quot;#fff&quot;,&quot;n&quot;:[1,true,null]},&quot;actions&quot;:[{&quot;label&quot;:&quot;go&quot;,&quot;href&quot;:&quot;/x&quot;}]}',
+    )
+  })
+
+  it.each([
+    ['an element', "tags={[<b>x</b>]}"],
+    ['a function', 'tags={[Probe]}'],
+    ['a constructor key', 'value={{ constructor: 1 }}'],
+    ['an unsafe URL', "actions={[{ label: 'go', href: 'data:text/html,x' }]}"],
+    ['an unevaluated entry', 'tags={["a", unknown]}'],
+  ])('drops a data prop that holds %s', async (_name, attribute) => {
+    expect(await html(`<Probe ${attribute} />`, { Probe })).toBe('<div data-props="{}"></div>')
+  })
+
+  it('keeps data only on components and only under the data props', async () => {
+    expect(await html("<Probe config={{ a: 1 }} items={['a']} /><div tags={['a']} value={{ a: 1 }} data-x={{ a: 1 }}>x</div>", { Probe })).toBe(
+      '<div data-props="{}"></div>\n<div>x</div>',
+    )
+  })
+
+  it('accepts only renderable values where a component draws the prop as a node', async () => {
+    const Card: ComponentType<Record<string, unknown>> = ({ icon, title }) =>
+      createElement('p', null, icon as ReactNode, title as ReactNode)
+    expect(await html("<Card icon={['a', 'b']} title={5} />", { Card })).toBe('<p>ab5</p>')
+    expect(await html('<Card icon={{ a: 1 }} title={{ b: 2 }} />', { Card })).toBe('<p></p>')
+  })
+})
+
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
 function substitute(node: ReactNode, value: string): ReactNode {
   if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)

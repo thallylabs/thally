@@ -307,6 +307,13 @@ function isRenderableNode(value: unknown): boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || isValidElement(value)
 }
 
+/** Props the builtin components read as data (a list or an object) rather than as text. */
+const DATA_PROPS = new Set(['tags', 'pre', 'post', 'defaultValue', 'actions', 'value'])
+/** Props components draw directly as a node, which React can only do for a renderable value. */
+const NODE_PROPS = new Set([
+  'children', 'icon', 'cta', 'tip', 'headline', 'title', 'description', 'default',
+  'fallback', 'footer', 'subtitle', 'caption', 'heading', 'label',
+])
 /** Text that is displayed, never loaded, so a leading scheme-like word is only words. */
 const DISPLAY_TEXT_PROPS = new Set(['title', 'description', 'label', 'alt'])
 /** Schemes a browser would run, or frame as markup authored in the URL. */
@@ -316,6 +323,24 @@ const ANIMATION_TAGS = new Set(['animate', 'set', 'animatetransform', 'animatemo
 /** Browsers ignore ASCII whitespace and control characters around and inside a URL scheme. */
 function hasUnsafeScheme(value: string): boolean {
   return UNSAFE_SCHEME.test(value.replace(/[\u0000-\u0020]/g, ''))
+}
+
+/**
+ * Strings, numbers, booleans, null and arrays or plain objects of those. A
+ * string under a URL-like key must also carry a safe scheme.
+ */
+function isPlainData(value: unknown, depth = 0): boolean {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') return true
+  if (typeof value !== 'object' || depth > 16) return false
+  if (Array.isArray(value)) return value.every((item) => isPlainData(item, depth + 1))
+  if ('$$typeof' in value) return false
+  return Object.entries(value).every(
+    ([key, entry]) =>
+      key !== '__proto__' &&
+      key !== 'constructor' &&
+      !(typeof entry === 'string' && /href|src|url|action|link/i.test(key) && hasUnsafeScheme(entry)) &&
+      isPlainData(entry, depth + 1),
+  )
 }
 
 /**
@@ -336,9 +361,15 @@ function hasUnsafeScheme(value: string): boolean {
  * `<script>`, `<base>`, `<plaintext>`, `<meta http-equiv>`, and SVG animations
  * that retarget a link or event attribute. A component whose URL prop is
  * dropped receives an empty string, as it would for an authored empty value,
- * so it renders its fallback instead of failing on `undefined`. Object values
- * survive only as `style` (string and number entries), and `children` only
- * when React can render it. String `style` is dropped because React throws.
+ * so it renders its fallback instead of failing on `undefined`. A string
+ * `style` is dropped because React throws, and a style object keeps only its
+ * string and number entries.
+ *
+ * Objects and arrays are the other way a page fails: React throws on one drawn
+ * as a node, and a component calls string methods on a prop it expects to be
+ * text. So a component keeps one only under a prop it reads as data and only
+ * if it is plain data; the node props (`children`, `icon`, ...) keep only
+ * renderable values; a DOM element keeps none apart from `style`.
  */
 function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
   const isElement = typeof type === 'string'
@@ -358,12 +389,12 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
       }
       continue
     }
-    if (key === 'children') {
-      if (isRenderableNode(value)) clean[key] = value
+    if (typeof value === 'object' && value !== null) {
+      const isNode = typeof (value as { $$typeof?: unknown }).$$typeof === 'symbol' || (NODE_PROPS.has(key) && isRenderableNode(value))
+      if (isNode || (!isElement && DATA_PROPS.has(key) && isPlainData(value))) clean[key] = value
       continue
     }
-    if (typeof value === 'object' && value !== null && typeof (value as { $$typeof?: unknown }).$$typeof !== 'symbol') continue
-    if (typeof value === 'string') {
+    if (typeof value === 'string' && key !== 'children') {
       if (!DISPLAY_TEXT_PROPS.has(name) && hasUnsafeScheme(value)) {
         if (!isElement) clean[key] = ''
         continue
