@@ -636,6 +636,16 @@ function isConfirmedClientBoundaryTag(name: string): boolean {
 }
 
 /**
+ * Whether moving attribute `attribute` of a tag into a wrapper keeps what the tag passes. JSX lets a later spread or a later prop
+ * of the same name win, but the wrapper applies the props it moves after everything else, so a moved prop would win over them.
+ */
+function keepsPropPrecedence(node: MdxNode, attribute: NonNullable<MdxNode['attributes']>[number]): boolean {
+  const attributes = node.attributes ?? []
+  return attributes.slice(attributes.indexOf(attribute) + 1)
+    .every((later) => later.type !== 'mdxJsxExpressionAttribute' && later.name !== attribute.name)
+}
+
+/**
  * A JSX attribute's raw expression source (`prop={<this>}`), for the two
  * shapes that end up passing a function value: a bare reference to a
  * page-declared function (`declaredNames`), or a function written inline
@@ -1877,7 +1887,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           && [...declaration.source.matchAll(/\{([^{}]*)\}/g)].every((match) =>
             ['children', '...props', 'children, ...props'].includes(match[1].trim()))
         const binding = registrations.get(aliases.get(node.name)!)
-        if (safeDeclaration && binding) {
+        // A later spread or prop of the same name would be overridden by the moved callback: keep the callback passive instead.
+        if (safeDeclaration && binding && keepsPropPrecedence(node, functionAttributes[0])) {
           const fallbackDeclaration = declaration!.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')
           const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`
           const imported = binding.imported === 'default' ? 'default' : binding.imported
@@ -1918,14 +1929,21 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
       if (wrappedRoots.has(node) || passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
         && node.position!.end.offset! <= root.position!.end.offset!)) return
-      const functionAttributes = (node.attributes ?? []).flatMap((attribute) => {
+      const candidates = (node.attributes ?? []).flatMap((attribute) => {
         const value = attribute.value && typeof attribute.value === 'object' ? attribute.value.value?.trim() : undefined
         const imported = value ? importedFunctions.get(value) : undefined
         return attribute.name && imported && attribute.position?.start.offset !== undefined && attribute.position.end.offset !== undefined
-          ? [{ name: attribute.name, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
+          ? [{ attribute, name: attribute.name, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
       })
       const binding = registrations.get(aliases.get(node.name)!)
-      if (functionAttributes.length === 0 || !binding) return
+      if (candidates.length === 0 || !binding) return
+      // A function a later spread or prop of the same name overrides stays on the page, as authored, rather than win over it.
+      const overridden = candidates.filter(({ attribute }) => !keepsPropPrecedence(node, attribute))
+      if (overridden.length > 0) {
+        warn(`<${node.name}> passes the imported function ${overridden.map(({ name }) => `"${name}"`).join(', ')} before a later prop or spread that overrides it, so ${overridden.length === 1 ? 'it was' : 'they were'} not moved into a client adapter and Next.js may refuse to build the page. Put the prop after the spread, or import the function inside the component.`, currentFile)
+      }
+      const functionAttributes = candidates.filter((candidate) => !overridden.includes(candidate))
+      if (functionAttributes.length === 0) return
       const moduleSpecifier = (path: string): string => JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
       const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`

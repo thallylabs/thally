@@ -1075,6 +1075,54 @@ describe('repository component migration', () => {
     expect(adapter.content).toContain('format={callback0}')
   })
 
+  describe('moving a function prop into a client adapter keeps what a later prop or spread overrides', () => {
+    const browser = 'export const Viewer = ({ format }) => { const [open] = useState(true); return open ? <p>{typeof format === "function" ? format("x") : format}</p> : null }'
+    const migrate = (tag: string) => {
+      const root = fixture({ 'viewer.jsx': browser, 'format.js': 'export default function format(value) { return value }' })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const body = migrator.transform(`import { Viewer } from './viewer.jsx'\nimport format from './format.js'\n\n${tag}`, join(root, 'index.mdx'))
+      return { body, warnings, adapter: migrator.files().find((file) => file.path.includes('/callback-')) }
+    }
+
+    it('does not move a function that a later spread overrides, and says why', () => {
+      const { body, warnings, adapter } = migrate('<Viewer format={format} {...{ format: "text" }} />')
+      expect(adapter).toBeUndefined()
+      expect(body).toContain('format={format} {...{ format: "text" }}')
+      expect(warnings.map((warning) => warning.message).join('\n')).toMatch(/format.*later prop or spread/)
+    })
+
+    it('does not move a function that a later prop of the same name overrides', () => {
+      const { body, adapter } = migrate('<Viewer format={format} format="text" />')
+      expect(adapter).toBeUndefined()
+      expect(body).toContain('format={format} format="text"')
+    })
+
+    it('still moves a function that follows the spread, which it overrides in either place', () => {
+      const { body, adapter } = migrate('<Viewer {...{ format: "text" }} format={format} />')
+      expect(body).not.toContain('format={format}')
+      expect(adapter?.content).toContain('<Original {...props} format={callback0}>')
+    })
+
+    it('moves a function nothing overrides and leaves only the overridden one', () => {
+      const { body, adapter } = migrate('<Viewer format={format} {...{ format: "text" }} label={format} />')
+      expect(body).toContain('format={format}')
+      expect(body).not.toContain('label={format}')
+      expect(adapter?.content).toContain('<Original {...props} label={callback0}>')
+    })
+
+    it('keeps a page-local callback passive rather than moving it over a later spread', () => {
+      const root = fixture({ 'playground.jsx': 'export const Playground = ({ children, CodeBlockComponent }) => <section><CodeBlockComponent>sample</CodeBlockComponent>{children}</section>' })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const source = "import { Playground } from './playground.jsx'\n\nexport const WidgetCodeBlock = ({ children, ...props }) => (<CodeBlock {...props}>{children}</CodeBlock>);\n\n<Playground CodeBlockComponent={WidgetCodeBlock} {...{ CodeBlockComponent: 'pre' }}><Warning>Keep this.</Warning></Playground>"
+      const body = migrator.transform(source, join(root, 'index.mdx'))
+      expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
+      expect(body).toContain('<Warning>Keep this.</Warning>')
+      expect(warnings.some((warning) => warning.message.includes('Interactive <Playground>'))).toBe(true)
+    })
+  })
+
   it('leaves an imported function that is only called in a page expression as it is', () => {
     const root = fixture({
       'browser.jsx': 'export const Browser = ({ items }) => { const [open] = useState(true); return <ul>{open && items.map((item) => <li key={item}>{item}</li>)}</ul> }',

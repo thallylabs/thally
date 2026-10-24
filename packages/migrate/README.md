@@ -525,7 +525,10 @@ the callback cannot be moved safely, it keeps the page and the control's child
 content as a passive fallback, with a warning identifying the control. A
 function the page imports from a copied module and passes as a prop to such a
 component (`badges={badgesFor}`) is imported by a client adapter instead, so
-the page never hands a function across the server boundary. A stateful local
+the page never hands a function across the server boundary. A function prop
+that a later spread or a later prop of the same name overrides is never moved
+(the adapter would put it over them): a page-authored callback then stays
+passive, and an imported function stays on the page, each with a warning. A stateful local
 snippet component is kept as a client component instead of flattening away its
 hooks and state.
 A component a page declares itself (`export const Counter = () => ...`) that
