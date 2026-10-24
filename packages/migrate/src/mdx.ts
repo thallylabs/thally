@@ -498,19 +498,50 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
-/** Names a function parameter, variable, class or catch clause declares anywhere inside an expression. */
-function declaredNamesIn(value: unknown, names: Set<string> = new Set()): Set<string> {
-  if (!value || typeof value !== 'object') return names
+/** `var` names a function hoists to its own scope, found in any nested block but not inside a nested function. */
+function hoistedVarNames(value: unknown, names: Set<string>): void {
+  if (!value || typeof value !== 'object') return
   const node = value as acorn.AnyNode
-  if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
-    node.params.forEach((param) => collectPatternNames(param, names))
-  }
-  if ((node.type === 'FunctionExpression' || node.type === 'ClassExpression') && node.id) names.add(node.id.name)
-  if (node.type === 'CatchClause' && node.param) collectPatternNames(node.param, names)
-  collectDeclarationNames(node, names)
+  if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration' || node.type === 'ArrowFunctionExpression') return
+  if (node.type === 'VariableDeclaration' && node.kind === 'var') node.declarations.forEach((declarator) => collectPatternNames(declarator.id, names))
   for (const child of Object.values(value)) {
-    if (Array.isArray(child)) child.forEach((entry) => declaredNamesIn(entry, names))
-    else if (child && typeof child === 'object') declaredNamesIn(child, names)
+    if (Array.isArray(child)) child.forEach((entry) => hoistedVarNames(entry, names))
+    else if (child && typeof child === 'object') hoistedVarNames(child, names)
+  }
+}
+
+/** The names a node declares for its own subtree only: a function's parameters, name and `var`s, and what a block, loop head or catch clause declares. */
+function scopeNames(node: acorn.AnyNode): Set<string> {
+  const names = new Set<string>()
+  switch (node.type) {
+    case 'FunctionExpression':
+    case 'FunctionDeclaration':
+    case 'ArrowFunctionExpression':
+      node.params.forEach((param) => collectPatternNames(param, names))
+      if (node.type === 'FunctionExpression' && node.id) names.add(node.id.name)
+      hoistedVarNames(node.body, names)
+      break
+    case 'BlockStatement':
+      node.body.forEach((statement) => collectDeclarationNames(statement, names))
+      break
+    case 'SwitchStatement':
+      node.cases.forEach((branch) => branch.consequent.forEach((statement) => collectDeclarationNames(statement, names)))
+      break
+    case 'ForStatement':
+      collectDeclarationNames(node.init, names)
+      break
+    case 'ForInStatement':
+    case 'ForOfStatement':
+      collectDeclarationNames(node.left, names)
+      break
+    case 'CatchClause':
+      if (node.param) collectPatternNames(node.param, names)
+      break
+    case 'ClassExpression':
+      if (node.id) names.add(node.id.name)
+      break
+    default:
+      break
   }
   return names
 }
@@ -518,17 +549,21 @@ function declaredNamesIn(value: unknown, names: Set<string> = new Set()): Set<st
 /**
  * Bind static partial invocation props inside expressions, preserving literals and code examples.
  * A snippet reads its props as variables (`{mode === "x" && ...}`) or as `props.mode`; both become
- * the literal value. A name the expression declares itself, an object key, a member name and a
- * lone `{name}` (replaced as text by the caller) are left alone.
+ * the literal value. A prop binds only where its name is a free variable: a name the snippet declares
+ * at the top of its own module (`export const mode = ...`, a function, a class, an import) or that a
+ * function, block or catch clause declares around the use is that declaration's. An object key, a
+ * member name and a lone `{name}` (replaced as text by the caller) are left alone too.
  */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
   if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
   let tree: unknown
   try { tree = descriptionParser.parse(body) } catch { return body }
   const edits: Array<{ start: number; end: number; value: string }> = []
-  const inspectExpression = (value: unknown, variables: ReadonlyMap<string, string>): void => {
+  const inspectExpression = (value: unknown, outer: ReadonlyMap<string, string>): void => {
     if (!value || typeof value !== 'object') return
     const node = value as acorn.AnyNode
+    const own = scopeNames(node)
+    const variables = own.size > 0 ? new Map([...outer].filter(([name]) => !own.has(name))) : outer
     if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
       const names = new Set<string>()
       node.params.forEach((param) => collectPatternNames(param, names))
@@ -563,6 +598,15 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
       else if (child && typeof child === 'object') inspectExpression(child, variables)
     }
   }
+  // What the snippet declares at the top of its own module is not a free variable anywhere in it.
+  const moduleNames = new Set<string>()
+  const collectModuleNames = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as MdxOffsetNode
+    if (node.type === 'mdxjsEsm') collectEsmBindings(node, moduleNames)
+    node.children?.forEach(collectModuleNames)
+  }
+  collectModuleNames(tree)
   const visit = (value: unknown): void => {
     if (!value || typeof value !== 'object') return
     const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown }> }
@@ -570,9 +614,8 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     if (program) {
       const [statement] = program.body
       const isLoneName = program.body.length === 1 && statement.type === 'ExpressionStatement' && statement.expression.type === 'Identifier'
-      const declared = declaredNamesIn(program)
       const variables = node.type === 'mdxjsEsm' || isLoneName ? new Map<string, string>()
-        : new Map([...properties].filter(([name]) => name !== 'children' && !declared.has(name)))
+        : new Map([...properties].filter(([name]) => name !== 'children' && !moduleNames.has(name)))
       inspectExpression(program, variables)
     }
     for (const attribute of node.attributes ?? []) visit(attribute.value)

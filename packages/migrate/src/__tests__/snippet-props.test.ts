@@ -76,3 +76,56 @@ describe('a snippet that uses its props as variables', () => {
     expect(warnings.find((warning) => warning.message.startsWith('Expressions that use "missing"'))?.source).toBe('home.mdx')
   })
 })
+
+describe('a snippet prop is bound only where it is a free variable', () => {
+  it('leaves a name the snippet declares at the top of its own module alone', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': 'export const mode = "local";\n\n{mode === "local" && <span>Keep this</span>}\n',
+    })
+    expect(body).toContain('{mode === "local" && <span>Keep this</span>}')
+    expect(body).not.toContain('"strict"')
+  })
+
+  it('leaves a name the snippet declares by function, class or import alone', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" other="x" third="y" />'),
+      'snippets/role.mdx': [
+        'import { mode } from "/snippets/values.js"',
+        'export function other() { return 1 }',
+        'export class third {}',
+        '',
+        '{mode === 1 && other() && <span>Keep this</span>}',
+        '',
+      ].join('\n'),
+      'snippets/values.js': 'export const mode = 1',
+    })
+    expect(body).toContain('{mode === 1 && other() && <span>Keep this</span>}')
+  })
+
+  it('still binds a prop the snippet only reads through props', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': 'export const label = props.mode;\n\n{mode === "strict" && <span>{label}</span>}\n',
+    })
+    expect(body).toContain('export const label = "strict";')
+    expect(body).toContain('{"strict" === "strict" && <span>{label}</span>}')
+  })
+
+  it('binds an outer reference when a callback in the same expression declares the same name', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{mode === "strict" && ["a", "b"].map((mode) => <li key={mode + "!"}>{mode.toUpperCase()}</li>)}\n',
+    })
+    expect(body).toContain('{"strict" === "strict" && ["a", "b"].map((mode) => <li key={mode + "!"}>{mode.toUpperCase()}</li>)}')
+  })
+
+  it('shadows a name only inside the function or block that declares it', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{(() => { const mode = 1; return mode })() && mode === "strict" && (() => { { const mode = 2 } return mode })()}\n',
+    })
+    expect(body).toContain('{(() => { const mode = 1; return mode })() && "strict" === "strict" && (() => { { const mode = 2 } return "strict" })()}')
+  })
+})
+

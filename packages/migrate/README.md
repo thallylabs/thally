@@ -548,7 +548,9 @@ lines inside a JS expression, and every line of a fenced code block, are left as
 written so a template literal and the code keep their text. The string props a snippet is called with are its variables, as on
 Mintlify: `{mode === "x" && ...}` and `props.mode` in the snippet read the
 value of `<Snippet mode="x" />` at each use, so the content a prop selects is
-kept. An outer code fence that contains a
+kept. A name the snippet declares itself (a top-level `export const mode`, a
+function or an import, or a callback parameter around the use) is that
+declaration's, never the prop's. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.
