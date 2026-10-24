@@ -72,7 +72,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2943,6 +2943,17 @@ function isolateFences(snippet: string, source: string, start: number, end: numb
   return `${fence.test(lines[0]) && /\S/.test(before) ? '\n' : ''}${snippet}${fence.test(lines[lines.length - 1]) && /\S/.test(after) ? '\n' : ''}`
 }
 
+/**
+ * A snippet replaces its tag in the middle of the page, so the lines after its first must sit
+ * where the tag did, after a list marker if one leads the line. Otherwise they leave the
+ * element or list item that held the tag.
+ */
+function alignToTag(snippet: string, source: string, start: number): string {
+  const before = source.slice(source.lastIndexOf('\n', start - 1) + 1, start)
+  const indent = /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?$/.test(before) ? before.replace(/\S/g, ' ') : before.match(/^[ \t]*/)![0]
+  return indentSnippetLines(snippet, indent)
+}
+
 /** Extract JSX from a statically declared snippet component before inlining it. */
 function snippetComponentBody(source: string, componentName: string): string {
   const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -3982,10 +3993,10 @@ function inlineMdxSnippets(
     for (const [componentName, snippet] of snippets) {
       segment = segment
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (tag: string, attributes: string, offset: number, source: string) => {
-          return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes)), source, offset, offset + tag.length)
+          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes)), source, offset), source, offset, offset + tag.length)
         })
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (tag: string, attributes: string, children: string, offset: number, source: string) => {
-          return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset, offset + tag.length)
+          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset), source, offset, offset + tag.length)
         })
     }
     const tagLabel = (filePath: string): string => platform === 'fern' ? `Included file ${filePath}` : `Snippet file="${filePath}"`
@@ -4006,7 +4017,7 @@ function inlineMdxSnippets(
         if (!candidate) throw new Error('file not found')
         const blocked = blockInline(candidate, filePath, tagLabel(filePath))
         if (blocked) return blocked
-        return isolateFences(closeOpenCodeFence(inlineMdxSnippets(
+        return isolateFences(alignToTag(closeOpenCodeFence(inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -4016,7 +4027,7 @@ function inlineMdxSnippets(
           globalAliases,
           gate,
           platform,
-        )), source, offset, offset + tag.length)
+        )), source, offset), source, offset, offset + tag.length)
       } catch {
         warnings.push({
           code: 'missing-page',

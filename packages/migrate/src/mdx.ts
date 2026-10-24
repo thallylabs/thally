@@ -1213,6 +1213,40 @@ export function closeOpenFence(body: string): string {
 }
 
 /**
+ * Indent every line of an inlined snippet after the first by `indent`, the
+ * column its tag started at, so a multi-line snippet stays inside the element
+ * or list item that held the tag (its first line already sits there). Lines
+ * inside a JS expression, an ESM block or a JSX attribute are left alone:
+ * indenting them would change the text of a multi-line template literal. A
+ * snippet that does not parse as MDX on its own is returned unchanged.
+ */
+export function indentSnippetLines(snippet: string, indent: string): string {
+  if (!indent || !snippet.includes('\n')) return snippet
+  let tree: MdxOffsetNode
+  try { tree = descriptionParser.parse(snippet) as MdxOffsetNode } catch { return snippet }
+  const verbatim: Array<[number, number]> = []
+  const keep = (node: { position?: MdxOffsetNode['position'] }): void => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (start !== undefined && end !== undefined) verbatim.push([start, end])
+  }
+  const visit = (node: MdxOffsetNode & { attributes?: Array<{ position?: MdxOffsetNode['position'] }> }): void => {
+    if (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression' || node.type === 'mdxjsEsm') keep(node)
+    node.attributes?.forEach(keep)
+    node.children?.forEach(visit)
+  }
+  visit(tree)
+  let lineStart = 0
+  return snippet.split('\n').map((line, index) => {
+    const start = lineStart
+    lineStart += line.length + 1
+    // A continuation line that begins inside a verbatim span is part of its text.
+    if (index === 0 || line.trim() === '' || verbatim.some(([from, to]) => from < start && start < to)) return line
+    return indent + line
+  }).join('\n')
+}
+
+/**
  * Apply a textual rename to the WHOLE body outside fenced/inline code (via
  * `maskCode`), so a match may span multiple lines.
  */

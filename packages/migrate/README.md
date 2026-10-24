@@ -524,7 +524,11 @@ over a same-named built-in. If any dependency cannot run in a client module
 the migration removed, a dynamic `import()`), the component is left where it
 is and a warning names it and the blocker.
 `<Snippet file="...">` accepts the documented `snippets/`-relative path as well
-as a `/snippets/...` or page-relative one. An outer code fence that contains a
+as a `/snippets/...` or page-relative one. A multi-line snippet keeps the
+indentation of the tag it replaces on every line (aligned with the item text
+after a list marker), so a list or block stays inside its `<Step>` or list item;
+lines inside a JS expression are left as written so a template literal keeps
+its text. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.
