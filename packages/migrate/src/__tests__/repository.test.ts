@@ -418,7 +418,7 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     expect(bundle.pages.map((page) => page.id).filter((id) => id.startsWith('api-reference/'))).toEqual(['api-reference/keys/create-api-key', 'api-reference/keys/get-api-key'])
   })
 
-  it('describes a page by the first sentence of the description as plain text, titling it by the summary, then the operation id, then the method and path', () => {
+  it('describes a page by the first sentence of the description as plain text, titling it by the summary, else the method and the words of the path', () => {
     const spec = {
       openapi: '3.0.0',
       info: { title: 'T', version: '1' },
@@ -434,9 +434,9 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     const pages = Object.fromEntries(bundle.pages.filter((page) => page.openapi).map((page) => [page.id, page]))
     expect(pages['api-reference/limits/apply-limit']).toMatchObject({ title: 'Apply limit', description: 'Check a limit now.' })
     expect(pages['api-reference/limits/bare']).toMatchObject({ description: 'No full stop here' })
-    // Mintlify's own fallbacks name the page: the operation id, else "METHOD /path".
-    expect(pages['api-reference/things/listthings']).toMatchObject({ title: 'listThings', description: 'listThings' })
-    expect(pages['api-reference/things/get-by-path']).toMatchObject({ title: 'GET /by-path', description: 'GET /by-path' })
+    // Mintlify's own fallback names the page "<Method> <words of the path>" and never uses the operation id (a live site: all 156 summary-less operations).
+    expect(pages['api-reference/things/get-by-id']).toMatchObject({ title: 'Get by id', description: 'Get by id' })
+    expect(pages['api-reference/things/get-by-path']).toMatchObject({ title: 'Get by path', description: 'Get by path' })
     expect(bundle.pages.filter((page) => page.openapi).every((page) => page.description.length > 0)).toBe(true)
   })
 
@@ -521,7 +521,7 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     expect(ids).toContain(endpointPageId('api-management/api-reference', 'deleteKey'))
   })
 
-  it('keeps the first of two operations that share a URL, drops the other from the tab, and warns once', () => {
+  it('numbers the later of two operations that share a URL, as Mintlify does, and keeps both in the tab', () => {
     const spec = {
       openapi: '3.0.0',
       info: { title: 'T', version: '1' },
@@ -534,15 +534,14 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     const bundle = migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, apiTab([{ group: 'Things', pages: ['POST /b', 'POST /a', 'POST /c'] }])] }, {}, spec)
 
     const pages = bundle.pages.filter((page) => page.openapi)
+    // Numbered in the order they are listed: the first keeps the URL, the next gets `-1` (a live site: every repeated URL).
     expect(pages.map((page) => [page.id, page.openapi])).toEqual([
       ['api-reference/things/create-thing', `${specAsset} POST /b`],
+      ['api-reference/things/create-thing-1', `${specAsset} POST /a`],
       ['api-reference/things/other', `${specAsset} POST /c`],
     ])
-    expect(tabOf(bundle, 'API reference')?.groups).toEqual([{ group: 'Things', pages: ['api-reference/things/create-thing', 'api-reference/things/other'] }])
-    const warnings = bundle.warnings.filter((warning) => warning.message.includes('shared by more than one operation'))
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0].message).toContain('/api-reference/things/create-thing')
-    expect(warnings[0].message).toContain('only the first operation has a page')
+    expect(tabOf(bundle, 'API reference')?.groups).toEqual([{ group: 'Things', pages: ['api-reference/things/create-thing', 'api-reference/things/create-thing-1', 'api-reference/things/other'] }])
+    expect(bundle.warnings.filter((warning) => warning.message.includes('shared by more than one operation'))).toEqual([])
   })
 
   it('adds no redirect from an endpoint page or to /api/, and keeps an authored redirect to a page as authored', () => {
@@ -2173,7 +2172,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages.find((page) => page.id === 'guide')?.body).toContain('[a](/api/default/users/get)')
   })
 
-  it('falls back to operationId, then method and path, when an operation summary is empty', () => {
+  it('titles an operation with an empty summary by its method and the words of its path, never by its operation id', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       navigation: { tabs: [{ tab: 'API', openapi: { source: 'e.yaml', directory: 'api' } }] },
@@ -2184,11 +2183,12 @@ describe('Mintlify repository migration', () => {
       '  /b:', '    get:', '      summary: "   "', '      tags: [T]', '      responses: { "200": { description: ok } }',
     ].join('\n'))
     const sources = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).docsConfig.redirects?.map((redirect) => redirect.source) ?? []
-    expect(sources).toContain('/api/t/listthings')
+    expect(sources).toContain('/api/t/get-a')
     expect(sources).toContain('/api/t/get-b')
+    expect(sources).not.toContain('/api/t/listthings')
   })
 
-  it('keeps the first operation and warns when two operations in a tag share a Mintlify endpoint slug', () => {
+  it('numbers the later of two operations in a tag that share a Mintlify endpoint slug, so each keeps its own redirect', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       navigation: { tabs: [{ tab: 'API', openapi: { source: 'd.yaml', directory: 'api' } }] },
@@ -2198,6 +2198,25 @@ describe('Mintlify repository migration', () => {
       '  /a:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
       '  /b:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
     ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t/get-thing'))).toEqual([
+      { source: '/api/t/get-thing', destination: '/api/default/a/get' },
+      { source: '/api/t/get-thing-1', destination: '/api/default/b/get' },
+    ])
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('shared by more than one operation')
+  })
+
+  it('keeps the first operation and warns when two specs mounted in one directory share an endpoint URL', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'First', openapi: { source: 'one.yaml', directory: 'api' } }, { tab: 'Second', openapi: { source: 'two.yaml', directory: 'api' } }] },
+    }))
+    for (const [file, path] of [['one.yaml', '/a'], ['two.yaml', '/b']]) {
+      writeFileSync(join(root, file), [
+        'openapi: 3.1.0', 'info: { title: D, version: "1.0" }', 'paths:',
+        `  ${path}:`, '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      ].join('\n'))
+    }
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source === '/api/t/get-thing')).toEqual([
       { source: '/api/t/get-thing', destination: '/api/default/a/get' },
@@ -2299,9 +2318,9 @@ describe('Mintlify repository migration', () => {
       }))
 
       const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
-      // The authored list is the tab: its operations are pages (the spec names no directory, so Mintlify's default one), and the spec is bound apart.
+      // The authored list is the tab: its operations are pages (the spec names no directory, so Mintlify's default one, with no tag folder for an untagged operation), and the spec is bound apart.
       const tab = bundle.docsConfig.tabs.find((entry) => entry.tab === 'API Reference')
-      const page = selectedPath === '/public' ? 'api-reference/default/public-operation' : 'api-reference/default/restricted-operation'
+      const page = selectedPath === '/public' ? 'api-reference/public-operation' : 'api-reference/restricted-operation'
       expect(tab?.api).toBeUndefined()
       expect(tab?.groups).toEqual([{ group: 'Selected', pages: [page] }])
       expect(bundle.docsConfig.tabs.find((entry) => entry.api)).toEqual({ tab: 'OpenAPI: service.json', hidden: true, api: { source: 'openapi/service.json' } })
@@ -2638,7 +2657,11 @@ describe('Mintlify repository migration', () => {
         message: expect.stringContaining(url),
       }))
     }
-    expect(bundle.remoteApiSpecs).toEqual([{ url: 'https://api.example.com/openapi.json', tabLabel: 'REST API' }, { url: 'https://[::ffff:7f00:1]/spec.json', tabLabel: 'Private API' }])
+    // Each tab names its spec and lists none of its operations, so Mintlify generated them all under its default directory.
+    expect(bundle.remoteApiSpecs).toEqual([
+      { url: 'https://api.example.com/openapi.json', tabLabel: 'REST API', directories: [{ directory: 'api-reference' }] },
+      { url: 'https://[::ffff:7f00:1]/spec.json', tabLabel: 'Private API', directories: [{ directory: 'api-reference' }] },
+    ])
     expect(bundle.warnings.filter((warning) => warning.message.includes('requires a network download'))).toHaveLength(2)
     expect(execFileCalls.calls).toEqual([])
   })

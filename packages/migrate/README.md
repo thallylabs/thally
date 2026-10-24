@@ -199,11 +199,12 @@ operations still have their pages. This is separate from a `directory`'s flat
 operation list, which still only drives the endpoint redirects.
 
 Mintlify serves one generated page per operation a navigation container lists,
-at `/<directory>/<first tag>/<summary>` (`directory` is the reference's
-`{ source, directory }` folder, `api-reference` when it is a plain string).
+at `/<directory>/<first tag>/<title>` (`directory` is the reference's
+`{ source, directory }` folder, `api-reference` when it is a plain string; an
+untagged operation has no tag folder).
 Each such operation becomes an MDX page at that path under `src/content`, so it
 keeps its URL, sidebar entry, eyebrow and previous/next links. Its frontmatter is
-the summary as `title` (else the operation id, else `METHOD /path`), the first
+the summary as `title` (else `<Method> <words of the path>`, never the operation id), the first
 sentence of the description as `description` (the title when there is none), and
 `openapi: "<spec file> METHOD /path"`; the body is empty. `descriptionPlacement: operation`
 keeps that short summary for search and metadata while the runtime renders the
@@ -266,10 +267,10 @@ no operation points to that section's overview page instead, and one warning
 lists the affected links (up to ten). A link to an address the site answers
 itself (a guide authored inside an API directory, trailing slash or `/index` or
 not, or the source of an authored redirect) is never rewritten. A spec that
-Mintlify mounted under a `directory` also gets a redirect from each endpoint URL that directory served
-(not the operations a container lists, which are pages at those URLs),
-to the matching endpoint page, and never to an operation the published spec
-withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
+Mintlify mounted under a `directory` also gets a redirect from each endpoint URL
+that directory served (not the operations a container lists, which are pages at
+those URLs), to the matching endpoint page, and never to an operation the
+published spec withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
 each of its tabs mounted it under, limited to the operations the navigation
 listed under a directory when it listed any. A local spec gets one directory
 per tab (the first) and every operation of the spec. When directories nest
@@ -282,11 +283,20 @@ id its spec is served under), so they stay as authored until then. A remote
 directory whose download failed still owns the addresses under it: they stay as
 authored, never rewritten or redirected. A link under any
 directory reaches only that directory's own endpoint URLs; a link under none is
-redirected by its last two segments (tag and summary) only when exactly one
+redirected by its last two segments (tag and title, as they appear in that URL) only when exactly one
 published operation across every spec carries them, to the id its spec is
 served under. A Mintlify default version's pages also get a redirect from their
 address without the version segment, since the original site serves them both
 ways.
+
+An endpoint URL Mintlify generates is `<directory>/<first tag>/<title>`: the
+title is the summary, else `<Method> <words of the path>` (the operation id is
+never used), an untagged operation has no tag folder, and an operation whose URL
+repeats an earlier one's gets `-1`, `-2` and so on after it, in the order the
+spec lists them. A navigation container (a group, tab or other) that names a
+spec without listing any of its operations had every one of them generated, under
+`api-reference` when it names no `directory`, so such a spec is mounted there
+too; the top-level `api` setting generates nothing.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
