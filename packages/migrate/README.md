@@ -150,8 +150,10 @@ produces a warning naming it. Specs that share a file name across folders are
 kept as separate files in `openapi/`. A remote `https://` spec is not
 downloaded by `migrateRepository`; the bundle lists it and warns, and
 `hydrateRemoteApiSpecs` (which `create-thally-docs migrate` runs after the
-conversion) downloads it from a public host, up to 25 MB, saves it as `.json`
-or `.yaml` by its content rather than its URL, and binds it to its tab. A
+conversion) downloads it from a public host, up to 25 MB once decompressed (it
+asks for gzip), saves it as `.json` or `.yaml` by its content rather than its
+URL, and binds it to its tab. A download is abandoned after 30 seconds without
+data or 5 minutes in all, however slowly the bytes arrive. A
 download that fails leaves a warning naming the URL. An `http://` spec is never
 imported. Missing local specs also produce warnings
 instead of silently dropping that API tab's reference. AsyncAPI has no Thally
