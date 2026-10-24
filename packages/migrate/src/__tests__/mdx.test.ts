@@ -1035,6 +1035,28 @@ describe('protectMathBlocks', () => {
     expect(result.body).toBe(body)
   })
 
+  it('keeps a template literal that holds a dollar sign inside a multi-line prop object', () => {
+    const body = [
+      '<Demo',
+      '  examples={[',
+      '    { title: "a", code: `x$y` },',
+      '    { title: "b", code: `$(x)` },',
+      '    { title: "c", code: `eval "$(tool profile create --pin)"` },',
+      '    { title: "d", code: `a ${1} c` },',
+      '    { title: "e", code: `$`, note: `${"$"}` },',
+      '  ]}',
+      '/>',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('keeps an inline code span that sits inside a JSX tag on a line with a dollar sign', () => {
+    const body = '<Demo code={`$HOME/bin`} label={`two`} />'
+    expect(protectMathBlocks(body).body).toBe(body)
+  })
+
   it('leaves an inlined ESM component with template-literal interpolations untouched (mintlify/docs vercel-json-generator.mdx repro)', () => {
     const body = [
       'Some prose before.',

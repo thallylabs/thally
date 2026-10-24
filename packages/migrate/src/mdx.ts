@@ -705,7 +705,10 @@ const FENCE_OPEN = /^(`{3,}|~{3,})/
  * line here because `protectMathBlocks` processes text line by line; a tag
  * split across lines is already opaque to it for other reasons.
  */
-function maskInlineSpansForMath(line: string): { masked: string; unmask: (text: string) => string } {
+function maskInlineSpansForMath(rawLine: string): { masked: string; unmask: (text: string) => string } {
+  // NUL is never valid in MDX; strip it so it cannot collide with the
+  // placeholder markers (same rule as `maskCode`).
+  const line = rawLine.replace(/\u0000/g, '')
   const blocks: Array<string> = []
   const stash = (text: string): string => {
     blocks.push(text)
@@ -725,10 +728,12 @@ function maskInlineSpansForMath(line: string): { masked: string; unmask: (text: 
   // template-literal interpolation (`${...}`), not a JSX container, and the
   // caller's own `$(?!{)` guard needs to see the literal `{` to reject it.
   const masked = [tagMasked, tagMasked].reduce((text) => text.replace(/(?<!\$)\{[^{}]*\}/g, stash), tagMasked)
-  return {
-    masked,
-    unmask: (text) => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)]),
-  }
+  // A tag or `{...}` container is stashed after the code spans inside it, so
+  // its block still holds their placeholders: unmask each block too. A single
+  // pass left `\u00000\u0000` in the page, which `maskCode` later stripped to a
+  // bare `0` (a prop like `code: \`x$y\`` silently became `code: 0`).
+  const unmask = (text: string): string => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => unmask(blocks[Number(index)]))
+  return { masked, unmask }
 }
 
 /**
