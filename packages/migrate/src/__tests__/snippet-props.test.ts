@@ -222,3 +222,25 @@ describe('a lone {name} in a snippet is bound by the same scope rules as any oth
     expect(markdown.body).toContain('```js\n{mode}\n```')
   })
 })
+
+describe('a snippet prop is bound where scope analysis says a reference is free', () => {
+  const bind = (snippet: string, attributes = 'mode="strict"', children = '') => migrate({
+    'home.mdx': page(children ? `<Role ${attributes}>${children}</Role>` : `<Role ${attributes} />`),
+    'snippets/role.mdx': snippet,
+  }).body
+
+  it('does not turn a label into a string, and binds the reference after it', () => {
+    const body = bind('{(() => { mode: for (;;) { break mode; } return mode; })()}\n')
+    expect(body).toContain('mode: for (;;) { break mode; } return "strict";')
+  })
+
+  it('binds the outer name in a default parameter that a var of the body does not shadow', () => {
+    const body = bind('{((x = mode) => { var mode = "local"; return x; })()}\n')
+    expect(body).toContain('(x = "strict") => { var mode = "local"; return x; }')
+  })
+
+  it('does not let a var in a class static block shadow the enclosing function', () => {
+    const body = bind('{(() => { class C { static { var mode = "local"; } }; return mode })()}\n')
+    expect(body).toContain('static { var mode = "local"; } }; return "strict"')
+  })
+})

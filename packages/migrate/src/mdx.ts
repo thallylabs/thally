@@ -1,6 +1,8 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
 import type * as acorn from 'acorn'
+// @ts-expect-error eslint-scope ships no types; the one function used here is typed where it is called.
+import { analyze } from 'eslint-scope'
 import { posix } from 'node:path'
 import { compileSync } from '@mdx-js/mdx'
 import { nameToEmoji } from 'gemoji'
@@ -498,68 +500,33 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
-/** `var` names a function hoists to its own scope, found in any nested block but not inside a nested function. */
-function hoistedVarNames(value: unknown, names: Set<string>): void {
-  if (!value || typeof value !== 'object') return
-  const node = value as acorn.AnyNode
-  if (node.type === 'FunctionExpression' || node.type === 'FunctionDeclaration' || node.type === 'ArrowFunctionExpression') return
-  if (node.type === 'VariableDeclaration' && node.kind === 'var') node.declarations.forEach((declarator) => collectPatternNames(declarator.id, names))
-  for (const child of Object.values(value)) {
-    if (Array.isArray(child)) child.forEach((entry) => hoistedVarNames(entry, names))
-    else if (child && typeof child === 'object') hoistedVarNames(child, names)
-  }
-}
-
-/** The names a node declares for its own subtree only: a function's parameters, name and `var`s, and what a block, loop head or catch clause declares. */
-function scopeNames(node: acorn.AnyNode): Set<string> {
-  const names = new Set<string>()
-  switch (node.type) {
-    case 'FunctionExpression':
-    case 'FunctionDeclaration':
-    case 'ArrowFunctionExpression':
-      node.params.forEach((param) => collectPatternNames(param, names))
-      if (node.type === 'FunctionExpression' && node.id) names.add(node.id.name)
-      hoistedVarNames(node.body, names)
-      break
-    case 'BlockStatement':
-      node.body.forEach((statement) => collectDeclarationNames(statement, names))
-      break
-    case 'SwitchStatement':
-      node.cases.forEach((branch) => branch.consequent.forEach((statement) => collectDeclarationNames(statement, names)))
-      break
-    case 'ForStatement':
-      collectDeclarationNames(node.init, names)
-      break
-    case 'ForInStatement':
-    case 'ForOfStatement':
-      collectDeclarationNames(node.left, names)
-      break
-    case 'CatchClause':
-      if (node.param) collectPatternNames(node.param, names)
-      break
-    case 'ClassExpression':
-      if (node.id) names.add(node.id.name)
-      break
-    default:
-      break
-  }
-  return names
+/** An ESTree node as scope analysis sees it: JSX nodes are not in acorn's own types. */
+interface EstreeNode {
+  type: string
+  start: number
+  end: number
+  name?: string
+  shorthand?: boolean
+  computed?: boolean
+  object?: unknown
+  property?: { type: string; name?: string; value?: unknown }
 }
 
 /**
  * Bind static partial invocation props inside expressions, preserving literals and code examples.
  * A snippet reads its props as variables (`{mode === "x" && ...}`) or as `props.mode`; both become
- * the literal value. A prop binds only where its name is a free variable: a name the snippet declares
- * at the top of its own module (`export const mode = ...`, a function, a class, an import) or that a
- * function, block or catch clause declares around the use is that declaration's. `props` is a name
- * like any other: `props.mode` binds only where `props` is not declared, and a function that takes a
- * parameter named `props` shields only its uses of `props`. An object key, a member name and a class
- * member name are left alone too.
+ * the literal value. A prop binds only where scope analysis finds the reference free: it resolves
+ * to no declaration of the expression (labels, `var` hoisting, parameter defaults, class blocks,
+ * catch clauses and shadowing are all the analyzer's), and is not a name the snippet declares at the
+ * top of its own module (`export const mode = ...`, a function, a class, an import). `props` is a
+ * name like any other: `props.mode` binds only where `props` is free. An object key, a member name
+ * and a class member name are not references, so they are left alone too.
  *
  * A lone `{name}` (a whole expression of one name, in text or as an attribute value) follows the same
  * rules; in text it becomes the value itself in a Markdown snippet and `{"value"}` in a JSX one, and
- * `{children}` always becomes the children as written. Text no expression covers (inline code, a
- * link destination) has its `{name}` replaced as it always was, except inside a fenced code block.
+ * `{children}` always becomes the children as written, inside an expression as well. Text no
+ * expression covers (inline code, a link destination) has its `{name}` replaced as it always was,
+ * except inside a fenced code block.
  */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
   if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
@@ -569,47 +536,6 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   const edits: Array<{ start: number; end: number; value: string }> = []
   /** Where the snippet's expressions are: the text between is not code, and is bound by name. */
   const covered: Array<[number, number]> = []
-  const inspectExpression = (value: unknown, outer: ReadonlyMap<string, string>, propsFree: boolean): void => {
-    if (!value || typeof value !== 'object') return
-    const node = value as acorn.AnyNode
-    const own = scopeNames(node)
-    const variables = own.size > 0 ? new Map([...outer].filter(([name]) => !own.has(name))) : outer
-    // `props` is a name like any other: a declaration of it around a use is that declaration's, and only its own uses are affected.
-    const free = propsFree && !own.has('props')
-    if (free && node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'props') {
-      const key = !node.computed && node.property.type === 'Identifier' ? node.property.name
-        : node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string' ? node.property.value : undefined
-      const replacement = key === undefined ? undefined : properties.get(key)
-      if (replacement !== undefined && body.slice(node.start, node.end).startsWith('props')) {
-        edits.push({ start: node.start, end: node.end, value: JSON.stringify(replacement) })
-        return
-      }
-    }
-    if (node.type === 'Identifier' && variables.has(node.name)) {
-      edits.push({ start: node.start, end: node.end, value: JSON.stringify(variables.get(node.name)) })
-      return
-    }
-    if (node.type === 'Property' && !node.computed) {
-      // `{ mode }` keeps its key; `{ mode: 1 }` has a key that is a name, not a reference.
-      if (node.shorthand && node.value.type === 'Identifier' && variables.has(node.value.name)) {
-        edits.push({ start: node.start, end: node.end, value: `${node.value.name}: ${JSON.stringify(variables.get(node.value.name))}` })
-      } else inspectExpression(node.value, variables, free)
-      return
-    }
-    if (node.type === 'MemberExpression' && !node.computed) {
-      inspectExpression(node.object, variables, free)
-      return
-    }
-    // A class member's name (method, field, accessor, static or `#private`) is not a reference; a computed key `[mode]` is, and what the member holds is.
-    if ((node.type === 'MethodDefinition' || node.type === 'PropertyDefinition') && !node.computed) {
-      if (node.value) inspectExpression(node.value, variables, free)
-      return
-    }
-    for (const child of Object.values(value)) {
-      if (Array.isArray(child)) child.forEach((entry) => inspectExpression(entry, variables, free))
-      else if (child && typeof child === 'object') inspectExpression(child, variables, free)
-    }
-  }
   // What the snippet declares at the top of its own module is not a free variable anywhere in it.
   const moduleNames = new Set<string>()
   const collectModuleNames = (value: unknown): void => {
@@ -619,6 +545,40 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     node.children?.forEach(collectModuleNames)
   }
   collectModuleNames(tree)
+  /** Bind the props `program` reads without declaring them. A page's ESM binds only `props.name`: its own names are its own. */
+  const bindFreeReferences = (program: acorn.Program, variables: boolean): void => {
+    const parents = new Map<unknown, EstreeNode>()
+    const link = (node: EstreeNode): void => {
+      for (const child of Object.values(node)) {
+        for (const entry of Array.isArray(child) ? child : [child]) {
+          if (entry && typeof entry === 'object' && typeof entry.type === 'string') { parents.set(entry, node); link(entry) }
+        }
+      }
+    }
+    link(program as unknown as EstreeNode)
+    // The references that resolve to no declaration anywhere in the program. `ecmaVersion` is a number: anything else is read as ES5, which has no block scope.
+    const free: Array<{ identifier: acorn.Identifier }> = analyze(program, { ecmaVersion: 2022, sourceType: 'module' }).globalScope.through
+    for (const { identifier } of free) {
+      const { name, start, end } = identifier
+      if (moduleNames.has(name)) continue
+      const parent = parents.get(identifier)
+      if (name === 'props' && parent?.type === 'MemberExpression' && parent.object === identifier) {
+        const key = !parent.computed && parent.property?.type === 'Identifier' ? parent.property.name
+          : parent.computed && parent.property?.type === 'Literal' && typeof parent.property.value === 'string' ? parent.property.value : undefined
+        const replacement = key === undefined ? undefined : properties.get(key)
+        if (replacement !== undefined && body.slice(parent.start, parent.end).startsWith('props')) {
+          edits.push({ start: parent.start, end: parent.end, value: JSON.stringify(replacement) })
+          continue
+        }
+      }
+      const bound = properties.get(name)
+      if (!variables || bound === undefined || name === 'children') continue
+      // `{ mode }` keeps its key; every other reference is replaced where it stands.
+      edits.push(parent?.type === 'Property' && parent.shorthand
+        ? { start: parent.start, end: parent.end, value: `${name}: ${JSON.stringify(bound)}` }
+        : { start, end, value: JSON.stringify(bound) })
+    }
+  }
   /** `span` is where an attribute's value expression sits, which the value node itself does not say. */
   const visit = (value: unknown, span?: [number, number]): void => {
     if (!value || typeof value !== 'object') return
@@ -637,11 +597,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
           // Not a prop of this call, or the snippet's own name: it stays an expression.
         } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
         else if (start !== undefined && end !== undefined) edits.push({ start, end, value: bound })
-      } else {
-        const variables = node.type === 'mdxjsEsm' ? new Map<string, string>()
-          : new Map([...properties].filter(([name]) => name !== 'children' && !moduleNames.has(name)))
-        inspectExpression(program, variables, !moduleNames.has('props'))
-      }
+      } else bindFreeReferences(program, node.type !== 'mdxjsEsm')
     }
     for (const attribute of node.attributes ?? []) {
       const from = attribute.position?.start.offset

@@ -560,13 +560,17 @@ lines inside a JS expression, and every line of a fenced code block, are left as
 written so a template literal and the code keep their text. The string props a snippet is called with are its variables, as on
 Mintlify: `{mode === "x" && ...}` and `props.mode` in the snippet read the
 value of `<Snippet mode="x" />` at each use, so the content a prop selects is
-kept. A name the snippet declares itself (a top-level `export const mode`, a
-function or an import, or a callback parameter around the use) is that
-declaration's, never the prop's; that includes `props` itself (`props.mode` binds
-only where the snippet does not declare `props`, and a callback parameter named
-`props` shields only its own uses of it). A property key, a member name after a
-dot and the name of a class member (method, field, accessor, `#private`) are
-names, not uses, and are never replaced; a computed key (`[mode]`) is a use.
+kept. A prop binds only where its name is a free variable, which a scope
+analysis of the expression decides (`eslint-scope`): a name the snippet declares
+itself (a top-level `export const mode`, a function or an import, or a parameter,
+`var`, block, loop, `catch` clause or class around the use) is that declaration's,
+never the prop's, while a default parameter (`(x = mode) => { var mode }`) still
+reads the outer name. That includes `props` itself (`props.mode` binds only where
+the snippet does not declare `props`, and a callback parameter named `props`
+shields only its own uses of it). A property key, a member name after a dot, a
+label (`mode: for (...)`, `break mode`) and the name of a class member (method,
+field, accessor, `#private`) are names, not uses, and are never replaced; a
+computed key (`[mode]`) is a use.
 A bare `{mode}` follows the same rules, so a callback parameter or a declaration
 of that name keeps its own value there too; it becomes the value as text in a
 Markdown snippet and `{"value"}` in a JSX one. An outer code fence that contains a
