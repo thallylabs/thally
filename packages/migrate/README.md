@@ -557,7 +557,10 @@ declaration's, never the prop's; that includes `props` itself (`props.mode` bind
 only where the snippet does not declare `props`, and a callback parameter named
 `props` shields only its own uses of it). A property key, a member name after a
 dot and the name of a class member (method, field, accessor, `#private`) are
-names, not uses, and are never replaced; a computed key (`[mode]`) is a use. An outer code fence that contains a
+names, not uses, and are never replaced; a computed key (`[mode]`) is a use.
+A bare `{mode}` follows the same rules, so a callback parameter or a declaration
+of that name keeps its own value there too; it becomes the value as text in a
+Markdown snippet and `{"value"}` in a JSX one. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.

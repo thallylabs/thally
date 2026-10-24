@@ -2926,27 +2926,7 @@ function staticSnippetProperties(attributes: string): Map<string, string> {
 function interpolateSnippet(snippet: string, attributes: string, children?: string): string {
   const properties = staticSnippetProperties(attributes)
   if (children !== undefined) properties.set('children', children.trim())
-  if (properties.size === 0) return snippet
-  snippet = bindSnippetProps(snippet, properties)
-  const isJsxSnippet = /<[A-Za-z][A-Za-z0-9]*/.test(snippet)
-  let fence = ''
-  return snippet.split('\n').map((line) => {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
-    if (marker) {
-      if (!fence) fence = marker[0]
-      else if (marker[0] === fence) fence = ''
-      return line
-    }
-    if (fence) return line
-    return line.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (original, name: string) => {
-      const value = properties.get(name)
-      // Preserve MDX expression syntax: a literal replacement inside JSX
-      // would turn `<a href={url}>` into invalid `href=https://...`.
-      if (value === undefined) return original
-      if (name === 'children') return value
-      return isJsxSnippet ? `{${JSON.stringify(value)}}` : value
-    })
-  }).join('\n')
+  return bindSnippetProps(snippet, properties)
 }
 
 /**

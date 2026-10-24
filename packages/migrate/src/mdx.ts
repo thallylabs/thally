@@ -553,14 +553,22 @@ function scopeNames(node: acorn.AnyNode): Set<string> {
  * at the top of its own module (`export const mode = ...`, a function, a class, an import) or that a
  * function, block or catch clause declares around the use is that declaration's. `props` is a name
  * like any other: `props.mode` binds only where `props` is not declared, and a function that takes a
- * parameter named `props` shields only its uses of `props`. An object key, a member name, a class member name and a lone
- * `{name}` (replaced as text by the caller) are left alone too.
+ * parameter named `props` shields only its uses of `props`. An object key, a member name and a class
+ * member name are left alone too.
+ *
+ * A lone `{name}` (a whole expression of one name, in text or as an attribute value) follows the same
+ * rules; in text it becomes the value itself in a Markdown snippet and `{"value"}` in a JSX one, and
+ * `{children}` always becomes the children as written. Text no expression covers (inline code, a
+ * link destination) has its `{name}` replaced as it always was, except inside a fenced code block.
  */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
   if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
+  const isJsx = /<[A-Za-z][A-Za-z0-9]*/.test(body)
   let tree: unknown
-  try { tree = descriptionParser.parse(body) } catch { return body }
+  try { tree = descriptionParser.parse(body) } catch { tree = undefined }
   const edits: Array<{ start: number; end: number; value: string }> = []
+  /** Where the snippet's expressions are: the text between is not code, and is bound by name. */
+  const covered: Array<[number, number]> = []
   const inspectExpression = (value: unknown, outer: ReadonlyMap<string, string>, propsFree: boolean): void => {
     if (!value || typeof value !== 'object') return
     const node = value as acorn.AnyNode
@@ -611,21 +619,59 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     node.children?.forEach(collectModuleNames)
   }
   collectModuleNames(tree)
-  const visit = (value: unknown): void => {
+  /** `span` is where an attribute's value expression sits, which the value node itself does not say. */
+  const visit = (value: unknown, span?: [number, number]): void => {
     if (!value || typeof value !== 'object') return
-    const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown }> }
+    const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown; position?: MdxOffsetNode['position'] }> }
     const program = node.data?.estree
     if (program) {
+      const start = span?.[0] ?? node.position?.start.offset
+      const end = span?.[1] ?? node.position?.end.offset
+      if (start !== undefined && end !== undefined) covered.push([start, end])
       const [statement] = program.body
-      const isLoneName = program.body.length === 1 && statement.type === 'ExpressionStatement' && statement.expression.type === 'Identifier'
-      const variables = node.type === 'mdxjsEsm' || isLoneName ? new Map<string, string>()
-        : new Map([...properties].filter(([name]) => name !== 'children' && !moduleNames.has(name)))
-      inspectExpression(program, variables, !moduleNames.has('props'))
+      const lone = node.type !== 'mdxjsEsm' && program.body.length === 1 && statement.type === 'ExpressionStatement' && statement.expression.type === 'Identifier'
+        ? statement.expression : undefined
+      if (lone) {
+        const bound = moduleNames.has(lone.name) ? undefined : properties.get(lone.name)
+        if (bound === undefined) {
+          // Not a prop of this call, or the snippet's own name: it stays an expression.
+        } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
+        else if (start !== undefined && end !== undefined) edits.push({ start, end, value: bound })
+      } else {
+        const variables = node.type === 'mdxjsEsm' ? new Map<string, string>()
+          : new Map([...properties].filter(([name]) => name !== 'children' && !moduleNames.has(name)))
+        inspectExpression(program, variables, !moduleNames.has('props'))
+      }
     }
-    for (const attribute of node.attributes ?? []) visit(attribute.value)
+    for (const attribute of node.attributes ?? []) {
+      const from = attribute.position?.start.offset
+      const to = attribute.position?.end.offset
+      const brace = from === undefined ? -1 : body.indexOf('{', from)
+      visit(attribute.value, to !== undefined && brace >= 0 && brace < to ? [brace, to] : undefined)
+    }
     for (const child of node.children ?? []) visit(child)
   }
   visit(tree)
+  let fence = ''
+  let lineStart = 0
+  for (const line of body.split('\n')) {
+    const start = lineStart
+    lineStart += line.length + 1
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
+    if (marker) {
+      if (!fence) fence = marker[0]
+      else if (marker[0] === fence) fence = ''
+      continue
+    }
+    if (fence) continue
+    for (const match of line.matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      const at = start + match.index
+      const bound = properties.get(match[1])
+      if (bound === undefined || covered.some(([from, to]) => from <= at && at < to)) continue
+      // Preserve MDX expression syntax: a literal replacement inside JSX would turn `<a href={url}>` into invalid `href=https://...`.
+      edits.push({ start: at, end: at + match[0].length, value: match[1] === 'children' || !isJsx ? bound : `{${JSON.stringify(bound)}}` })
+    }
+  }
   return edits.sort((a, b) => b.start - a.start).reduce((text, edit) => text.slice(0, edit.start) + edit.value + text.slice(edit.end), body)
 }
 

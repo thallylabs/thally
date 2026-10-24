@@ -185,3 +185,40 @@ describe('a snippet prop is never bound to a class member name', () => {
     expect(body).toContain('class X { mode() { return "strict" } }; return new X().mode()')
   })
 })
+
+describe('a lone {name} in a snippet is bound by the same scope rules as any other use', () => {
+  it('leaves {name} alone inside a callback that declares the name', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{["a"].map((mode) => <span key={mode}>{mode}</span>)}\n',
+    })
+    expect(body).toContain('(mode) => <span key={mode}>{mode}</span>')
+    expect(body).not.toContain('"strict"')
+  })
+
+  it('leaves {name} alone where the snippet declares the name at the top of its own module', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': 'export const mode = "local";\n\nValue: {mode}\n\n<Card title={mode} />\n',
+    })
+    expect(body).toContain('Value: {mode}')
+    expect(body).toContain('<Card title={mode} />')
+    expect(body).not.toContain('"strict"')
+  })
+
+  it('still replaces {name} in text, an attribute, a markdown snippet and inline code', () => {
+    const jsx = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': 'Mode: {mode}\n\n<Card title={mode} />\n\nRun `deploy {mode}`.\n',
+    })
+    expect(jsx.body).toContain('Mode: {"strict"}')
+    expect(jsx.body).toContain('<Card title={"strict"} />')
+    expect(jsx.body).toContain('`deploy {"strict"}`')
+    const markdown = migrate({
+      'home.mdx': page('<Role mode="strict">Inner text</Role>'),
+      'snippets/role.mdx': 'Mode: {mode}, then {children}.\n\n```js\n{mode}\n```\n',
+    })
+    expect(markdown.body).toContain('Mode: strict, then Inner text.')
+    expect(markdown.body).toContain('```js\n{mode}\n```')
+  })
+})
