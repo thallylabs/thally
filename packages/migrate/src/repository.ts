@@ -172,6 +172,14 @@ const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'agents.md', 'claude.md', 'code_of_conduct.md', 'contributing.md',
   'license.md', 'readme.md', 'security.md',
 ])
+/**
+ * Mintlify's default ignored patterns: these Markdown files are dropped at any
+ * depth, not just at the root (see "Default ignored patterns" in its
+ * `.mintignore` docs). A navigation entry that names one still publishes it.
+ */
+const MINTLIFY_DEFAULT_IGNORED_DOCUMENTS = new Set([
+  'changelog.md', 'contributing.md', 'license.md', 'readme.md',
+])
 const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_partials'])
 // Matches a default import (`import Name from '...'`), a default-as-named
 // import (`import { default as Name } from '...'`), and a plain named import
@@ -4757,8 +4765,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       skipped++
       continue
     }
-    const rootFilename = !file.relativePath.includes('/') ? basename(file.relativePath).toLowerCase() : ''
-    if (REPOSITORY_ONLY_DOCUMENTS.has(rootFilename) && !exactReferenceMap.has(exactReferenceKey(file.relativePath))) {
+    const filename = basename(file.relativePath).toLowerCase()
+    const isRepositoryOnly = (!file.relativePath.includes('/') && REPOSITORY_ONLY_DOCUMENTS.has(filename))
+      || (platform === 'mintlify' && MINTLIFY_DEFAULT_IGNORED_DOCUMENTS.has(filename))
+    if (isRepositoryOnly && !exactReferenceMap.has(exactReferenceKey(file.relativePath))) {
       skipped++
       continue
     }
