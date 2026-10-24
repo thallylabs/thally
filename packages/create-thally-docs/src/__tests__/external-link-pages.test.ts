@@ -1,6 +1,6 @@
 /** A migrated Mintlify page that links elsewhere passes `thally check`: it is in the navigation and its path redirects off the site. */
 
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -39,7 +39,7 @@ describe('thally check on the stub the migrator writes for a Mintlify url entry'
   const stubWarning = /Very short body|Missing "description"/
 
   /** Migrate a site whose `github-repo` page is only a title and a `url`, plus an ordinary short page, and return the check issues by file. */
-  async function issuesByFile(extra: Record<string, string> = {}): Promise<Map<string, Array<string>>> {
+  async function issuesByFile(extra: Record<string, string> = {}, editSite?: (site: string) => void): Promise<Map<string, Array<string>>> {
     const source = mkdtempSync(join(tmpdir(), 'thally-link-stub-source-'))
     writeFileSync(join(source, 'docs.json'), JSON.stringify({
       navigation: { groups: [{ group: 'Community', pages: ['introduction', 'github-repo', 'short'] }] },
@@ -54,6 +54,7 @@ describe('thally check on the stub the migrator writes for a Mintlify url entry'
       mkdirSync(dirname(join(site, file.path)), { recursive: true })
       writeFileSync(join(site, file.path), file.content)
     }
+    editSite?.(site)
     const found: Array<{ file?: string; message: string }> = []
     await runCheck(site, { fix: false, ci: true, silent: true, onIssues: (issues) => found.push(...issues) })
     const byFile = new Map<string, Array<string>>()
@@ -64,6 +65,18 @@ describe('thally check on the stub the migrator writes for a Mintlify url entry'
   it('does not warn that the page has no description or body', async () => {
     const byFile = await issuesByFile()
     expect(byFile.get('src/content/github-repo.mdx') ?? []).toEqual([])
+  })
+
+  it('does not warn when the stub redirects to a path on the site instead of another site', async () => {
+    // What a root-relative `url:` (`/introduction#login`) becomes: the same never-rendered stub, redirecting within the site.
+    const byFile = await issuesByFile({}, (site) => {
+      writeFileSync(join(site, 'src/content/github-repo.mdx'), '---\ntitle: GitHub repo\nnoindex: true\n---\n')
+      const config = JSON.parse(readFileSync(join(site, 'docs.json'), 'utf8')) as { redirects?: Array<{ source: string }> }
+      config.redirects = [...(config.redirects ?? []).filter((redirect) => redirect.source !== '/github-repo'),
+        { source: '/github-repo', destination: '/introduction#login' } as { source: string }]
+      writeFileSync(join(site, 'docs.json'), JSON.stringify(config))
+    })
+    expect((byFile.get('src/content/github-repo.mdx') ?? []).filter((message) => stubWarning.test(message))).toEqual([])
   })
 
   it('still warns about an ordinary short page next to it', async () => {

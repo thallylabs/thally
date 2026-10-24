@@ -245,7 +245,7 @@ Defaults to the current directory if no path is given.
 | Missing `description` in frontmatter | Warning |
 | Empty or near-empty page body | Warning |
 
-A page that only stands in for a link to another site (a `noindex` page whose own address redirects there, which a migrated Mintlify `url` entry becomes) is not checked for a `description` or a body, because no visitor reads it.
+A page that only stands in for a link elsewhere (a `noindex` page whose own address redirects to another site or to a path on this one, which a migrated Mintlify `url` entry becomes) is not checked for a `description` or a body, because no visitor reads it.
 
 ```bash
 # Check the current project
