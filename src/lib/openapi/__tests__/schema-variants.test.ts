@@ -120,3 +120,60 @@ describe('flattenSchema with a union that has one member', () => {
     expect(flattenSchema({ allOf: [{ type: 'object' }], oneOf: [] }).oneOf).toEqual([])
   })
 })
+
+// Each fragment is a union of two objects: n fragments make 2^n pairings of members.
+const pairings = (count: number, extra: Array<Record<string, unknown>> = []) => ({
+  allOf: [
+    ...Array.from({ length: count }, (_, i) => ({
+      anyOf: [
+        { type: 'object', properties: { ['a' + i]: { type: 'string' } }, required: ['a' + i] },
+        { type: 'object', properties: { ['b' + i]: { type: 'string' } } },
+      ],
+    })),
+    ...extra,
+  ],
+})
+const names = (count: number) => Array.from({ length: count }, (_, i) => ['a' + i, 'b' + i]).flat()
+
+describe('flattenSchema with many unions inside allOf', () => {
+  it('still gives every pairing when there are few enough to read as tabs', () => {
+    expect(unionVariants(flattenSchema(pairings(7)))).toHaveLength(128)
+  })
+
+  it('lists every field once instead of every pairing when the pairings pass the budget', () => {
+    const flat = flattenSchema(pairings(8))
+    expect(unionVariants(flat)).toBeNull()
+    expect(Object.keys(flat.properties as object)).toEqual(names(8))
+    expect(flat.type).toBe('object')
+  })
+
+  it('does not build 65,536 variants for sixteen unions, nor 16.7 million for twenty-four', () => {
+    for (const count of [16, 24]) {
+      const flat = flattenSchema(pairings(count))
+      expect(unionVariants(flat)).toBeNull()
+      expect(Object.keys(flat.properties as object)).toEqual(names(count))
+    }
+  })
+
+  it('requires a field only if every alternative and the schema around them require it', () => {
+    const both = [{ required: ['kind'] }, { required: ['kind'] }]
+    const flat = flattenSchema(
+      pairings(8, [{ type: 'object', properties: { name: { type: 'string' }, kind: {} }, required: ['name'] }, { anyOf: both }]),
+    )
+    // a0 to a7 are required by one member of their union only; kind by every member of its own.
+    expect([...(flat.required as string[])].sort()).toEqual(['kind', 'name'])
+  })
+
+  it('keeps a union with many members as tabs when it is the only one around the shared fields', () => {
+    const members = Array.from({ length: 108 }, (_, i) => ({ type: 'object', properties: { ['kind' + i]: { type: 'string' } } }))
+    const variants = unionVariants(flattenSchema({ allOf: [{ anyOf: members }, shared] }))
+    expect(variants).toHaveLength(108)
+    expect(Object.keys(variants?.[107].schema.properties as object).sort()).toEqual(['description', 'kind107', 'name'])
+  })
+
+  it('merges the members of a nested union as alternatives too', () => {
+    const nested = { allOf: [{ anyOf: [{ properties: { x: {} } }, { properties: { y: {} } }] }, { anyOf: [{ properties: { z: {} } }, { properties: { w: {} } }] }] }
+    const flat = flattenSchema({ allOf: [...pairings(8).allOf, { anyOf: [nested, { properties: { v: {} } }] }] })
+    expect(Object.keys(flat.properties as object).sort()).toEqual([...names(8), 'x', 'y', 'z', 'w', 'v'].sort())
+  })
+})
