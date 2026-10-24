@@ -435,6 +435,20 @@ function sourceFile(source: string, filename: string): ts.SourceFile {
   return ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKindFor(filename))
 }
 
+/** The names a module's top-level statements declare: variables (destructured ones too), functions and classes. */
+function topLevelNames(source: ts.SourceFile): Set<string> {
+  const names = new Set<string>()
+  const bind = (name: ts.BindingName): void => {
+    if (ts.isIdentifier(name)) names.add(name.text)
+    else for (const element of name.elements) if (ts.isBindingElement(element)) bind(element.name)
+  }
+  for (const statement of source.statements) {
+    if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text)
+    if (ts.isVariableStatement(statement)) for (const variable of statement.declarationList.declarations) bind(variable.name)
+  }
+  return names
+}
+
 function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   visitor(node)
   for (const child of node.children ?? []) walk(child, visitor)
@@ -1882,17 +1896,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       extracted.push({ node, name: `Inline${extracted.length}`, jsx })
     }
     if (extracted.length && declarations.length) {
-      const declared = new Set<string>()
-      function bind(name: ts.BindingName): void {
-        if (ts.isIdentifier(name)) declared.add(name.text)
-        else for (const element of name.elements) if (ts.isBindingElement(element)) bind(element.name)
-      }
-      for (const declaration of declarations) {
-        for (const statement of sourceFile(declaration.source, 'declaration.tsx').statements) {
-          if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) declared.add(statement.name.text)
-          if (ts.isVariableStatement(statement)) for (const variable of statement.declarationList.declarations) bind(variable.name)
-        }
-      }
+      const declared = new Set(declarations.flatMap((declaration) => [...topLevelNames(sourceFile(declaration.source, 'declaration.tsx'))]))
       const hasSharedDeclarations = hasExpressionReference(declared, {
         excludedNodes: extracted.map((entry) => entry.node),
         includeDeclarations: false,
@@ -1995,10 +1999,20 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
       const importedMoved = moved.flatMap(({ imported }) => imported ? [imported] : [])
       const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
-      // The adapter binds names of its own beside the one declaration copied from the page, and imports a function only under such a name.
-      // None may take the declaration's name, or the module would not parse or would pass the wrong value: it gets a trailing underscore.
-      const declared = declaration ? pageLocal[0].value : undefined
-      const own = (name: string): string => { while (name === declared) name += '_'; return name }
+      // The adapter binds names of its own beside the statement copied from the page, and imports a function only under such a name.
+      // None may take a name that statement declares (it can declare several, `export const a = ..., a_ = ...`) or another one of the
+      // adapter's, or the module would not parse or would pass the wrong value: a name in use gets trailing underscores until it is free.
+      const taken = new Set(declaration ? topLevelNames(sourceFile(declaration.source, 'declaration.tsx')) : [])
+      const owned = new Map<string, string>()
+      const own = (name: string): string => {
+        if (!owned.has(name)) {
+          let free = name
+          while (taken.has(free)) free += '_'
+          taken.add(free)
+          owned.set(name, free)
+        }
+        return owned.get(name)!
+      }
       const [original, wrapper, kids, rest] = ['Original', 'CallbackWrapper', 'children', 'props'].map(own)
       const wrapperName = register(wrapperPath, wrapper)
       copied.set(wrapperPath, { path: wrapperPath, content: [

@@ -2250,6 +2250,27 @@ describe('the names a client adapter binds never take one the page declared', ()
     }
   })
 
+  it('keeps clear of every name the copied statement declares, not only the one the tag passes', () => {
+    const run = (declaration: string, tag: string) => {
+      const root = fixture({ 'widget.jsx': widget, 'format.js': 'export default function format(value) { return value }' })
+      const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+      migrator.transform(`import { Widget } from './widget.jsx'\nimport format from './format.js'\n\n${declaration}\n\n${tag}`, join(root, 'index.mdx'))
+      return String(migrator.files().find((file) => file.path.includes('/callback-'))?.content)
+    }
+    // `callback0_` is declared beside `callback0`, so the imported function must not take it.
+    const second = run('export const callback0 = ({children}) => (<div>{children}</div>), callback0_ = ({children}) => (<span>{children}</span>);',
+      '<Widget f={callback0} g={format}>Body.</Widget>')
+    parses(second)
+    expect(second).toMatch(/import callback0__ from "\.\/[^"]*format\.js";/)
+    expect(second).toContain('<Original {...props} f={callback0} g={callback0__}>')
+    // The same for the other names the adapter binds, and whatever the first name an unused one takes.
+    const others = run('export const Original = ({children}) => (<div>{children}</div>), Original_ = ({children}) => (<b>{children}</b>), CallbackWrapper_ = ({children}) => (<i>{children}</i>);',
+      '<Widget f={Original} g={format}>Body.</Widget>')
+    parses(others)
+    expect(others).toMatch(/import \{ Widget as Original__ \} from/)
+    expect(others).toContain('<Original__ {...props} f={Original} g={callback0}>{children}</Original__>')
+  })
+
   it('leaves every name as it was when the page declares none of them', () => {
     const { content } = adapterFor('render')
     expect(content).toContain('export function CallbackWrapper({ children, ...props }) { return <Original {...props} f={render} g={callback0}>{children}</Original>; }')
