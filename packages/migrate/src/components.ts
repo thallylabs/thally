@@ -440,6 +440,18 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   for (const child of node.children ?? []) walk(child, visitor)
 }
 
+/** Whether a module has async code: a client adapter cannot wrap an async component (Next.js does not run one on the client). */
+function hasAsyncCode(source: string): boolean {
+  let found = false
+  const visit = (node: ts.Node): void => {
+    if (found) return
+    if (node.kind === ts.SyntaxKind.AsyncKeyword || ts.isAwaitExpression(node)) found = true
+    else ts.forEachChild(node, visit)
+  }
+  visit(sourceFile(source, 'module.jsx'))
+  return found
+}
+
 /** Whether a module's source opens with the `'use client'` directive: only a byte order mark, whitespace and comments may come before it, and either quote may spell it. */
 export function hasClientDirective(source: string): boolean {
   return /^[\uFEFF\s]*(?:(?:\/\/[^\n]*(?:\n|$)|\/\*(?:(?!\*\/)[\s\S])*\*\/)[\uFEFF\s]*)*['"]use client['"]/.test(source)
@@ -1301,6 +1313,13 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const realPageImports: Array<string> = []
     // Imported bindings that are, or may be, functions (anything not known to be plain data): a function cannot be passed from the page into a client component.
     const importedFunctions = new Map<string, { path: string; imported: string }>()
+    // Imported components the page also uses as a value, so they keep a real import instead of an alias: what each tag of one renders.
+    const importedComponents = new Map<string, { path: string; imported: string }>()
+    /** The copied module and export a tag renders, whether it is an alias of the registry or a real import. */
+    const componentTarget = (name: string): { path: string; imported: string } | undefined => {
+      const registered = aliases.get(name)
+      return registered ? registrations.get(registered) : importedComponents.get(name)
+    }
     const serverPageDeclarations: Array<string> = []
     const sharedImportEdits: Array<Replacement> = []
     let hasUnsupportedImports = false
@@ -1598,6 +1617,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
               }
               const aliasSpecifier = portableSpecifier(`@/${registerPath.replace(/^src\//, '').replace(/\\/g, '/')}`)
               realPageImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(aliasSpecifier)};`)
+              importedComponents.set(binding.local, { path: registerPath, imported: registerImported })
               continue
             }
             const name = register(registerPath, registerImported)
@@ -1911,86 +1931,56 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       }
       edits.push(...declarations.map(({ start, end }) => ({ start, end, value: '' })), ...sharedImportEdits)
     }
-    // A page-local callback cannot cross into a copied client component. Move
-    // a self-contained JSX callback into a thin client adapter while keeping
-    // the MDX children on the page. More complex callbacks remain passive.
+    // A function cannot cross from the page into a client component. One decision per tag covers every prop that carries one, whether the
+    // function is declared on the page or imported from a copied module: a thin client adapter holds them all (a page-authored one is
+    // copied into it, an imported one is imported by it) while the page keeps passing data and children. A page-authored callback that
+    // cannot move makes the tag a passive fallback that keeps its child content. A component that is not a client component takes an
+    // imported function from the page as authored, and so does an async one a page-authored callback: wrapped, it could not run.
     const pageFunctions = functionDeclaredNames(content)
     const passiveRoots: Array<MdxNode> = []
     const wrappedRoots = new Set<MdxNode>()
     walk(tree, (node) => {
-      if (!node.name || !aliases.has(node.name) || !functionValuedAttribute(node, pageFunctions)
-        || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      const binding = node.name ? componentTarget(node.name) : undefined
+      if (!node.name || !binding || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      const moduleSource = String(copied.get(binding.path)?.content ?? '')
+      const client = hasClientDirective(moduleSource)
+      if (!client && hasAsyncCode(moduleSource)) return
       if (passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
         && node.position!.end.offset! <= root.position!.end.offset!)) return
-      const functionAttributes = (node.attributes ?? []).filter((attribute) => {
+      const callbacks = (node.attributes ?? []).flatMap((attribute) => {
         const value = attribute.value && typeof attribute.value === 'object' ? attribute.value.value?.trim() : undefined
-        return !!value && pageFunctions.has(value)
+        const imported = value ? importedFunctions.get(value) : undefined
+        return attribute.name && value && (imported || pageFunctions.has(value))
+          && attribute.position?.start.offset !== undefined && attribute.position.end.offset !== undefined
+          ? [{ attribute, name: attribute.name, value, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
       })
-      if (functionAttributes.length === 1 && functionAttributes[0].name
-        && functionAttributes[0].position?.start.offset !== undefined
-        && functionAttributes[0].position.end.offset !== undefined) {
-        const functionName = (functionAttributes[0].value as { value: string }).value.trim()
-        const declaration = declarations.find((entry) => new RegExp(`^export const ${functionName}\\s*=`).test(entry.source))
+      const pageLocal = callbacks.filter(({ imported }) => !imported)
+      const crossing = functionValuedAttribute(node, pageFunctions) !== undefined
+      // A client component refuses any function from the page. Another one is only given an adapter for a page-authored callback.
+      if (!crossing && !(client && callbacks.length > 0)) return
+      let declaration: { source: string } | undefined
+      if (crossing) {
+        declaration = pageLocal.length === 1 ? declarations.find((entry) => new RegExp(`^export const ${pageLocal[0].value}\\s*=`).test(entry.source)) : undefined
         const safeDeclaration = declaration?.source.match(/^export const \w+\s*=\s*\(\s*\{\s*children(?:\s*,\s*\.\.\.props)?\s*\}\s*\)\s*=>\s*\([\s\S]*\)\s*;?$/)
           && !/\b(?:window|document|process|fetch|use[A-Z]\w*)\b/.test(declaration.source)
           && [...declaration.source.matchAll(/<([A-Z]\w*)\b/g)].every((match) => match[1] === 'CodeBlock')
           && [...declaration.source.matchAll(/\{([^{}]*)\}/g)].every((match) =>
             ['children', '...props', 'children, ...props'].includes(match[1].trim()))
-        const binding = registrations.get(aliases.get(node.name)!)
         // A later spread or prop of the same name would be overridden by the moved callback, and `children` cannot be moved: keep the callback passive instead.
-        if (safeDeclaration && binding && canMoveIntoWrapper(node, functionAttributes[0])) {
-          const fallbackDeclaration = declaration!.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')
-          const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
-          const imported = binding.imported === 'default' ? 'default' : binding.imported
-          const importClause = imported === 'default' ? 'import Original' : `import { ${imported} as Original }`
-          const specifier = portableSpecifier(`./${relative(destinationRoot, binding.path).replace(/\\/g, '/')}`)
-          const wrapperName = register(wrapperPath, 'CallbackWrapper')
-          copied.set(wrapperPath, { path: wrapperPath, content: [
-            "'use client';", `${importClause} from ${JSON.stringify(specifier)};`,
-            fallbackDeclaration,
-            `export function CallbackWrapper({ children, ...props }) { return <Original {...props} ${functionAttributes[0].name}={${functionName}}>{children}</Original>; }`,
-          ].join('\n') })
-          const start = node.position.start.offset
-          const end = node.position.end.offset
-          const source = content.slice(start, end)
-          const opening = source.indexOf(`<${node.name}`)
-          const closing = source.lastIndexOf(`</${node.name}`)
-          if (opening >= 0) edits.push({ start: start + opening + 1, end: start + opening + 1 + node.name.length, value: wrapperName })
-          if (closing >= 0) edits.push({ start: start + closing + 2, end: start + closing + 2 + node.name.length, value: wrapperName })
-          edits.push({ start: functionAttributes[0].position!.start.offset!, end: functionAttributes[0].position!.end.offset!, value: '' })
-          wrappedRoots.add(node)
-          if (declaration!.source.includes('<CodeBlock')) warn(`Interactive <${node.name}> was retained with a basic code block in place of Mintlify's CodeBlock.`, currentFile)
+        if (!safeDeclaration || !canMoveIntoWrapper(node, pageLocal[0].attribute)) {
+          const source = content.slice(node.position.start.offset, node.position.end.offset)
+          const openingEnd = source.indexOf('>')
+          const closingStart = source.lastIndexOf(`</${node.name}`)
+          const children = openingEnd >= 0 && closingStart > openingEnd ? source.slice(openingEnd + 1, closingStart) : ''
+          edits.push({ start: node.position.start.offset, end: node.position.end.offset,
+            value: `<div data-migration-interactive-fallback="${node.name}">${children}</div>` })
+          passiveRoots.push(node)
+          warn(`Interactive <${node.name}> passes a page-local function into a client component; its child content was retained without the interactive control. Move the callback into a client component to restore it.`, currentFile)
           return
         }
       }
-      const source = content.slice(node.position.start.offset, node.position.end.offset)
-      const openingEnd = source.indexOf('>')
-      const closingStart = source.lastIndexOf(`</${node.name}`)
-      const children = openingEnd >= 0 && closingStart > openingEnd ? source.slice(openingEnd + 1, closingStart) : ''
-      edits.push({ start: node.position.start.offset, end: node.position.end.offset,
-        value: `<div data-migration-interactive-fallback="${node.name}">${children}</div>` })
-      passiveRoots.push(node)
-      warn(`Interactive <${node.name}> passes a page-local function into a client component; its child content was retained without the interactive control. Move the callback into a client component to restore it.`, currentFile)
-    })
-    // A function imported from a copied module cannot cross into a client component from the page
-    // either. The adapter imports it itself, and the page keeps passing only the data props. A
-    // component that is not already a client component is left to take its props from the page.
-    walk(tree, (node) => {
-      if (!node.name || !aliases.has(node.name) || functionValuedAttribute(node, pageFunctions) !== undefined
-        || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
-      if (wrappedRoots.has(node) || passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
-        && node.position!.end.offset! <= root.position!.end.offset!)) return
-      const candidates = (node.attributes ?? []).flatMap((attribute) => {
-        const value = attribute.value && typeof attribute.value === 'object' ? attribute.value.value?.trim() : undefined
-        const imported = value ? importedFunctions.get(value) : undefined
-        return attribute.name && imported && attribute.position?.start.offset !== undefined && attribute.position.end.offset !== undefined
-          ? [{ attribute, name: attribute.name, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
-      })
-      const binding = registrations.get(aliases.get(node.name)!)
-      // Only a client component refuses a function from the page; a server component keeps taking it as authored.
-      if (candidates.length === 0 || !binding || !hasClientDirective(String(copied.get(binding.path)?.content ?? ''))) return
-      // A function that cannot move stays on the page, as authored: one a later spread or prop of the same name overrides, rather than win over it, and `children`.
-      const unmoved = candidates.filter(({ attribute }) => !canMoveIntoWrapper(node, attribute))
+      // An imported function that cannot move stays on the page, as authored: one a later spread or prop of the same name overrides, rather than win over it, and `children`.
+      const unmoved = callbacks.filter(({ imported, attribute }) => imported && !canMoveIntoWrapper(node, attribute))
       const asChildren = unmoved.filter(({ name }) => name === 'children')
       const overridden = unmoved.filter(({ name }) => name !== 'children')
       if (asChildren.length > 0) {
@@ -1999,17 +1989,19 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       if (overridden.length > 0) {
         warn(`<${node.name}> passes the imported function ${overridden.map(({ name }) => `"${name}"`).join(', ')} before a later prop or spread that overrides it, so ${overridden.length === 1 ? 'it was' : 'they were'} not moved into a client adapter and Next.js may refuse to build the page. Put the prop after the spread, or import the function inside the component.`, currentFile)
       }
-      const functionAttributes = candidates.filter((candidate) => !unmoved.includes(candidate))
-      if (functionAttributes.length === 0) return
+      const moved = callbacks.filter((callback) => !unmoved.includes(callback))
+      if (moved.length === 0) return
       const moduleSpecifier = (path: string): string => JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
+      const importedMoved = moved.flatMap(({ imported }) => imported ? [imported] : [])
       const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
       const wrapperName = register(wrapperPath, 'CallbackWrapper')
       copied.set(wrapperPath, { path: wrapperPath, content: [
         "'use client';",
         `${importClause(binding.imported, 'Original')} from ${moduleSpecifier(binding.path)};`,
-        ...functionAttributes.map(({ imported }, index) => `${importClause(imported.imported, `callback${index}`)} from ${moduleSpecifier(imported.path)};`),
-        `export function CallbackWrapper({ children, ...props }) { return <Original {...props}${functionAttributes.map(({ name }, index) => ` ${name}={callback${index}}`).join('')}>{children}</Original>; }`,
+        ...importedMoved.map((imported, index) => `${importClause(imported.imported, `callback${index}`)} from ${moduleSpecifier(imported.path)};`),
+        ...(declaration ? [declaration.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')] : []),
+        `export function CallbackWrapper({ children, ...props }) { return <Original {...props}${moved.map(({ name, value, imported }) => ` ${name}={${imported ? `callback${importedMoved.indexOf(imported)}` : value}}`).join('')}>{children}</Original>; }`,
       ].join('\n') })
       const start = node.position.start.offset
       const source = content.slice(start, node.position.end.offset)
@@ -2017,8 +2009,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const closing = source.lastIndexOf(`</${node.name}`)
       if (opening >= 0) edits.push({ start: start + opening + 1, end: start + opening + 1 + node.name.length, value: wrapperName })
       if (closing >= 0) edits.push({ start: start + closing + 2, end: start + closing + 2 + node.name.length, value: wrapperName })
-      for (const { start: from, end } of functionAttributes) edits.push({ start: from, end, value: '' })
+      for (const { start: from, end } of moved) edits.push({ start: from, end, value: '' })
       wrappedRoots.add(node)
+      if (declaration?.source.includes('<CodeBlock')) warn(`Interactive <${node.name}> was retained with a basic code block in place of Mintlify's CodeBlock.`, currentFile)
     })
     walk(tree, (node) => {
       const replacement = node.name ? aliases.get(node.name) : undefined

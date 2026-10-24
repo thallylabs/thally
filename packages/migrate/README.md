@@ -534,9 +534,15 @@ the page never hands a function across the server boundary, however the module
 exports it (`export default format`, `export { format as f }`); an export that
 cannot be classified without running the module is moved too, since importing
 plain data inside a client module is just as safe (a `let` or `var` is one, as a later
-assignment may change it: only a `const` literal stays on the page). Only a component
-that is already a client component gets an adapter: a copied server component
-(an async one, say) keeps receiving the function from the page, as authored. A function prop
+assignment may change it: only a `const` literal stays on the page). A tag gets one
+adapter for all of its function props, a page-authored callback and imported
+functions alike, so none is left crossing from the page; that holds for a
+component the page also uses as a value (`C={Widget}`), which keeps a real import
+instead of an alias. A client component gets the adapter for either kind of
+function. A copied server component keeps receiving an imported function from the
+page, as authored, and gets one for a page-authored callback only when it can run
+once wrapped: an async one (`export default async function Widget`) is left as
+authored, since wrapped it would be an async client component. A function prop
 that a later spread or a later prop of the same name overrides is never moved
 (the adapter would put it over them), and neither is a function passed as
 `children` (the adapter hands the component its own children): a page-authored

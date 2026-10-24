@@ -1263,6 +1263,57 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  describe('one adapter carries every function a tag passes into a client component', () => {
+    const widget = 'export const Widget = ({ f, g, C, children }) => { const [open] = useState(true); return open ? <p>{f("x")}{g ? g("y") : null}{children}</p> : null }'
+    const render = 'export const render = ({ children, ...props }) => (<div {...props}>{children}</div>);'
+    const migrate = (widgetSource: string, source: string, extra: Record<string, string> = {}) => {
+      const root = fixture({ 'widget.jsx': widgetSource, 'format.js': 'export default function format(value) { return value }', ...extra })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const body = migrator.transform(`import { Widget } from './widget.jsx'\nimport format from './format.js'\n\n${source}`, join(root, 'index.mdx'))
+      return { body, warnings, adapters: migrator.files().filter((file) => file.path.includes('/callback-')) }
+    }
+
+    it('moves a page-local callback and an imported function of one tag into the same adapter', () => {
+      const { body, adapters } = migrate(widget, `${render}\n\n<Widget f={render} g={format}>Body.</Widget>`)
+      expect(body).not.toMatch(/f=\{render\}|g=\{format\}/)
+      expect(body).toMatch(/<Migrated[a-f0-9]+\s*>Body\.<\/Migrated[a-f0-9]+>/)
+      expect(adapters).toHaveLength(1)
+      expect(adapters[0].content).toContain('export const render =')
+      expect(adapters[0].content).toMatch(/import callback0 from "\.\/[^"]*format\.js";/)
+      expect(adapters[0].content).toContain('<Original {...props} f={render} g={callback0}>')
+    })
+
+    it('takes the adapter for a component the page also uses as a value', () => {
+      const { body, adapters } = migrate(widget, '<Widget f={format} C={Widget}>Body.</Widget>')
+      // The component is a function too: it travels through the adapter with `f`, not from the page.
+      expect(body).not.toMatch(/f=\{format\}|C=\{Widget\}/)
+      expect(body).toMatch(/<Migrated[a-f0-9]+\s*>Body\.<\/Migrated[a-f0-9]+>/)
+      expect(adapters).toHaveLength(1)
+      expect(adapters[0].content).toContain('<Original {...props} f={callback0} C={callback1}>')
+    })
+
+    it('keeps a mixed tag passive when its page-local callback cannot move, whatever else it passes', () => {
+      const { body, warnings, adapters } = migrate(widget, "export const bad = ({ children }) => { const [n] = useState(0); return <b>{n}{children}</b> };\n\n<Widget f={bad} g={format}><Warning>Keep this.</Warning></Widget>")
+      expect(adapters).toEqual([])
+      expect(body).toContain('<Warning>Keep this.</Warning>')
+      expect(body).not.toContain('g={format}')
+      expect(warnings.some((warning) => warning.message.includes('Interactive <Widget>'))).toBe(true)
+    })
+
+    it('leaves a page-local callback passed to an async server component as authored', () => {
+      const root = fixture({ 'widget.jsx': 'export default async function Widget({ f }) { return <p>{f(await Promise.resolve("x"))}</p> }' })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const body = migrator.transform(`import Widget from './widget.jsx'\n\n${render}\n\n<Widget f={render} />`, join(root, 'index.mdx'))
+      // Wrapped in a 'use client' adapter it would be an async client component, which Next.js cannot run.
+      expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
+      expect(body).toMatch(/<Migrated[a-f0-9]+ f=\{render\} \/>/)
+      expect(String(migrator.files().find((file) => file.path.endsWith('/widget.jsx'))!.content)).not.toContain("'use client'")
+      expect(warnings).toEqual([])
+    })
+  })
+
   it('names callback adapters and the component registry the same on every run, wherever the repository is cloned', () => {
     const files = {
       'docs.json': JSON.stringify({ navigation: { pages: ['home'] } }),
