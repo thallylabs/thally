@@ -1,8 +1,9 @@
 /** Bounded HTTPS specification downloading and inert operation parsing, without repository capabilities. */
 import { lookup } from 'node:dns/promises'
+import type { IncomingMessage } from 'node:http'
 import { request } from 'node:https'
 import { isIP } from 'node:net'
-import { createGunzip } from 'node:zlib'
+import { createGunzip, type Gunzip } from 'node:zlib'
 import type { MigrationFetcher } from './types.js'
 
 /** The same extension flags the runtime uses to withhold an operation. */
@@ -67,8 +68,18 @@ interface SpecResponse {
 
 async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits): Promise<SpecResponse> {
   const pinned = await getPinnedAddress(url)
-  let deadline: NodeJS.Timeout | undefined
   return new Promise<SpecResponse>((resolve, reject) => {
+    let response: IncomingMessage | undefined
+    let decoder: Gunzip | undefined
+    // Whichever limit trips, stop everything: destroying only the request would leave the decoder
+    // expanding bytes it already holds, long after the download was given up on.
+    const abandon = (error: Error): void => {
+      clearTimeout(deadline)
+      decoder?.destroy()
+      response?.destroy()
+      req.destroy()
+      reject(error)
+    }
     const req = request(url, {
       // Node's request does not ask for compression by itself, and a large spec is far smaller gzipped.
       headers: { Accept: 'application/json, application/yaml, text/yaml, */*', 'Accept-Encoding': 'gzip', 'User-Agent': 'Thally-Migrate/1.0 (+https://thally.io)' },
@@ -78,56 +89,55 @@ async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits): Promise<
         if (typeof options === 'object' && options.all) callback(null, [pinned])
         else callback(null, pinned.address, pinned.family)
       },
-    }, (response) => {
-      const status = response.statusCode ?? 0
+    }, (incoming) => {
+      response = incoming
+      const status = incoming.statusCode ?? 0
       if (status >= 300 && status < 400) {
-        response.resume()
-        resolve({ status, location: response.headers.location, body: Buffer.alloc(0) })
+        incoming.resume()
+        clearTimeout(deadline)
+        resolve({ status, location: incoming.headers.location, body: Buffer.alloc(0) })
         return
       }
       if (status < 200 || status >= 300) {
-        response.resume()
-        reject(new Error(`OpenAPI server returned ${status}.`))
+        incoming.resume()
+        abandon(new Error(`OpenAPI server returned ${status}.`))
         return
       }
-      const statedBytes = Number(response.headers['content-length'] ?? 0)
+      const statedBytes = Number(incoming.headers['content-length'] ?? 0)
       if (statedBytes > MAX_SPEC_BYTES) {
-        response.destroy()
-        reject(new Error('Remote OpenAPI spec exceeds the 25 MB import limit.'))
+        abandon(new Error('Remote OpenAPI spec exceeds the 25 MB import limit.'))
         return
       }
-      const encoding = String(response.headers['content-encoding'] ?? 'identity').toLowerCase()
+      const encoding = String(incoming.headers['content-encoding'] ?? 'identity').toLowerCase()
       if (encoding !== 'identity' && encoding !== 'gzip') {
-        response.destroy()
-        reject(new Error(`The OpenAPI server compressed the spec with "${encoding}", which Thally cannot read. Serve it uncompressed or as gzip.`))
+        abandon(new Error(`The OpenAPI server compressed the spec with "${encoding}", which Thally cannot read. Serve it uncompressed or as gzip.`))
         return
       }
-      const body = encoding === 'gzip' ? response.pipe(createGunzip()) : response
+      if (encoding === 'gzip') decoder = incoming.pipe(createGunzip())
+      const body = decoder ?? incoming
       const chunks: Array<Buffer> = []
       let bytes = 0
       // The limit counts decoded bytes, so a small download cannot expand past it.
       body.on('data', (chunk: Buffer) => {
         bytes += chunk.length
         if (bytes > MAX_SPEC_BYTES) {
-          reject(new Error('Remote OpenAPI spec exceeds the 25 MB import limit.'))
-          req.destroy()
+          abandon(new Error('Remote OpenAPI spec exceeds the 25 MB import limit.'))
           return
         }
         chunks.push(chunk)
       })
-      body.on('end', () => resolve({ status, body: Buffer.concat(chunks) }))
-      body.on('error', (error) => reject(body === response ? error : new Error(`The OpenAPI spec could not be decompressed: ${error.message}`)))
-      if (body !== response) response.on('error', reject)
+      body.on('end', () => {
+        clearTimeout(deadline)
+        resolve({ status, body: Buffer.concat(chunks) })
+      })
+      body.on('error', (error) => abandon(decoder ? new Error(`The OpenAPI spec could not be decompressed: ${error.message}`) : error))
+      if (decoder) incoming.on('error', abandon)
     })
-    const abandon = (message: string): void => {
-      reject(new Error(message))
-      req.destroy()
-    }
-    req.setTimeout(limits.idleMs, () => abandon(`The OpenAPI server stopped sending data for ${limits.idleMs / 1000} seconds.`))
-    deadline = setTimeout(() => abandon(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`), limits.totalMs)
-    req.on('error', reject)
+    req.setTimeout(limits.idleMs, () => abandon(new Error(`The OpenAPI server stopped sending data for ${limits.idleMs / 1000} seconds.`)))
+    const deadline = setTimeout(() => abandon(new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)), limits.totalMs)
+    req.on('error', abandon)
     req.end()
-  }).finally(() => clearTimeout(deadline))
+  })
 }
 
 /** Fetch one bounded HTTPS specification, validating every redirect and public DNS address. */

@@ -1,11 +1,27 @@
 /** The spec download asks for compression and gives up on silence, not on a slow-but-steady transfer. */
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { gzipSync } from 'node:zlib'
+import { gzipSync, type Gunzip } from 'node:zlib'
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const target = vi.hoisted(() => ({ port: 0 }))
+// Every decoder the download creates, with the decoded bytes it has produced so far.
+const decoders = vi.hoisted(() => ({ made: [] as Array<{ decoder: Gunzip; bytes: number }> }))
+
+vi.mock('node:zlib', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:zlib')>()
+  return {
+    ...actual,
+    createGunzip: (...args: Parameters<typeof actual.createGunzip>) => {
+      const decoder = actual.createGunzip(...args)
+      const record = { decoder, bytes: 0 }
+      decoder.on('data', (chunk: Buffer) => { record.bytes += chunk.length })
+      decoders.made.push(record)
+      return decoder
+    },
+  }
+})
 
 // Resolve to a public address and speak plain HTTP to a local server, so the real
 // request, timeout and decoding code runs without touching the network.
@@ -21,6 +37,9 @@ import { downloadSpec } from '../remote-spec.js'
 
 const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: {} })
 const specUrl = (path: string) => `https://specs.example.com${path}`
+
+// 100 MB of spaces is about 100 KB gzipped, so the whole body arrives long before the limit trips.
+const hugeBomb = gzipSync(Buffer.alloc(100_000_000, 32))
 
 let server: Server
 let lastHeaders: IncomingHttpHeaders = {}
@@ -39,6 +58,7 @@ beforeAll(async () => {
       case '/always-gzip': send(gzipSync(spec), gzipped); break
       case '/unknown-encoding': send(Buffer.from(spec), { 'Content-Encoding': 'zstd' }); break
       case '/bomb': send(gzipSync(Buffer.alloc(26_000_000, 32)), gzipped); break
+      case '/huge-bomb': send(hugeBomb, gzipped); break
       case '/stall':
         response.writeHead(200)
         response.write(spec.slice(0, 10))
@@ -96,6 +116,16 @@ describe('remote spec download', () => {
 
   it('applies the 25 MB limit to the decoded size', async () => {
     await expect(downloadSpec(specUrl('/bomb'))).rejects.toThrow('25 MB')
+  })
+
+  it('stops decompressing once the decoded size limit trips', async () => {
+    decoders.made.length = 0
+    await expect(downloadSpec(specUrl('/huge-bomb'))).rejects.toThrow('25 MB')
+    // Give a decoder that kept running time to chew through the rest of the 100 MB.
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const [{ decoder, bytes }] = decoders.made
+    expect(decoder.destroyed).toBe(true)
+    expect(bytes).toBeLessThan(30_000_000)
   })
 
   it('keeps waiting while bytes keep arriving, even past the idle time', async () => {
