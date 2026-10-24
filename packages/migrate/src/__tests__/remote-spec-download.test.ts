@@ -25,7 +25,15 @@ vi.mock('node:zlib', async (importOriginal) => {
 
 // Resolve to a public address and speak plain HTTP to a local server, so the real
 // request, timeout and decoding code runs without touching the network.
-vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: '93.184.216.34', family: 4 }] }))
+// A test sets `dns.delays` to make the next lookups slow, one entry per lookup.
+const dns = vi.hoisted(() => ({ delays: [] as Array<number> }))
+vi.mock('node:dns/promises', () => ({
+  lookup: async () => {
+    const delay = dns.delays.shift() ?? 0
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+    return [{ address: '93.184.216.34', family: 4 }]
+  },
+}))
 vi.mock('node:https', () => ({
   request: (url: URL, options: object, callback: (response: IncomingMessage) => void) => httpRequest(
     { ...options, host: '127.0.0.1', port: target.port, path: `${url.pathname}${url.search}` },
@@ -159,6 +167,21 @@ describe('remote spec download', () => {
     // Three 200 ms hops against 300 ms in all: each hop alone is well inside it.
     await expect(downloadSpec(specUrl('/hop/2'), undefined, { idleMs: 5_000, totalMs: 300 })).rejects.toThrow('took longer than')
     expect((await downloadSpec(specUrl('/hop/2'), undefined, { idleMs: 5_000, totalMs: 5_000 })).toString()).toBe(spec)
+  })
+
+  it('counts a slow address lookup against the total time, without waiting for it to finish', async () => {
+    dns.delays = [400]
+    const started = Date.now()
+    await expect(downloadSpec(specUrl('/hop/0'), undefined, { idleMs: 5_000, totalMs: 50 })).rejects.toThrow('took longer than')
+    expect(Date.now() - started).toBeLessThan(250)
+  })
+
+  it('counts the address lookup of a redirect against the same total time', async () => {
+    // The first hop answers in 200 ms, then the lookup for the redirect stalls for 600 ms against 450 ms in all.
+    dns.delays = [0, 600]
+    const started = Date.now()
+    await expect(downloadSpec(specUrl('/hop/1'), undefined, { idleMs: 5_000, totalMs: 450 })).rejects.toThrow('took longer than')
+    expect(Date.now() - started).toBeLessThan(580)
   })
 
   it('keeps waiting while bytes keep arriving, even past the idle time', async () => {

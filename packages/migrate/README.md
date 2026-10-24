@@ -162,8 +162,9 @@ downloaded by `migrateRepository`; the bundle lists it and warns, and
 conversion) downloads it from a public host, up to 25 MB once decompressed (it
 asks for gzip), saves it as `.json` or `.yaml` by its content rather than its
 URL, and binds it to its tab. A download is abandoned after 30 seconds without
-data or 5 minutes in all (one clock for the whole redirect chain), however
-slowly the bytes arrive. A download that fails leaves a warning naming the URL. An `http://` spec is never
+data or 5 minutes in all (one clock for the whole redirect chain, the DNS lookup
+of every hop included, so a stalled lookup cannot hold it past the limit),
+however slowly the bytes arrive. A download that fails leaves a warning naming the URL. An `http://` spec is never
 imported. Missing local specs also produce warnings
 instead of silently dropping that API tab's reference. AsyncAPI has no Thally
 renderer, so it always produces a clear warning naming the spec instead of

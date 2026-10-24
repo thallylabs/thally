@@ -68,9 +68,17 @@ interface SpecResponse {
 
 /** `deadlineAt` is the wall-clock end of the whole download, shared by every redirect hop. */
 async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits, deadlineAt: number): Promise<SpecResponse> {
-  const pinned = await getPinnedAddress(url)
+  const timedOut = (): Error => new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)
+  const lookupMs = deadlineAt - Date.now()
+  if (lookupMs <= 0) throw timedOut()
+  // The address lookup cannot be cancelled, so the deadline is raced against it: a stalled lookup ends the download on time.
+  let lookupTimer: NodeJS.Timeout | undefined
+  const pinned = await Promise.race([
+    getPinnedAddress(url),
+    new Promise<never>((_resolve, reject) => { lookupTimer = setTimeout(() => reject(timedOut()), lookupMs) }),
+  ]).finally(() => clearTimeout(lookupTimer))
   const remainingMs = deadlineAt - Date.now()
-  if (remainingMs <= 0) throw new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)
+  if (remainingMs <= 0) throw timedOut()
   return new Promise<SpecResponse>((resolve, reject) => {
     let response: IncomingMessage | undefined
     let decoder: Gunzip | undefined
@@ -137,7 +145,7 @@ async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits, deadlineA
       if (decoder) incoming.on('error', abandon)
     })
     req.setTimeout(limits.idleMs, () => abandon(new Error(`The OpenAPI server stopped sending data for ${limits.idleMs / 1000} seconds.`)))
-    const deadline = setTimeout(() => abandon(new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)), remainingMs)
+    const deadline = setTimeout(() => abandon(timedOut()), remainingMs)
     req.on('error', abandon)
     req.end()
   })
