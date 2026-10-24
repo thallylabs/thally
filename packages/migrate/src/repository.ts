@@ -242,6 +242,8 @@ export interface RepositoryMigrationOptions {
   docusaurusSkipAssets?: boolean
   /** @internal Test seam: lowers the 5,000-file budget so budget behaviour can be exercised with small fixtures. */
   maxSourceFiles?: number
+  /** @internal Test seam: lowers the 500 MB total asset budget so budget behaviour can be exercised with small fixtures. */
+  maxTotalAssetBytes?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
   /** Mintlify `sourceRef` repositories already fetched and prepared by `importSourceRef`. */
@@ -4398,6 +4400,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     : undefined
   const sourceBudget = options.maxSourceFiles ?? MAX_SOURCE_FILES
+  const totalAssetBudget = options.maxTotalAssetBytes ?? MAX_TOTAL_ASSET_BYTES
   const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank, sourceBudget)
   const mintignoreFilteredFiles = mintignoreMatcher
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
@@ -5335,13 +5338,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     assetCandidates.push({ file, assetPath, size: candidateSize })
   }
-  // Copy assets that pages actually reference before unreferenced ones, so a
-  // tight budget drops decorative/unused files first instead of screenshots
-  // a page links to (each group keeps its original scan order).
+  // A full budget must not cost the site its look. Copy first what the site itself loads (its
+  // stylesheets, scripts and fonts) and what docs.json names (logo, favicon, background), then the
+  // assets pages reference, then the rest, so a tight budget drops decorative/unused files first
+  // (each group keeps its original scan order).
+  const configAssetPaths = new Set<string>()
+  addPathReferences(platform === 'mintlify'
+    ? JSON.stringify(mintlifyConfig ?? {})
+    : JSON.stringify([docsConfig, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null]), '', configAssetPaths, new Set(), docusaurusPaths(''))
+  if (fernRawConfig) addFernConfigPathReferences(fernRawConfig, configAssetPaths, new Set())
+  const isSiteAsset = (candidate: AssetCandidate): boolean => siteAssetPaths.has(candidate.assetPath) || configAssetPaths.has(candidate.assetPath)
   const isReferenced = (candidate: AssetCandidate): boolean => referencedAssetPaths.has(candidate.assetPath)
   const orderedAssetCandidates = [
-    ...assetCandidates.filter((candidate) => isReferenced(candidate)),
-    ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
+    ...assetCandidates.filter((candidate) => isSiteAsset(candidate)),
+    ...assetCandidates.filter((candidate) => !isSiteAsset(candidate) && isReferenced(candidate)),
+    ...assetCandidates.filter((candidate) => !isSiteAsset(candidate) && !isReferenced(candidate)),
   ]
   const quarantinedPageCount = quarantinedFiles.length
   // Two files can map to one public path (`logo.png` and `public/logo.png`);
@@ -5379,7 +5390,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     && !(isPublicReachable(assetPath) && !(failClosedAssets && (destinationCounts.get(assetPath) ?? 0) > 1))
   let withheldAssetCount = 0
   let unreferencedAssetCount = 0
-  let totalAssetBytes = 0
+  // The root stylesheet is written after the assets, so its bytes are set aside before any is copied.
+  let totalAssetBytes = !rootStyleProblem && rootStyleProjection?.css.trim() ? Buffer.byteLength(rootStyleProjection.css) : 0
   // One summary warning per skip reason, not one per file: a repository with
   // hundreds of oversized assets would otherwise bury every other warning.
   const overBudgetAssets: Array<string> = []
@@ -5388,7 +5400,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const ambiguouslyNamedAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
     const individualLimit = referencedAssetPaths.has(assetPath) ? MAX_REFERENCED_ASSET_BYTES : MAX_ASSET_BYTES
-    if (size > individualLimit || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+    if (size > individualLimit || totalAssetBytes + size > totalAssetBudget) {
       overBudgetAssets.push(file.relativePath)
       if (referencedAssetPaths.has(assetPath)) overBudgetReferenced++
       continue
@@ -5475,7 +5487,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Thally owns the navbar, cards and footer through docs.json and its theme.
   if (hasRootStylesheet && rootStylesheetPath && mintlifyProjectRoot) {
     const size = lstatSync(rootStylesheetPath).size
-    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+    if (size > MAX_ASSET_BYTES) {
       warnings.push({ code: 'limit-reached', message: 'Mintlify root style.css exceeded the asset budget and was not imported.', source: 'style.css' })
     } else if (rootStyleProblem === 'unsafe') {
       warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
@@ -5506,7 +5518,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const content = Buffer.from(rootStyleProjection.css)
         assets.push({ path: assetPath, content })
         docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
-        totalAssetBytes += content.length
       }
     }
   }
