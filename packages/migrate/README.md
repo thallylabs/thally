@@ -240,6 +240,8 @@ The renderer tries the first visible API tab's spec first for a bare
 `openapi: "METHOD /path"` page; when converting a tab to pages stops its spec being
 that one, each bare reference to an operation the converted spec defines is
 written with that spec's path in front, so it still renders the same operation.
+A spec a tab rejects (Thally binds one API spec per tab) has no binding, so no
+reference is moved to it.
 
 Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.

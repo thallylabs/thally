@@ -128,8 +128,6 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
         if (ref?.specRef === reference.url) page.openapi = withSpecRef(ref, `openapi/${filename}`)
       }
-      // Where the spec would be bound were it an API tab, whatever happens next: it decides which spec a bare `openapi:` reference reached first.
-      bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
       // The operations the tab listed become its pages, and the spec is bound only in a hidden tab that lists nothing.
       const endpoint = reference.groups && reference.endpointPages
         ? addEndpointPages({
@@ -149,7 +147,10 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
             },
           })
         : null
+      // A spec that is kept is bound in `apiTabs` as an API tab would be: that decides which spec a bare `openapi:` reference reached first.
+      // A spec the tab rejects below has no binding, so a reference never moves to it.
       if (endpoint) {
+        bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
         bound.push({ reference, filename, content: body, operations, tabName: reference.tabLabel ?? 'API Reference', endpointOperations: endpoint.operations })
         continue
       }
@@ -164,6 +165,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         })
         continue
       }
+      bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
       bound.push({ reference, filename, content: body, operations, tabName: bindApiTab(tabs, reference, api) })
     } catch (error) {
       warnings.push({

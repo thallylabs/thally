@@ -108,6 +108,28 @@ describe('two remote specs in one docs.json, only one of them named by a page', 
   })
 })
 
+describe('a spec the tab rejects never takes over a bare operation reference', () => {
+  const A = 'https://example.com/a.json'
+  const B = 'https://example.com/b.json'
+  const specWith = (tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { '/x': { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  const bodies: Record<string, string> = { [A]: specWith('Alpha'), [B]: specWith('Beta') }
+  const both: MigrationFetcher = async (url) => ({ finalUrl: url, body: bodies[url.toString()], contentType: 'application/json' })
+
+  it('leaves the page on the spec that was kept, never the one that was rejected', async () => {
+    const bundle = await hydrateRemoteApiSpecs(site({ 'home.mdx': page('GET /x') }, { openapi: [A, B] }), both)
+    const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
+    expect(apiTabs(bundle)).toHaveLength(1)
+    expect((apiTabs(bundle)[0].api as { source: string }).source).toBe(assetFor(A))
+    expect(bundle.warnings.some((warning) => warning.code === 'unsupported-config' && warning.source === B)).toBe(true)
+    // `GET /x` reached A before and still does: it names no spec that has no binding.
+    expect(bundle.pages.find((entry) => entry.id === 'home')!.openapi).not.toContain(assetFor(B)!)
+  })
+})
+
 describe('two local specs in one docs.json, only one of them named by a page', () => {
   const specWith = (path: string, tag: string) => JSON.stringify({
     openapi: '3.0.0',
