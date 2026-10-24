@@ -63,4 +63,43 @@ describe('indentation of an inlined snippet', () => {
     const body = migrate(`import Fields from '/snippets/fields.mdx'\n\n<Fields />`, { 'snippets/fields.mdx': fields })
     expect(body).toBe('- **Name**: first\n- **Description**: second')
   })
+
+  describe('code fences', () => {
+    const python = '```python\nprint("hello")\n```'
+    const nested = '````md\n```js\nx()\n```\n````'
+    const indented = '```python\ndef f():\n    return 1\n```'
+    const demo = (snippet: string) => ({ 'snippets/demo.mdx': `${snippet}\n` })
+    const use = (tag: string) => `import Demo from '/snippets/demo.mdx'\n\n${tag}`
+
+    it('keeps the code of a fence in a list item exactly as written', () => {
+      expect(migrate(use('- <Demo />'), demo(python))).toContain(`\n${python}`)
+    })
+
+    it('keeps a ~~~ fence in a list item exactly as written', () => {
+      const tilde = '~~~python\nprint("hello")\n~~~'
+      expect(migrate(use('- <Demo />'), demo(tilde))).toContain(`\n${tilde}`)
+    })
+
+    it('keeps a four-backtick fence, and the fence it holds, exactly as written', () => {
+      expect(migrate(use('- <Demo />'), demo(nested))).toContain(`\n${nested}`)
+    })
+
+    it('keeps an indented line of code after a numbered item, and still aligns the text around it', () => {
+      const body = migrate(use('1. <Demo />\n2. Next'), demo(`Do it:\n\n${indented}\n\nDone.`))
+      expect(body).toContain(`\n${indented}\n`)
+      expect(body).toContain('\n   Done.\n2. Next')
+    })
+
+    it('keeps the code of a fence inside an indented Step exactly as written', () => {
+      expect(migrate(use(step('<Demo />')), demo(`Run it:\n\n${indented}\n\nDone.`))).toContain(`\n${indented}\n`)
+    })
+
+    it('keeps the code of a fence that opens the snippet inside an indented Step', () => {
+      expect(migrate(use(step('<Demo />')), demo(indented))).toContain(`\n${indented}\n`)
+    })
+
+    it('keeps the code of a fence in a <Snippet file> used in a list item', () => {
+      expect(migrate('- <Snippet file="demo.mdx" />', demo(python))).toContain(`\n${python}`)
+    })
+  })
 })

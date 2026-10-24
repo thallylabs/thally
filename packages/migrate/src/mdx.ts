@@ -1262,22 +1262,25 @@ export function closeOpenFence(body: string): string {
  * column its tag started at, so a multi-line snippet stays inside the element
  * or list item that held the tag (its first line already sits there). Lines
  * inside a JS expression, an ESM block or a JSX attribute are left alone:
- * indenting them would change the text of a multi-line template literal. A
- * snippet that does not parse as MDX on its own is returned unchanged.
+ * indenting them would change the text of a multi-line template literal. So is
+ * every line of a fenced code block, fences included: the code stays exactly as
+ * written. A snippet that does not parse as MDX on its own is returned unchanged.
  */
 export function indentSnippetLines(snippet: string, indent: string): string {
   if (!indent || !snippet.includes('\n')) return snippet
   let tree: MdxOffsetNode
   try { tree = descriptionParser.parse(snippet) as MdxOffsetNode } catch { return snippet }
   const verbatim: Array<[number, number]> = []
-  const keep = (node: { position?: MdxOffsetNode['position'] }): void => {
+  const fenced: Array<[number, number]> = []
+  const keep = (node: { position?: MdxOffsetNode['position'] }, into = verbatim): void => {
     const start = node.position?.start.offset
     const end = node.position?.end.offset
-    if (start !== undefined && end !== undefined) verbatim.push([start, end])
+    if (start !== undefined && end !== undefined) into.push([start, end])
   }
   const visit = (node: MdxOffsetNode & { attributes?: Array<{ position?: MdxOffsetNode['position'] }> }): void => {
     if (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression' || node.type === 'mdxjsEsm') keep(node)
-    node.attributes?.forEach(keep)
+    if (node.type === 'code') keep(node, fenced)
+    node.attributes?.forEach((attribute) => keep(attribute))
     node.children?.forEach(visit)
   }
   visit(tree)
@@ -1285,8 +1288,9 @@ export function indentSnippetLines(snippet: string, indent: string): string {
   return snippet.split('\n').map((line, index) => {
     const start = lineStart
     lineStart += line.length + 1
-    // A continuation line that begins inside a verbatim span is part of its text.
-    if (index === 0 || line.trim() === '' || verbatim.some(([from, to]) => from < start && start < to)) return line
+    // A continuation line that begins inside a verbatim span is part of its text, and any line of a code block is code.
+    if (index === 0 || line.trim() === '' || verbatim.some(([from, to]) => from < start && start < to)
+      || fenced.some(([from, to]) => from < start + line.length + 1 && start < to)) return line
     return indent + line
   }).join('\n')
 }
