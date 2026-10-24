@@ -12,6 +12,7 @@ async function checkLinks(
   links: string,
   redirects: Array<{ source: string; destination: string }> = [],
   translation?: string,
+  extraPages: Record<string, string> = {},
 ): Promise<{ exit: number; output: string }> {
   const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-routes-'))
   writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({
@@ -23,6 +24,7 @@ async function checkLinks(
     introduction: links,
     'api-reference/token': '## Response\n\nThis reference explains the complete response returned by the API.',
     ...(translation ? { 'zh-Hans/api-reference/token': translation } : {}),
+    ...extraPages,
   }
   for (const [path, body] of Object.entries(pages)) {
     const file = join(projectDir, `src/content/${path}.mdx`)
@@ -236,13 +238,35 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken')
   })
 
-  it('reports a link that a regular-expression parameter does not match, and none that a source it cannot read might move', async () => {
-    const result = await checkLinks('[Other](/legacy/c) [Unread](/unread/a-x)', [
+  it('reports a link that a regular-expression parameter does not match, and none once a source Next.js refuses might move it', async () => {
+    const result = await checkLinks('[Other](/legacy/c)', [
       { source: '/legacy/:path(a|b)', destination: '/introduction' },
-      { source: '/unread/:slug\\-x', destination: '/introduction' },
     ])
     expect(result.output).toContain('Broken link: "/legacy/c"')
-    expect(result.output).not.toContain('Broken link: "/unread/a-x"')
+    const unread = await checkLinks('[Unread](/unread/a-x) [Missing](/missing)', [
+      { source: '/unread/(a(b))', destination: '/introduction' },
+    ])
+    expect(unread.output).not.toContain('Broken link')
+  })
+
+  it('splits a path on a literal dash the way Next.js does', async () => {
+    // Next.js reads `/:section-:slug` on `/docs-v1-token` as section `docs-v1` and slug `token`, not `docs` and `v1-token`.
+    const result = await checkLinks('[Token](/docs-v1-token)', [
+      { source: '/:section-:slug', destination: '/:section/:slug' },
+    ], undefined, { 'docs-v1/token': 'The token page, written to be long enough that the check does not call it empty.' })
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
+  it('reads an escaped character after an optional or repeated parameter, so a link through it resolves', async () => {
+    for (const modifier of ['?', '*', '+']) {
+      // `?` takes one segment and `*` or `+` any number; `+` needs one.
+      const result = await checkLinks('[None](/legacy-x) [One](/legacy/a-x) [Two](/legacy/a/b-x) [Elsewhere](/legacyx)', [
+        { source: `/legacy/:slug${modifier}\\-x`, destination: '/introduction' },
+      ])
+      const broken = ['/legacy-x', '/legacy/a-x', '/legacy/a/b-x', '/legacyx'].filter((link) => result.output.includes(`Broken link: "${link}"`))
+      expect(broken, modifier).toEqual(modifier === '?' ? ['/legacy/a/b-x', '/legacyx'] : modifier === '*' ? ['/legacyx'] : ['/legacy-x', '/legacyx'])
+    }
   })
 
   it('terminates on a wildcard redirect whose destination keeps matching its own source', async () => {

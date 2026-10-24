@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { compile, pathToRegexp, regexpToFunction, type Key } from 'path-to-regexp'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import remarkMdx from 'remark-mdx'
@@ -364,105 +365,56 @@ interface ResolvedLink {
 }
 
 /**
- * A docs.json redirect, with its source compiled the way Next.js reads it (path-to-regexp, as `next.config.ts` passes it on): letter
- * case is ignored, a trailing slash is optional, `:name` takes one segment, `*`, `+` or `?` after it repeat or omit it, and `(pattern)`
- * after it, or alone, is a regular expression. Anything else in a source (a group, an escape) is not read here, so it has no `regex`
- * and only claims the addresses that begin as it does (`prefix`, in lower case): none of those is ever said to be missing.
+ * A docs.json redirect, read the way Next.js reads it: the source goes through the path-to-regexp copy Next.js compiles in, with the
+ * options it passes (`getPathMatch` in shared/lib/router/utils/path-match.js and `buildCustomRoute` in server/lib/router-utils/filesystem.js),
+ * and the destination is compiled by the same `compile` (shared/lib/router/utils/prepare-destination.js). A source path-to-regexp rejects
+ * is one Next.js refuses to start with, so it has no `match` and might have moved any address: none of them is ever said to be missing.
  */
 interface RedirectRule {
-  regex: RegExp | null
-  paramNames: Array<string>
+  match: ((path: string) => false | { params: Record<string, string | Array<string>> }) | null
   destination: string
-  prefix: string
   /** A source with no route syntax at all: one address. */
   literal: boolean
 }
 
-const ROUTE_SYNTAX = /[:*+?(){}\\]/
-const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-/** The regular expression Next.js builds for a redirect source, and its parameter names (empty for an unnamed one); null for syntax not read here. */
-function routeRegex(source: string): { regex: RegExp; paramNames: Array<string> } | null {
-  const paramNames: Array<string> = []
-  let route = '^'
-  // Literal text not yet written: its last character is the prefix of a parameter that follows, if it is `/` or `.`.
-  let text = ''
-  for (let index = 0; index < source.length;) {
-    const char = source[index]
-    if (char !== ':' && char !== '(') {
-      if ('*+?{}\\)'.includes(char)) return null
-      text += char
-      index++
-      continue
-    }
-    let name = ''
-    if (char === ':') {
-      name = /^\w*/.exec(source.slice(index + 1))![0]
-      if (!name) return null
-      index += 1 + name.length
-    }
-    let pattern = '[^\\/]+?'
-    if (source[index] === '(') {
-      let depth = 1
-      let end = index + 1
-      for (; end < source.length && depth > 0; end++) {
-        if (source[end] === '\\') end++
-        else if (source[end] === ')') depth--
-        else if (source[end] === '(') {
-          // Next.js refuses a group that captures inside a pattern.
-          if (source[end + 1] !== '?') return null
-          depth++
-        }
-      }
-      pattern = source.slice(index + 1, end - 1)
-      if (depth > 0 || !pattern || pattern.startsWith('?')) return null
-      index = end
-    }
-    const modifier = /[*+?]/.test(source[index] ?? '') ? source[index++] : ''
-    const last = text.slice(-1)
-    const lead = last === '/' || last === '.' ? escapeRegex(last) : ''
-    route += escapeRegex(lead ? text.slice(0, -1) : text)
-    text = ''
-    paramNames.push(name)
-    const repeats = modifier === '*' || modifier === '+'
-    if (lead) route += repeats ? `(?:${lead}((?:${pattern})(?:${lead}(?:${pattern}))*))${modifier === '*' ? '?' : ''}` : `(?:${lead}(${pattern}))${modifier}`
-    else route += repeats ? `((?:${pattern})${modifier})` : `(${pattern})${modifier}`
-  }
-  try {
-    return { regex: new RegExp(`${route}${escapeRegex(text)}(?:\\/)?$`, 'i'), paramNames }
-  } catch {
-    return null
-  }
-}
-
 /** Compile a redirect for `resolveLink`. Exported for the test that holds it to Next.js's own matcher. */
 export function compileRedirectSource(source: string, destination: string): RedirectRule {
-  const bare = source.replace(/\/$/, '')
-  const syntax = bare.search(ROUTE_SYNTAX)
-  const compiled = routeRegex(bare)
-  return {
-    regex: compiled?.regex ?? null,
-    paramNames: compiled?.paramNames ?? [],
-    destination,
-    prefix: (syntax < 0 ? bare : bare.slice(0, syntax)).toLowerCase(),
-    literal: syntax < 0,
-  }
+  const bare = source.replace(/\/$/, '') || '/'
+  const keys: Array<Key> = []
+  let match: RedirectRule['match'] = null
+  try {
+    const regexp = pathToRegexp(bare, keys, { delimiter: '/', sensitive: false, strict: true })
+    // What Next.js's `modifyRouteRegex` does to a redirect: a trailing slash is optional, and `/_next` is never redirected.
+    const matcher = regexpToFunction<Record<string, string | Array<string>>>(new RegExp(regexp.source.replace(/\^/, '^(?!\\/_next)').replace(/\$$/, '(?:\\/)?$'), regexp.flags), keys)
+    match = (path) => {
+      const found = matcher(path)
+      if (!found) return false
+      // Next.js passes on named parameters only (`removeUnnamedParams`).
+      for (const key of keys) if (typeof key.name === 'number') delete found.params[key.name]
+      return found
+    }
+  } catch { /* Next.js rejects this source too */ }
+  return { match, destination, literal: !/[:*+?(){}\\]/.test(bare) }
 }
 
-/** Substitute a redirect's matched params into its destination template. */
-function resolveDynamicRedirectDestination(redirect: RedirectRule, match: RegExpMatchArray): string {
-  return redirect.destination.replace(/:([A-Za-z_][A-Za-z0-9_]*)[*+?]?/g, (whole, name: string) => {
-    const index = redirect.paramNames.indexOf(name)
-    return index === -1 ? whole : (match[index + 1] ?? '')
-  })
+/**
+ * Where `rule` sends `path`: undefined when it does not take it, null when its destination cannot be built (Next.js fails there too).
+ * Only the path and hash of a destination are compiled; its query is not an address.
+ */
+export function applyRedirect(rule: RedirectRule, path: string): string | null | undefined {
+  const found = rule.match?.(path)
+  if (!found) return undefined
+  if (/^(?:https?:)?\/\//i.test(rule.destination)) return rule.destination
+  try { return compile(rule.destination.replace(/\?[^#]*/, ''), { validate: false })(found.params) } catch { return null }
 }
 
-/** The first redirect, in the order docs.json lists them, that takes `path`: with its match, or `unsure` where one this check cannot read might come first. */
-function matchRedirect(rules: ReadonlyArray<RedirectRule>, path: string): { rule: RedirectRule; match: RegExpMatchArray } | 'unsure' | undefined {
+/** The first redirect, in the order docs.json lists them, that takes `path`: with where it sends it, or `unsure` where one this check cannot read might come first. */
+function matchRedirect(rules: ReadonlyArray<RedirectRule>, path: string): { to: string } | 'unsure' | undefined {
   for (const rule of rules) {
-    const match = rule.regex ? path.match(rule.regex) : null
-    if (match) return { rule, match }
-    if (!rule.regex && path.toLowerCase().startsWith(rule.prefix)) return 'unsure'
+    if (!rule.match) return 'unsure'
+    const to = applyRedirect(rule, path)
+    if (to === null) return 'unsure'
+    if (to !== undefined) return { to }
   }
   return undefined
 }
@@ -488,7 +440,7 @@ function resolveLink(target: string, redirects: ReadonlyArray<RedirectRule>): Re
     const found = matchRedirect(redirects, path)
     if (found === 'unsure') return { path, anchor, unsure: true }
     if (!found) return { path, anchor }
-    current = resolveDynamicRedirectDestination(found.rule, found.match)
+    current = found.to
   }
 }
 
@@ -807,7 +759,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     // The stub the migrator writes for a Mintlify `url:` entry: a noindex page whose own address redirects elsewhere (another site, or
     // a path on this one), so no visitor reads it and it has nothing to describe. Whether that holds depends on where the redirect
     // leads, which is known once every page is, so its notices are held back until then.
-    const isLinkStub = data.noindex === true && redirectRules.some((rule) => rule.literal && rule.regex?.test(path))
+    const isLinkStub = data.noindex === true && redirectRules.some((rule) => rule.literal && rule.match?.(path))
     const notices = isLinkStub ? [] : issues
     // The site describes an API page by its operation when the page has no description, so only the spec can say it has none.
     if (!data.description && !reference) notices.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
