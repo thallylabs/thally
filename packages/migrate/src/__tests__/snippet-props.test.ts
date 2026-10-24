@@ -42,11 +42,10 @@ describe('a snippet that uses its props as variables', () => {
       'home.mdx': page('<Role externalId="required" />\n\n<Role externalId="optional" />'),
       'snippets/role.mdx': role,
     })
-    expect(body).toContain('{"required" === "required" && (')
-    expect(body).toContain('{"required" !== "required" && <span>No external ID</span>}')
-    expect(body).toContain('{"optional" === "required" && (')
-    expect(body).toContain('Use the external ID **{"required"}**.')
-    expect(body).not.toMatch(/\bexternalId\b/)
+    // Each call keeps only the branch its prop selects, as content; nothing is left to evaluate.
+    expect(body.match(/Use the external ID \*\*\{"required"\}\*\*\./g)).toHaveLength(1)
+    expect(body.match(/<span>No external ID<\/span>/g)).toHaveLength(1)
+    expect(body).not.toMatch(/&&|===|!==|\bexternalId\b/)
     expect(warnings.map((warning) => warning.message).join('\n')).not.toContain('Expressions that use')
   })
 
@@ -109,7 +108,8 @@ describe('a snippet prop is bound only where it is a free variable', () => {
       'snippets/role.mdx': 'export const label = props.mode;\n\n{mode === "strict" && <span>{label}</span>}\n',
     })
     expect(body).toContain('export const label = "strict";')
-    expect(body).toContain('{"strict" === "strict" && <span>{label}</span>}')
+    expect(body).toContain('<span>{label}</span>')
+    expect(body).not.toContain('&&')
   })
 
   it('binds an outer reference when a callback in the same expression declares the same name', () => {
@@ -231,7 +231,7 @@ describe('a snippet prop is bound where scope analysis says a reference is free'
 
   it('binds children inside an expression a prop selects', () => {
     const body = bind('{mode === "strict" && <Note>{children}</Note>}\n', 'mode="strict"', 'Important instructions')
-    expect(body).toContain('{"strict" === "strict" && <Note>Important instructions</Note>}')
+    expect(body).toBe('<Note>Important instructions</Note>')
   })
 
   it('does not turn a label into a string, and binds the reference after it', () => {
@@ -268,5 +268,151 @@ describe('a snippet fence closes the way CommonMark closes it', () => {
     })
     expect(body).toContain('```\n{name}\n```js\n{name}\n```')
     expect(body).toContain('After strict.')
+  })
+})
+
+describe('a condition the binding has made fully static is decided at migration time', () => {
+  // The shape of Infisical's snippets/app-connections/aws/create-iam-role.mdx.
+  const iamRole = [
+    '<Step>',
+    '    Select **Another AWS account**:',
+    '',
+    '    {externalId === "required" && (',
+    '        <MDX>',
+    '            <View title="Organization-level">',
+    '                Enable **Require external ID**.',
+    '            </View>',
+    '',
+    '            Infisical sends this ID every time it assumes the role.',
+    '        </MDX>',
+    '    )}',
+    '',
+    '    {externalId === "organization" && (',
+    '        <MDX>',
+    '            Use your Organization ID.',
+    '        </MDX>',
+    '    )}',
+    '</Step>',
+    '',
+  ].join('\n')
+
+  it('keeps the branch that holds as content and removes the others, whatever the prop is', () => {
+    const run = (value: string) => migrate({
+      'home.mdx': page(`<Role externalId="${value}" />`),
+      'snippets/role.mdx': iamRole,
+    }).body
+    const required = run('required')
+    expect(required).toContain('Enable **Require external ID**.')
+    expect(required).toContain('<MDX>\n            <View title="Organization-level">')
+    expect(required).not.toContain('Use your Organization ID.')
+    const organization = run('organization')
+    expect(organization).toContain('Use your Organization ID.')
+    expect(organization).not.toContain('Enable **Require external ID**.')
+    const skipped = run('skip')
+    expect(skipped).not.toMatch(/Require external ID|Organization ID/)
+    for (const body of [required, organization, skipped]) {
+      expect(body).toContain('Select **Another AWS account**:')
+      expect(body).not.toMatch(/&&|===|externalId/)
+    }
+  })
+
+  it('decides ternaries, negation, || and nested conditions', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="cloud" other="x" />'),
+      'snippets/role.mdx': [
+        'Runs on {mode === "cloud" ? "Infisical Cloud" : "your own servers"}.',
+        '',
+        'Version {mode != "cloud" ? "self" : 2}',
+        '',
+        '{!(mode === "dedicated") && <b>not dedicated</b>}',
+        '',
+        '{mode === "dedicated" || other === "x" ? <i>either</i> : <u>neither</u>}',
+        '',
+        '{mode === "cloud" && (other === "y" || other === "x" && (<span>nested</span>))}',
+        '',
+        '{mode === "cloud" ? (other === "x" ? <em>one</em> : <u>two</u>) : <s>three</s>}',
+        '',
+        '{mode === "dedicated" && <u>never</u>}',
+        '',
+        '{mode === "cloud" ? "A & B" : "C"}',
+        '',
+      ].join('\n'),
+    })
+    expect(body.split('\n').filter(Boolean)).toEqual([
+      'Runs on Infisical Cloud.',
+      'Version {2}',
+      '<b>not dedicated</b>',
+      '<i>either</i>',
+      '<span>nested</span>',
+      '<em>one</em>',
+      '{"A & B"}',
+    ])
+  })
+
+  it('decides an attribute that selects a literal, and leaves one that selects JSX', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="cloud" />'),
+      'snippets/role.mdx': '<Card title={mode === "cloud" ? "Cloud" : "Self"} icon={mode === "cloud" && <Icon />} />\n',
+    })
+    expect(body).toContain('<Card title={"Cloud"} icon={"cloud" === "cloud" && <Icon />} />')
+  })
+
+  it('leaves an expression with anything not static as written, bound', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="cloud" />'),
+      'snippets/role.mdx': [
+        'export const later = "yes"',
+        'export const items = []',
+        'export function check() { return true }',
+        '',
+        '{mode === "cloud" && later}',
+        '',
+        '{mode === "cloud" && check() && <b>call</b>}',
+        '',
+        '{mode === "cloud" && items.length > 0 && <b>compare</b>}',
+        '',
+        '{mode === "cloud" ?? <b>nullish</b>}',
+        '',
+        '{(mode === "cloud" && <b>seen</b>) || later}',
+        '',
+        '{mode === "cloud" ? [1, 2] : []}',
+        '',
+        '{mode + "!" === "cloud!" && <b>concat</b>}',
+        '',
+        '{mode === `cloud` && <b>template</b>}',
+        '',
+        '{mode === "cloud" && -1 === -1 && <b>negative</b>}',
+        '',
+      ].join('\n'),
+    })
+    expect(body).toContain('{"cloud" === "cloud" && later}')
+    expect(body).toContain('{"cloud" === "cloud" && check() && <b>call</b>}')
+    expect(body).toContain('{"cloud" === "cloud" && items.length > 0 && <b>compare</b>}')
+    expect(body).toContain('{"cloud" === "cloud" ?? <b>nullish</b>}')
+    expect(body).toContain('{("cloud" === "cloud" && <b>seen</b>) || later}')
+    expect(body).toContain('{"cloud" === "cloud" ? [1, 2] : []}')
+    expect(body).toContain('{"cloud" + "!" === "cloud!" && <b>concat</b>}')
+    expect(body).toContain('{"cloud" === `cloud` && <b>template</b>}')
+    expect(body).toContain('{"cloud" === "cloud" && -1 === -1 && <b>negative</b>}')
+  })
+
+  it('leaves a condition the page wrote static itself, and a fenced example, as written', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="cloud" />'),
+      'snippets/role.mdx': [
+        '{true && <b>already static</b>}',
+        '',
+        '```jsx',
+        '{mode === "cloud" && <b>example</b>}',
+        '```',
+        '',
+        '{mode === "cloud" && <b>decided</b>}',
+        '',
+      ].join('\n'),
+    })
+    expect(body).toContain('{true && <b>already static</b>}')
+    expect(body).toContain('```jsx\n{mode === "cloud" && <b>example</b>}\n```')
+    expect(body).toContain('<b>decided</b>')
+    expect(body).not.toContain('{"cloud" === "cloud"')
   })
 })
