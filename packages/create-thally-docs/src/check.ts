@@ -721,6 +721,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
+  // The pages that are only a stub for a redirect, with the notices about their empty body held until every page is known.
+  const linkStubs: Array<{ file: string; path: string; issues: LintIssue[] }> = []
 
   for (const filePath of allFiles) {
     const rel = filePath.slice(contentDir.length + 1).replace(/\.mdx$/, '').replace(/\\/g, '/')
@@ -755,14 +757,18 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const rel2 = relative(projectDir, filePath)
     if (!data.title) issues.push({ severity: 'warning', message: `Missing "title" in frontmatter`, file: rel2 })
     const reference = parseDocReference(data.openapi)
+    const path = pageIdToPath(pageId, secondaryLocales)
     // The stub the migrator writes for a Mintlify `url:` entry: a noindex page whose own address redirects elsewhere (another site, or
-    // a path on this one), so no visitor reads it and it has nothing to describe.
-    const isLinkStub = data.noindex === true && redirectDestinations.has(pageIdToPath(pageId, secondaryLocales))
+    // a path on this one), so no visitor reads it and it has nothing to describe. Whether that holds depends on where the redirect
+    // leads, which is known once every page is, so its notices are held back until then.
+    const isLinkStub = data.noindex === true && redirectDestinations.has(path)
+    const notices = isLinkStub ? [] : issues
     // The site describes an API page by its operation when the page has no description, so only the spec can say it has none.
-    if (!data.description && !reference && !isLinkStub) issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
-    if (typeof data.openapi !== 'string' && !isLinkStub && content.trim().length < 50) {
-      issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
+    if (!data.description && !reference) notices.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
+    if (typeof data.openapi !== 'string' && content.trim().length < 50) {
+      notices.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
+    if (isLinkStub) linkStubs.push({ file: rel2, path, issues: notices })
 
     if (reference) operationPages.push({ file: rel2, reference, hasDescription: Boolean(data.description) })
     for (const message of manualApiProblems(rel2, data, Boolean(reference), content, (config as { api?: unknown }).api)) {
@@ -771,7 +777,6 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
-    const path = pageIdToPath(pageId, secondaryLocales)
     const anchors = extractHeadingAnchors(content)
     validPaths.add(path)
     // The runtime accepts the explicit introduction slug as well as `/`.
@@ -794,6 +799,23 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     }
   }
 
+  // Generated API pages, Next.js internals and files are served without a page of their own.
+  const isGeneratedPath = (path: string): boolean => Array.from(generatedApiPaths).some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+    || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path)
+
+  // A stub only stands in for a redirect: where that leads nowhere (a missing page, a loop) the navigation entry for it is a dead end.
+  for (const { file, path, issues: notices } of linkStubs) {
+    const { path: destination, cycle, external } = resolveLink(path, redirectDestinations, dynamicRedirects)
+    if (external || (!cycle && (isGeneratedPath(destination) || validPaths.has(destination)))) continue
+    issues.push(...notices, {
+      severity: 'error',
+      message: cycle
+        ? `Broken redirect: "${path}" redirects in a loop, so the page it stands in for cannot be reached`
+        : `Broken redirect: "${path}" redirects to "${destination}", where there is no page`,
+      file,
+    })
+  }
+
   // Broken internal link + anchor detection (after all valid paths are known).
   const externalLinks: Array<ExternalLinkReference> = []
   for (const { file, anchors, links, offset } of linksByFile) {
@@ -814,10 +836,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (!target.startsWith('/')) continue // relative/asset links — not validated
       const { path, anchor, cycle, external } = resolveLink(target, redirectDestinations, dynamicRedirects)
       if (external) continue
-      const isGeneratedApiPath = Array.from(generatedApiPaths).some(
-        (prefix) => path === prefix || path.startsWith(`${prefix}/`),
-      )
-      if (!cycle && (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path))) continue // generated/assets
+      if (!cycle && isGeneratedPath(path)) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
       } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor))) {

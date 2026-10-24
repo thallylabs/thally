@@ -79,6 +79,44 @@ describe('thally check on the stub the migrator writes for a Mintlify url entry'
     expect((byFile.get('src/content/github-repo.mdx') ?? []).filter((message) => stubWarning.test(message))).toEqual([])
   })
 
+  describe('when the redirect from the stub does not lead anywhere', () => {
+    /** The same stub, with these redirects instead of the one the migrator wrote. */
+    const withRedirects = (redirects: Array<{ source: string; destination: string }>) => issuesByFile({}, (site) => {
+      writeFileSync(join(site, 'src/content/github-repo.mdx'), '---\ntitle: GitHub repo\nnoindex: true\n---\n')
+      const config = JSON.parse(readFileSync(join(site, 'docs.json'), 'utf8')) as { redirects?: Array<{ source: string }> }
+      config.redirects = [...(config.redirects ?? []).filter((redirect) => redirect.source !== '/github-repo'), ...redirects] as Array<{ source: string }>
+      writeFileSync(join(site, 'docs.json'), JSON.stringify(config))
+    })
+    const reported = async (redirects: Array<{ source: string; destination: string }>) =>
+      (await withRedirects(redirects)).get('src/content/github-repo.mdx') ?? []
+
+    it('reports a redirect to a page that does not exist, and keeps the stub warnings', async () => {
+      const messages = await reported([{ source: '/github-repo', destination: '/missing' }])
+      expect(messages.filter((message) => /Broken redirect.*\/github-repo.*\/missing/.test(message))).toHaveLength(1)
+      expect(messages.filter((message) => stubWarning.test(message))).toHaveLength(2)
+    })
+
+    it('reports a redirect to itself', async () => {
+      const messages = await reported([{ source: '/github-repo', destination: '/github-repo' }])
+      expect(messages.filter((message) => /Broken redirect.*loop/.test(message))).toHaveLength(1)
+    })
+
+    it('reports a chain of redirects that comes back to the stub', async () => {
+      const messages = await reported([{ source: '/github-repo', destination: '/other' }, { source: '/other', destination: '/github-repo' }])
+      expect(messages.filter((message) => /Broken redirect.*loop/.test(message))).toHaveLength(1)
+    })
+
+    it('reports nothing when the chain ends on a page or another site', async () => {
+      for (const redirects of [
+        [{ source: '/github-repo', destination: '/other' }, { source: '/other', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/introduction#login' }],
+        [{ source: '/github-repo', destination: '/other' }, { source: '/other', destination: 'https://github.com/acme/docs' }],
+      ]) {
+        expect(await reported(redirects)).toEqual([])
+      }
+    })
+  })
+
   it('still warns about an ordinary short page next to it', async () => {
     const byFile = await issuesByFile()
     expect((byFile.get('src/content/short.mdx') ?? []).filter((message) => stubWarning.test(message))).toHaveLength(2)
