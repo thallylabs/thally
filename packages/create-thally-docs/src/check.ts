@@ -359,57 +359,120 @@ interface ResolvedLink {
   anchor?: string
   external?: boolean
   cycle?: boolean
-}
-
-interface DynamicRedirect {
-  regex: RegExp
-  paramNames: Array<string>
-  destination: string
+  /** A redirect this check cannot read might have moved the address, so no page can be said to be missing. */
+  unsure?: boolean
 }
 
 /**
- * Compile a Next.js-style redirect source into a matcher, for a source that
- * contains a dynamic segment (`:param`, `:param*`, `:param+`, `:param?`) —
- * the same syntax `next.config.ts` passes straight to Next's own
- * `redirects()`. A purely literal source (no `:`) doesn't need this; it
- * stays in the exact-match map below. `*`/`+` consume the rest of the path
- * including further `/` segments, matching Next's own behavior.
+ * A docs.json redirect, with its source compiled the way Next.js reads it (path-to-regexp, as `next.config.ts` passes it on): letter
+ * case is ignored, a trailing slash is optional, `:name` takes one segment, `*`, `+` or `?` after it repeat or omit it, and `(pattern)`
+ * after it, or alone, is a regular expression. Anything else in a source (a group, an escape) is not read here, so it has no `regex`
+ * and only claims the addresses that begin as it does (`prefix`, in lower case): none of those is ever said to be missing.
  */
-function compileDynamicRedirectSource(source: string, destination: string): DynamicRedirect | null {
-  if (!source.includes(':')) return null
-  const paramNames: Array<string> = []
-  let pattern = ''
-  source.split('/').forEach((segment, index) => {
-    const match = segment.match(/^:([A-Za-z_][A-Za-z0-9_]*)([*+?]?)$/)
-    const separator = index === 0 ? '' : '/'
-    if (!match) {
-      pattern += separator + segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      return
-    }
-    const [, name, quantifier] = match
-    paramNames.push(name)
-    // `*` and `?` also match with the whole segment (and its `/`) absent.
-    if (quantifier === '*') pattern += `(?:${separator}(.*))?`
-    else if (quantifier === '?') pattern += `(?:${separator}([^/]+))?`
-    else pattern += `${separator}(${quantifier === '+' ? '.+' : '[^/]+'})`
-  })
-  return { regex: new RegExp(`^${pattern}$`), paramNames, destination }
+interface RedirectRule {
+  regex: RegExp | null
+  paramNames: Array<string>
+  destination: string
+  prefix: string
+  /** A source with no route syntax at all: one address. */
+  literal: boolean
 }
 
-/** Substitute a dynamic redirect's matched params into its destination template. */
-function resolveDynamicRedirectDestination(redirect: DynamicRedirect, match: RegExpMatchArray): string {
+const ROUTE_SYNTAX = /[:*+?(){}\\]/
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** The regular expression Next.js builds for a redirect source, and its parameter names (empty for an unnamed one); null for syntax not read here. */
+function routeRegex(source: string): { regex: RegExp; paramNames: Array<string> } | null {
+  const paramNames: Array<string> = []
+  let route = '^'
+  // Literal text not yet written: its last character is the prefix of a parameter that follows, if it is `/` or `.`.
+  let text = ''
+  for (let index = 0; index < source.length;) {
+    const char = source[index]
+    if (char !== ':' && char !== '(') {
+      if ('*+?{}\\)'.includes(char)) return null
+      text += char
+      index++
+      continue
+    }
+    let name = ''
+    if (char === ':') {
+      name = /^\w*/.exec(source.slice(index + 1))![0]
+      if (!name) return null
+      index += 1 + name.length
+    }
+    let pattern = '[^\\/]+?'
+    if (source[index] === '(') {
+      let depth = 1
+      let end = index + 1
+      for (; end < source.length && depth > 0; end++) {
+        if (source[end] === '\\') end++
+        else if (source[end] === ')') depth--
+        else if (source[end] === '(') {
+          // Next.js refuses a group that captures inside a pattern.
+          if (source[end + 1] !== '?') return null
+          depth++
+        }
+      }
+      pattern = source.slice(index + 1, end - 1)
+      if (depth > 0 || !pattern || pattern.startsWith('?')) return null
+      index = end
+    }
+    const modifier = /[*+?]/.test(source[index] ?? '') ? source[index++] : ''
+    const last = text.slice(-1)
+    const lead = last === '/' || last === '.' ? escapeRegex(last) : ''
+    route += escapeRegex(lead ? text.slice(0, -1) : text)
+    text = ''
+    paramNames.push(name)
+    const repeats = modifier === '*' || modifier === '+'
+    if (lead) route += repeats ? `(?:${lead}((?:${pattern})(?:${lead}(?:${pattern}))*))${modifier === '*' ? '?' : ''}` : `(?:${lead}(${pattern}))${modifier}`
+    else route += repeats ? `((?:${pattern})${modifier})` : `(${pattern})${modifier}`
+  }
+  try {
+    return { regex: new RegExp(`${route}${escapeRegex(text)}(?:\\/)?$`, 'i'), paramNames }
+  } catch {
+    return null
+  }
+}
+
+/** Compile a redirect for `resolveLink`. Exported for the test that holds it to Next.js's own matcher. */
+export function compileRedirectSource(source: string, destination: string): RedirectRule {
+  const bare = source.replace(/\/$/, '')
+  const syntax = bare.search(ROUTE_SYNTAX)
+  const compiled = routeRegex(bare)
+  return {
+    regex: compiled?.regex ?? null,
+    paramNames: compiled?.paramNames ?? [],
+    destination,
+    prefix: (syntax < 0 ? bare : bare.slice(0, syntax)).toLowerCase(),
+    literal: syntax < 0,
+  }
+}
+
+/** Substitute a redirect's matched params into its destination template. */
+function resolveDynamicRedirectDestination(redirect: RedirectRule, match: RegExpMatchArray): string {
   return redirect.destination.replace(/:([A-Za-z_][A-Za-z0-9_]*)[*+?]?/g, (whole, name: string) => {
     const index = redirect.paramNames.indexOf(name)
     return index === -1 ? whole : (match[index + 1] ?? '')
   })
 }
 
+/** The first redirect, in the order docs.json lists them, that takes `path`: with its match, or `unsure` where one this check cannot read might come first. */
+function matchRedirect(rules: ReadonlyArray<RedirectRule>, path: string): { rule: RedirectRule; match: RegExpMatchArray } | 'unsure' | undefined {
+  for (const rule of rules) {
+    const match = rule.regex ? path.match(rule.regex) : null
+    if (match) return { rule, match }
+    if (!rule.regex && path.toLowerCase().startsWith(rule.prefix)) return 'unsure'
+  }
+  return undefined
+}
+
 const MAX_REDIRECT_HOPS = 20
 
 const MISSING_DESCRIPTION = 'Missing "description" in frontmatter'
 
-/** Follow literal and Next.js-style dynamic site redirects without accepting cycles as reachable pages. */
-function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dynamicRedirects: ReadonlyArray<DynamicRedirect> = []): ResolvedLink {
+/** Follow site redirects, in the order and with the matching Next.js applies, without accepting cycles as reachable pages. */
+function resolveLink(target: string, redirects: ReadonlyArray<RedirectRule>): ResolvedLink {
   let current = target
   let anchor: string | undefined
   const seen = new Set<string>()
@@ -422,16 +485,10 @@ function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dyn
     // A wildcard can keep matching its own destination (`/docs/:p*` -> `/docs/v2/:p*`), producing a new path every hop.
     if (seen.has(path) || seen.size >= MAX_REDIRECT_HOPS) return { path, anchor, cycle: true }
     seen.add(path)
-    const literalRedirect = redirects.get(path)
-    if (literalRedirect) {
-      current = literalRedirect
-      continue
-    }
-    const dynamicMatch = dynamicRedirects
-      .map((redirect) => ({ redirect, match: path.match(redirect.regex) }))
-      .find((candidate): candidate is { redirect: DynamicRedirect; match: RegExpMatchArray } => candidate.match !== null)
-    if (!dynamicMatch) return { path, anchor }
-    current = resolveDynamicRedirectDestination(dynamicMatch.redirect, dynamicMatch.match)
+    const found = matchRedirect(redirects, path)
+    if (found === 'unsure') return { path, anchor, unsure: true }
+    if (!found) return { path, anchor }
+    current = resolveDynamicRedirectDestination(found.rule, found.match)
   }
 }
 
@@ -676,18 +733,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     '/api',
     ...Array.from(secondaryLocales, (locale) => `/${locale}/api`),
   ])
-  const redirectDestinations = new Map(
-    (config.redirects ?? [])
-      .filter((redirect) => !redirect.source.includes(':'))
-      .map((redirect) => [
-        redirect.source.replace(/\/$/, '') || '/',
-        redirect.destination,
-      ]),
-  )
-  const dynamicRedirects = (config.redirects ?? []).flatMap((redirect) => {
-    const compiled = compileDynamicRedirectSource(redirect.source, redirect.destination)
-    return compiled ? [compiled] : []
-  })
+  const redirectRules = (config.redirects ?? []).map(({ source, destination }) => compileRedirectSource(source, destination))
 
   for (const message of validateIntegrations((config as { integrations?: unknown }).integrations)) {
     issues.push({ severity: 'warning', message, file: 'docs.json' })
@@ -761,7 +807,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     // The stub the migrator writes for a Mintlify `url:` entry: a noindex page whose own address redirects elsewhere (another site, or
     // a path on this one), so no visitor reads it and it has nothing to describe. Whether that holds depends on where the redirect
     // leads, which is known once every page is, so its notices are held back until then.
-    const isLinkStub = data.noindex === true && redirectDestinations.has(path)
+    const isLinkStub = data.noindex === true && redirectRules.some((rule) => rule.literal && rule.regex?.test(path))
     const notices = isLinkStub ? [] : issues
     // The site describes an API page by its operation when the page has no description, so only the spec can say it has none.
     if (!data.description && !reference) notices.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
@@ -805,8 +851,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   // A stub only stands in for a redirect: where that leads nowhere (a missing page, a loop) the navigation entry for it is a dead end.
   for (const { file, path, issues: notices } of linkStubs) {
-    const { path: destination, cycle, external } = resolveLink(path, redirectDestinations, dynamicRedirects)
-    if (external || (!cycle && (isGeneratedPath(destination) || validPaths.has(destination)))) continue
+    const { path: destination, cycle, external, unsure } = resolveLink(path, redirectRules)
+    if (external || unsure || (!cycle && (isGeneratedPath(destination) || validPaths.has(destination)))) continue
     issues.push(...notices, {
       severity: 'error',
       message: cycle
@@ -834,8 +880,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
         continue
       }
       if (!target.startsWith('/')) continue // relative/asset links — not validated
-      const { path, anchor, cycle, external } = resolveLink(target, redirectDestinations, dynamicRedirects)
-      if (external) continue
+      const { path, anchor, cycle, external, unsure } = resolveLink(target, redirectRules)
+      if (external || unsure) continue
       if (!cycle && isGeneratedPath(path)) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })

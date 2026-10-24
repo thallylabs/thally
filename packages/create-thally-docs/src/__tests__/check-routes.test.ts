@@ -227,6 +227,24 @@ describe('thally check reader routes', () => {
     expect(result.output).toContain('Broken link: "/old/nowhere"')
   })
 
+  it('matches a redirect source ignoring letter case, and reads a regular expression for a parameter', async () => {
+    const result = await checkLinks('[Old](/OLD) [Param](/legacy/api-reference/token)', [
+      { source: '/old', destination: '/introduction' },
+      { source: '/legacy/:path(.*)', destination: '/:path' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
+  it('reports a link that a regular-expression parameter does not match, and none that a source it cannot read might move', async () => {
+    const result = await checkLinks('[Other](/legacy/c) [Unread](/unread/a-x)', [
+      { source: '/legacy/:path(a|b)', destination: '/introduction' },
+      { source: '/unread/:slug\\-x', destination: '/introduction' },
+    ])
+    expect(result.output).toContain('Broken link: "/legacy/c"')
+    expect(result.output).not.toContain('Broken link: "/unread/a-x"')
+  })
+
   it('terminates on a wildcard redirect whose destination keeps matching its own source', async () => {
     const result = await checkLinks('[Docs](/docs/intro)', [
       { source: '/docs/:slug*', destination: '/docs/v2/:slug*' },

@@ -106,6 +106,50 @@ describe('thally check on the stub the migrator writes for a Mintlify url entry'
       expect(messages.filter((message) => /Broken redirect.*loop/.test(message))).toHaveLength(1)
     })
 
+    // Next matches a redirect source as the runtime does: ignoring letter case, with or without a trailing slash, with a regular
+    // expression for a parameter, and on the path alone. Where the check cannot read a source it cannot tell, so it says nothing.
+    it('follows a source the way the runtime matches it', async () => {
+      for (const redirects of [
+        [{ source: '/github-repo', destination: '/OTHER' }, { source: '/other', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/other' }, { source: '/OTHER', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/other/' }, { source: '/other', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/other' }, { source: '/other/', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/other?from=stub#top' }, { source: '/other', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old/a' }, { source: '/old/:path(.*)', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old/a/b' }, { source: '/old/:path(.*)', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/OLD/a' }, { source: '/old/:path*', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old/a/b' }, { source: '/old/:path*', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old' }, { source: '/old/:path*', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old/a' }, { source: '/old/:path(a|b)', destination: '/introduction' }],
+        [{ source: '/github-repo', destination: '/old/a' }, { source: '/old/:path(.*)', destination: '/other/:path' }, { source: '/other/a', destination: '/introduction' }],
+      ]) {
+        expect(await reported(redirects), JSON.stringify(redirects)).toEqual([])
+      }
+    })
+
+    it('still reports a chain that a source of that syntax sends nowhere', async () => {
+      for (const redirects of [
+        [{ source: '/github-repo', destination: '/old/a' }, { source: '/old/:path(.*)', destination: '/missing' }],
+        [{ source: '/github-repo', destination: '/old/a' }, { source: '/old/:path*', destination: '/missing' }],
+        [{ source: '/github-repo', destination: '/OTHER' }, { source: '/other', destination: '/missing' }],
+        // The pattern does not match, so nothing redirects `/old/c` and it is no page.
+        [{ source: '/github-repo', destination: '/old/c' }, { source: '/old/:path(a|b)', destination: '/introduction' }],
+      ]) {
+        const messages = await reported(redirects)
+        expect(messages.filter((message) => /Broken redirect/.test(message)), JSON.stringify(redirects)).toHaveLength(1)
+      }
+    })
+
+    it('says nothing about a destination a source it cannot read might redirect', async () => {
+      // A backslash escape and a group are route syntax the check does not read: `/legacy/a-x` may be what each of them matches.
+      for (const unreadable of ['/legacy/:slug\\-x', '/legacy{/:slug}?']) {
+        expect(await reported([{ source: '/github-repo', destination: '/legacy/a-x' }, { source: unreadable, destination: '/introduction' }]), unreadable).toEqual([])
+      }
+      // A destination it can tell they do not match is still no page.
+      const messages = await reported([{ source: '/github-repo', destination: '/missing' }, { source: '/legacy/:slug\\-x', destination: '/introduction' }])
+      expect(messages.filter((message) => /Broken redirect/.test(message))).toHaveLength(1)
+    })
+
     it('reports nothing when the chain ends on a page or another site', async () => {
       for (const redirects of [
         [{ source: '/github-repo', destination: '/other' }, { source: '/other', destination: '/introduction' }],
