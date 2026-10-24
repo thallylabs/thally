@@ -92,3 +92,31 @@ describe('flattenSchema with a union inside allOf', () => {
     expect(flat.anyOf).toBeUndefined()
   })
 })
+
+describe('flattenSchema with a union that has one member', () => {
+  it('keeps every keyword of the member, not only its fields', () => {
+    const member = {
+      type: 'array',
+      description: 'The ids.',
+      nullable: true,
+      items: { type: 'object', properties: { id: { type: 'string' } } },
+    }
+    const flat = flattenSchema({ allOf: [{ minItems: 1 }], oneOf: [member] })
+    expect(flat).toMatchObject(member)
+  })
+
+  it('keeps enum, format, additionalProperties and the schema\'s own keywords', () => {
+    const flat = flattenSchema({
+      description: 'The mode.',
+      allOf: [{ type: 'object' }],
+      anyOf: [{ type: 'object', additionalProperties: { type: 'string' }, properties: { mode: { type: 'string', format: 'slug', enum: ['a', 'b'] } } }],
+    })
+    expect(flat.description).toBe('The mode.')
+    expect(flat.additionalProperties).toEqual({ type: 'string' })
+    expect((flat.properties as Record<string, unknown>).mode).toEqual({ type: 'string', format: 'slug', enum: ['a', 'b'] })
+  })
+
+  it('keeps an anyOf or oneOf that has no schema to merge', () => {
+    expect(flattenSchema({ allOf: [{ type: 'object' }], oneOf: [] }).oneOf).toEqual([])
+  })
+})

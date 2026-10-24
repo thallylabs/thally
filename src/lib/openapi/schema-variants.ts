@@ -54,29 +54,29 @@ function mergeFragments(base: Record<string, unknown>, fragments: Array<Record<s
 export function flattenSchema(schema: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(schema.allOf)) return schema
 
-  const { allOf, anyOf, oneOf, ...rest } = schema as { allOf: Array<unknown>; anyOf?: unknown; oneOf?: unknown } & Record<string, unknown>
+  const { allOf, ...own } = schema as { allOf: Array<unknown> } & Record<string, unknown>
+  const { anyOf, oneOf, ...rest } = own
   const fragments = [...allOf, ...(anyOf || oneOf ? [{ anyOf, oneOf }] : [])].filter(isSchema).map(flattenSchema)
   const at = fragments.findIndex((fragment) => unionMembers(fragment))
-  if (at < 0) return mergeFragments(rest, fragments)
+  // Without members the anyOf or oneOf is kept as the schema had it.
+  if (at < 0) return mergeFragments(own, fragments)
 
   const members = unionMembers(fragments[at]) as Array<Record<string, unknown>>
   // What the union fragment holds besides its members is shared by all of them.
   const shared = { ...fragments[at], anyOf: undefined, oneOf: undefined }
   const withMember = (member: Record<string, unknown>) => fragments.flatMap((fragment, index) => (index === at ? [shared, member] : [fragment]))
-  if (members.length === 1) return flattenSchema({ ...rest, allOf: withMember(members[0]) })
 
   // The union has no type or properties of its own: each member lists them, with its own title and description.
   const outer = { ...rest }
   for (const key of ['properties', 'required', 'type']) delete outer[key]
-  return {
-    ...outer,
-    anyOf: members.map((member) => {
-      const flat = flattenSchema(member)
-      const own = { ...flat }
-      for (const key of ['properties', 'required', 'type']) delete own[key]
-      return flattenSchema({ ...own, allOf: [structure(rest), ...withMember(structure(flat))] })
-    }),
-  }
+  const variants = members.map((member) => {
+    const flat = flattenSchema(member)
+    const memberOwn = { ...flat }
+    for (const key of ['properties', 'required', 'type']) delete memberOwn[key]
+    return flattenSchema({ ...memberOwn, allOf: [structure(rest), ...withMember(structure(flat))] })
+  })
+  // One member is no union: the schema is that member, with every keyword it has.
+  return variants.length === 1 ? { ...variants[0], ...outer } : { ...outer, anyOf: variants }
 }
 
 export interface SchemaVariant {
