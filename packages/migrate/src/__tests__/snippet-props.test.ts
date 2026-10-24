@@ -249,3 +249,24 @@ describe('a snippet prop is bound where scope analysis says a reference is free'
     expect(body).toContain('static { var mode = "local"; } }; return "strict"')
   })
 })
+
+describe('a snippet fence closes the way CommonMark closes it', () => {
+  it('keeps a shorter fence inside a longer one, and the text after the longer one is bound again', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role name="strict" />'),
+      'snippets/role.mdx': ['Before {name}.', '', '````js', '```js', '{name}', '```', '{name}', '````', '', 'After {name}.', ''].join('\n'),
+    })
+    expect(body).toContain('````js\n```js\n{name}\n```\n{name}\n````')
+    expect(body).toContain('Before strict.')
+    expect(body).toContain('After strict.')
+  })
+
+  it('does not close a fence on a line that has an info string', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role name="strict" />'),
+      'snippets/role.mdx': ['```', '{name}', '```js', '{name}', '```', '', 'After {name}.', ''].join('\n'),
+    })
+    expect(body).toContain('```\n{name}\n```js\n{name}\n```')
+    expect(body).toContain('After strict.')
+  })
+})

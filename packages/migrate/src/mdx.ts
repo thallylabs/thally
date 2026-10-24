@@ -618,10 +618,11 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   for (const line of body.split('\n')) {
     const start = lineStart
     lineStart += line.length + 1
-    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
+    const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/)
     if (marker) {
-      if (!fence) fence = marker[0]
-      else if (marker[0] === fence) fence = ''
+      // A fence closes on the same character, at least as long, with nothing after it: a shorter one or one with an info string is code.
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = ''
       continue
     }
     if (fence) continue
