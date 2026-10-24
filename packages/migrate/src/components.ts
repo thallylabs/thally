@@ -1195,6 +1195,11 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     return wrapperPath
   }
 
+  /** The module of a callback adapter, named by where its page sits in the site and where in the page the tag starts, never by where the repository was cloned. */
+  function callbackWrapperPath(currentFile: string, offset: number): string {
+    return `${destinationRoot}/callback-${hash(`${relative(root, currentFile)}:${offset}`)}.jsx`
+  }
+
   function register(path: string, imported: string): string {
     const name = `Migrated${hash(`${path}:${imported}`)}`
     registrations.set(name, { path, imported })
@@ -1890,7 +1895,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // A later spread or prop of the same name would be overridden by the moved callback: keep the callback passive instead.
         if (safeDeclaration && binding && keepsPropPrecedence(node, functionAttributes[0])) {
           const fallbackDeclaration = declaration!.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')
-          const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`
+          const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
           const imported = binding.imported === 'default' ? 'default' : binding.imported
           const importClause = imported === 'default' ? 'import Original' : `import { ${imported} as Original }`
           const specifier = portableSpecifier(`./${relative(destinationRoot, binding.path).replace(/\\/g, '/')}`)
@@ -1946,7 +1951,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       if (functionAttributes.length === 0) return
       const moduleSpecifier = (path: string): string => JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
-      const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`
+      const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
       const wrapperName = register(wrapperPath, 'CallbackWrapper')
       copied.set(wrapperPath, { path: wrapperPath, content: [
         "'use client';",

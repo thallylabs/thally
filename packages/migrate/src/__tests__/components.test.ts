@@ -1137,6 +1137,36 @@ describe('repository component migration', () => {
     expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
   })
 
+  it('names callback adapters and the component registry the same on every run, wherever the repository is cloned', () => {
+    const files = {
+      'docs.json': JSON.stringify({ navigation: { pages: ['home'] } }),
+      'home.mdx': [
+        '---', 'title: Home', '---', '',
+        "import { Playground } from './snippets/playground.jsx'",
+        "import { Viewer } from './snippets/viewer.jsx'",
+        "import format from './snippets/format.js'", '',
+        'export const WidgetCodeBlock = ({ children, ...props }) => (<CodeBlock {...props}>{children}</CodeBlock>);', '',
+        '<Playground CodeBlockComponent={WidgetCodeBlock}><Warning>Keep this.</Warning></Playground>', '',
+        '<Viewer format={format} />', '',
+      ].join('\n'),
+      'snippets/playground.jsx': 'export const Playground = ({ children, CodeBlockComponent }) => <section><CodeBlockComponent>sample</CodeBlockComponent>{children}</section>',
+      'snippets/viewer.jsx': 'export const Viewer = ({ format }) => { const [open] = useState(true); return open ? <p>{format("x")}</p> : null }',
+      'snippets/format.js': 'export default function format(value) { return value }',
+    }
+    const migrate = () => {
+      const bundle = migrateRepository({ repositoryDir: fixture(files), sourceUrl: 'https://github.com/example/docs' })
+      const rendered = renderMigrationFiles(bundle)
+      return {
+        body: bundle.pages.find((page) => page.id === 'home')!.body,
+        paths: rendered.map((file) => file.path).sort(),
+        registry: String(rendered.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content),
+      }
+    }
+    const first = migrate()
+    expect(first.paths.filter((path) => path.includes('/callback-'))).toHaveLength(2)
+    expect(migrate()).toEqual(first)
+  })
+
   it('removes a React hook import unused outside fenced examples', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
