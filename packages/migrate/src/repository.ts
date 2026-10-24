@@ -5321,10 +5321,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           // Restricted pages' markup must not keep a rule (and the image its
           // url() names) public; rules only they use are dropped.
           ...pages.filter((page) => !restrictedPages.has(page)).map((page) => page.body),
-          ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
           // Site-wide scripts build markup of their own (a CTA card, say) that the stylesheet is meant for.
           ...files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.js'
             && lstatSync(file.absolutePath).size <= MAX_PAGE_BYTES).map((file) => readFileSync(file.absolutePath, 'utf8')),
+        ], [
+          // A copied component builds its class names at run time, so every string in one may be a class.
+          ...(componentMigrator?.files() ?? []).flatMap((file) => typeof file.content === 'string' && /\.[cm]?[jt]sx?$/i.test(file.path) ? [file.content] : []),
         ])
       } catch {
         rootStyleProblem = 'parse'
@@ -5547,6 +5549,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         code: 'unsupported-config',
         source: 'style.css',
         message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
+      })
+      const { runtime, unused } = rootStyleProjection.skippedVariables
+      const otherDeclarations = rootStyleProjection.skippedThemeDeclarations
+      if (runtime.length + unused.length + otherDeclarations > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Left out of the theme blocks (:root, .dark) of style.css: ${[
+          runtime.length ? `${runtime.join(', ')} (Thally defines ${runtime.length === 1 ? 'it' : 'them'} itself, and the import would change Thally's own colours or layout)` : '',
+          unused.length ? `${unused.join(', ')} (no imported rule uses ${unused.length === 1 ? 'it' : 'them'})` : '',
+          otherDeclarations ? `${otherDeclarations} other declaration${otherDeclarations === 1 ? '' : 's'} that would restyle the page itself` : '',
+        ].filter(Boolean).join('; ')}. Recreate an intentional change with Thally configuration.`,
       })
       if (rootStyleProjection.css.trim()) {
         const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)

@@ -1,0 +1,148 @@
+/** A stylesheet's rules for the classes a copied component builds, and the theme variables those rules read, come across with it. */
+
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
+
+import { migrateRepository } from '../index.js'
+
+// The shape of Infisical's docs: design tokens on `:root` and `.dark`, `.ifx-*` rules for classes a snippet component builds at run
+// time, and rules for Mintlify's own markup that the Thally shell does not take.
+const stylesheet = `
+* { border-radius: 0 !important; }
+
+:root {
+  --ifx-surface: #fbfbfa;
+  --ifx-line: rgb(var(--gray-200, 223 223 223) / 0.7);
+  --ifx-card-bg: var(--ifx-surface);
+  --ifx-card-line: var(--ifx-line);
+  --ifx-green: #56a600;
+  --ifx-cat-secrets: var(--ifx-green);
+  --ifx-cat-pam: #dc2626;
+  --ifx-unused: #123456;
+  --docs-bg: #ff0000;
+  --thally-background: 0 0% 0%;
+  background-color: pink;
+}
+
+.dark {
+  --ifx-surface: #101114;
+  --ifx-line: rgb(255 255 255 / 0.1);
+  --ifx-green: #9ee067;
+  --ifx-cat-pam: #ff8a85;
+  --ds-accent: #ffffff;
+}
+
+#content-area div.card { background-color: var(--ifx-card-bg); border-color: var(--ifx-unused); }
+.nav-tabs-item { color: var(--ifx-green); }
+
+.ifx-catalog { display: grid; gap: 12px; }
+.ifx-card { border: 1px solid var(--ifx-card-line); background: var(--ifx-card-bg); }
+.ifx-card--secrets { border-top-color: var(--ifx-cat-secrets); }
+.dark .ifx-card--pam { border-top-color: var(--ifx-cat-pam); }
+.ifx-card__title { font-weight: 600; }
+.ifx-tag--new { text-transform: uppercase; }
+.ifx-never-built { color: red; }
+.title { margin: 0; }
+`
+
+const catalog = [
+  'const cx = (...names) => names.filter(Boolean).join(" ")',
+  'const heading = "title"',
+  'export const Catalog = ({ kinds }) => (',
+  '  <div className="ifx-catalog">',
+  '    {kinds.map((kind) => (',
+  '      <a key={kind} className={`ifx-card ifx-card--${kind}`}>',
+  '        <h3 className={cx("ifx-card__title")}>{kind}</h3>',
+  '      </a>',
+  '    ))}',
+  '    <span className={"ifx-tag--" + "new"} />',
+  '  </div>',
+  ')',
+  '',
+].join('\n')
+
+function migrate(files: Record<string, string>) {
+  const root = mkdtempSync(join(tmpdir(), 'thally-migrate-component-styles-'))
+  const all = {
+    'docs.json': JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['index'] } }),
+    'index.mdx': '---\ntitle: Home\n---\n\nimport { Catalog } from "/snippets/catalog.jsx"\n\n<Catalog kinds={["secrets", "pam"]} />\n',
+    'snippets/catalog.jsx': catalog,
+    'style.css': stylesheet,
+    ...files,
+  }
+  for (const [path, body] of Object.entries(all)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true })
+    writeFileSync(join(root, path), body)
+  }
+  const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+  const href = bundle.docsConfig.stylesheets?.[0]
+  return {
+    css: bundle.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? '',
+    warnings: bundle.warnings.filter((warning) => warning.source === 'style.css').map((warning) => warning.message),
+    bundle,
+  }
+}
+
+const rules = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ')
+
+describe('stylesheet rules for the classes a copied component builds', () => {
+  it('keeps the rules for a class the component spells out, builds from a template or joins from parts', () => {
+    const { css } = migrate({})
+    const text = rules(css)
+    expect(text).toContain('.ifx-catalog {')
+    expect(text).toContain('.ifx-card {')
+    expect(text).toContain('.ifx-card--secrets {')
+    expect(text).toContain('.dark .ifx-card--pam {')
+    expect(text).toContain('.ifx-card__title {')
+    expect(text).toContain('.ifx-tag--new {')
+    expect(text).not.toContain('.ifx-never-built')
+  })
+
+  it('does not take a bare word from a string as a class', () => {
+    // "title" is a string the component holds, but not a class name it builds: `.title` would restyle every page that has one.
+    expect(rules(migrate({}).css)).not.toContain('.title')
+  })
+
+  it('skips Mintlify platform selectors and the global reset', () => {
+    const text = rules(migrate({}).css)
+    expect(text).not.toContain('#content-area')
+    expect(text).not.toContain('.nav-tabs-item')
+    expect(text).not.toMatch(/\*\s*\{/)
+  })
+})
+
+describe('theme custom properties on :root and .dark', () => {
+  it('keeps those some kept rule reads, directly or through another variable, in both themes', () => {
+    const text = rules(migrate({}).css)
+    const root = /:root \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    const dark = /\.dark \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    for (const name of ['--ifx-surface', '--ifx-line', '--ifx-card-bg', '--ifx-card-line', '--ifx-green', '--ifx-cat-secrets', '--ifx-cat-pam']) expect(root, name).toContain(`${name}:`)
+    for (const name of ['--ifx-surface', '--ifx-line', '--ifx-green', '--ifx-cat-pam']) expect(dark, name).toContain(`${name}:`)
+  })
+
+  it('drops a variable no kept rule reads, a name the Thally runtime defines, and what else the block sets', () => {
+    const text = rules(migrate({}).css)
+    expect(text).not.toContain('--ifx-unused')
+    expect(text).not.toContain('--docs-bg')
+    expect(text).not.toContain('--thally-background')
+    expect(text).not.toContain('--ds-accent')
+    expect(text).not.toContain('background-color: pink')
+  })
+
+  it('says plainly what it skipped', () => {
+    const { warnings } = migrate({})
+    const text = warnings.join('\n')
+    expect(text).toMatch(/--docs-bg, --thally-background, --ds-accent.*Thally defines/)
+    expect(text).toMatch(/--ifx-unused.*no imported rule uses/)
+    expect(text).toMatch(/1 other declaration/)
+  })
+
+  it('imports no theme block at all when nothing kept reads a variable', () => {
+    const { css } = migrate({ 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />', 'style.css': stylesheet.replace(/var\(--[\w-]+\)/g, 'red') })
+    expect(css).toContain('.ifx-catalog')
+    expect(css).not.toMatch(/:root|--ifx/)
+  })
+})
