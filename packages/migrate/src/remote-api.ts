@@ -35,15 +35,17 @@ interface BoundSpec {
 /** Bind a spec to the tab its reference names, or to a new API tab beside it; returns that tab's label. How every spec was bound before operations could become pages. */
 function bindApiTab(
   tabs: Array<MigrationNavigationTab>,
-  reference: Pick<RemoteApiSpec, 'tabLabel' | 'parentTab' | 'icon' | 'hidden'>,
+  reference: Pick<RemoteApiSpec, 'tabLabel' | 'parentTab' | 'icon' | 'hidden'> & { url?: string },
   api: NonNullable<MigrationNavigationTab['api']>,
 ): string {
   const tab = reference.tabLabel
     ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
     : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
+  // A spec only pages name gets a hidden tab, which lists none of its operations.
+  const label = reference.tabLabel ?? (reference.hidden ? `OpenAPI: ${reference.url}` : 'API Reference')
   if (tab) tab.api = api
-  else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api }, reference.parentTab)
-  return tab?.tab ?? reference.tabLabel ?? 'API Reference'
+  else insertApiTab(tabs, { tab: label, ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api }, reference.parentTab)
+  return tab?.tab ?? label
 }
 
 /**

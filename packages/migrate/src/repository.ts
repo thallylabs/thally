@@ -1646,9 +1646,26 @@ function resolveMintlifyApiSpecs(
   if (!mintlifyConfig) return []
   const slotByContainer = new Map(apiTabSlots.map(({ container, slot }) => [container, slot]))
   const slotByLabel = new Map(apiTabSlots.map(({ slot }) => [slot.tab.tab, slot]))
+  const topLevelReferences = mintlifyTopLevelApiReferences(mintlifyConfig)
+  const navigationReferences = mintlifyNavigationApiReferences(mintlifyConfig, (container) => slotByContainer.get(container)?.tab.tab)
+  const specFiles = specFileCandidates(files)
+  // A top-level `api.openapi` that no navigation entry lists and that pages name is rendered by Mintlify only where those pages
+  // put it: it publishes no endpoint list of its own. The spec is bound to a hidden tab, so the pages still render their endpoint.
+  // A bare `openapi: "GET /x"` names it only when it is the site's one spec; with several, it could belong to any.
+  const specKey = (value: string): string => isRemoteSpecRef(value) ? value : canonicalSpecRef(value)
+  const listedKeys = new Set(navigationReferences.map((reference) => specKey(reference.value)))
+  const siteSpecKeys = new Set([...topLevelReferences, ...navigationReferences].filter((reference) => reference.kind === 'openapi').map((reference) => specKey(reference.value)))
+  const pageRefs = pages.flatMap((page) => { const ref = page.openapi ? splitOpenApiRef(page.openapi) : null; return ref ? [ref] : [] })
+  const namedByPage = (key: string): boolean => pageRefs.some((ref) => {
+    if (!ref.specRef) return siteSpecKeys.size === 1
+    if (isRemoteSpecRef(ref.specRef)) return ref.specRef === key
+    const resolved = resolveSpecRef(ref.specRef, specFiles, false)
+    return resolved.kind === 'match' && resolved.spec.sourcePath === key
+  })
   const references: Array<MintlifyApiSpecReference & { pageOnly?: boolean }> = [
-    ...mintlifyTopLevelApiReferences(mintlifyConfig),
-    ...mintlifyNavigationApiReferences(mintlifyConfig, (container) => slotByContainer.get(container)?.tab.tab),
+    ...topLevelReferences.map((reference) => reference.kind === 'openapi' && !listedKeys.has(specKey(reference.value)) && namedByPage(specKey(reference.value))
+      ? { ...reference, hidden: true } : reference),
+    ...navigationReferences,
   ]
   // A reference that lists operations gets them as pages under its directory, unless the directory cannot name a folder.
   const endpointPagesOf = (reference: MintlifyApiSpecReference): EndpointPagesTarget | undefined => {
@@ -1657,7 +1674,6 @@ function resolveMintlifyApiSpecs(
     return directory === undefined ? undefined : { directory, ...(slot ? { slot } : {}) }
   }
   const known = new Set(references.map((reference) => canonicalSpecRef(reference.value)))
-  const specFiles = specFileCandidates(files)
   // Pages repeat a few spec prefixes: look each one up once.
   const namedFiles = new Map<string, SpecRefResolution<Required<SpecCandidate>>>()
   for (const page of pages) {
@@ -4100,7 +4116,7 @@ function injectOpenApiSpecs(
       }
     } else {
       insertApiTab(tabs, {
-        tab: spec.tabLabel ?? 'API Reference',
+        tab: spec.tabLabel ?? (spec.hidden ? `OpenAPI: ${spec.sourcePath ?? spec.filename}` : 'API Reference'),
         ...(spec.icon ? { icon: spec.icon } : {}),
         ...(spec.hidden ? { hidden: true } : {}),
         api: { source: specAssetPath(spec.filename), ...(spec.navigation === false ? { navigation: false } : {}), ...(spec.groups ? { groups: spec.groups } : {}) },

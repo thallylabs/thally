@@ -146,7 +146,12 @@ a tab `menu` (string or `{ source, directory }`) becomes its own API tab named
 only content it binds to the tab itself. The item's `icon` and `hidden` carry
 onto that tab, and a `directory` output folder is not used (a warning says so:
 endpoint pages are generated under `/api/`). An item Thally cannot represent
-produces a warning naming it. Specs that share a file name across folders are
+produces a warning naming it. A top-level `api.openapi` that no navigation entry
+lists and that pages name in their `openapi:` frontmatter (a bare `GET /x` names
+it only when it is the site's one spec) gets no API tab, because Mintlify
+publishes just those pages: the spec is bound to a hidden tab (`OpenAPI: <spec>`)
+that the pages' endpoints resolve against. A spec no page names keeps its API
+tab. Specs that share a file name across folders are
 kept as separate files in `openapi/`. A remote `https://` spec is not
 downloaded by `migrateRepository`; the bundle lists it and warns, and
 `hydrateRemoteApiSpecs` (which `create-thally-docs migrate` runs after the
