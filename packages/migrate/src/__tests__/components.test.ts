@@ -1152,6 +1152,8 @@ describe('repository component migration', () => {
       ['a named export list', 'const format = (value) => value.toUpperCase()\nexport { format }', '{ format }', 'format'],
       ['a renamed export', 'const make = (value) => value.toUpperCase()\nexport { make as f }', '{ f as format }', 'f'],
       ['a function declaration exported as default later', 'function format(value) { return value }\nexport default format', 'format', 'default'],
+      ['a let that is reassigned to a function', 'let f = 0\nf = () => "changed"\nexport { f as format }', '{ format }', 'format'],
+      ['a var exported where it is declared and reassigned', 'export var format = 0\nformat = (value) => value', '{ format }', 'format'],
     ] as const) {
       it(`moves the function of ${name}`, () => {
         const { body, adapter } = migrate(helpers, importClause)
@@ -1166,6 +1168,14 @@ describe('repository component migration', () => {
       expect(body).not.toContain('format={format}')
       expect(adapter?.content).toContain('format={callback0}')
       expect(warnings).toEqual([])
+    })
+
+    it('keeps a const literal on the page but not a let, which a later assignment may change', () => {
+      const constant = migrate('const items = ["a", "b"]\nexport { items }', '{ items }', '<Viewer items={items} />')
+      expect(constant.adapter).toBeUndefined()
+      const mutable = migrate('let items = ["a", "b"]\nexport { items }', '{ items }', '<Viewer items={items} />')
+      expect(mutable.body).not.toContain('items={items}')
+      expect(mutable.adapter?.content).toContain('items={callback0}')
     })
 
     it('keeps plain data on the page, however it is exported', () => {

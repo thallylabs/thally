@@ -533,7 +533,8 @@ component (`badges={badgesFor}`) is imported by a client adapter instead, so
 the page never hands a function across the server boundary, however the module
 exports it (`export default format`, `export { format as f }`); an export that
 cannot be classified without running the module is moved too, since importing
-plain data inside a client module is just as safe. Only a component
+plain data inside a client module is just as safe (a `let` or `var` is one, as a later
+assignment may change it: only a `const` literal stays on the page). Only a component
 that is already a client component gets an adapter: a copied server component
 (an async one, say) keeps receiving the function from the page, as authored. A function prop
 that a later spread or a later prop of the same name overrides is never moved

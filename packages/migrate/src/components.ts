@@ -128,7 +128,8 @@ function staticServerHelper(path: string, imported: string, local: string): stri
  * What a copied module exports as `imported` (`'default'` included): a `function` (an arrow, a function expression, a function or
  * class declaration), plain `data` (a literal), or `unknown` when only running the module would tell. A name is followed through
  * the module's own top-level declarations, so `const f = ...; export default f`, `export { f }` and `export { f as g }` are read
- * like `export const f = ...`. A re-export from another module is `unknown`.
+ * like `export const f = ...`. A re-export from another module is `unknown`, and so is a `let` or `var`, which a later assignment
+ * can turn into anything.
  */
 function exportedValueKind(path: string, imported: string): 'function' | 'data' | 'unknown' {
   const parsed = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -141,7 +142,8 @@ function exportedValueKind(path: string, imported: string): 'function' | 'data' 
       if (!ts.isVariableStatement(statement)) continue
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
-          return declaration.initializer ? valueKind(declaration.initializer, new Set([...seen, name])) : 'unknown'
+          // Only a `const` holds what it was given: a `let` or `var` may be assigned anything later in the module.
+          return declaration.initializer && statement.declarationList.flags & ts.NodeFlags.Const ? valueKind(declaration.initializer, new Set([...seen, name])) : 'unknown'
         }
       }
     }
