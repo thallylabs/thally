@@ -3773,6 +3773,80 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  it('reads site identity through an imported JSON module', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'site.json'), JSON.stringify({
+      name: 'Hookline',
+      title: 'Hookline Docs',
+      tagline: 'Deliver every webhook, once, securely.',
+    }))
+    writeFileSync(join(root, 'docusaurus.config.ts'), `
+      import site from './site.json'
+      const config = {
+        presets: [['classic', { docs: { sidebarPath: './sidebars.ts' } }]],
+        title: site.title,
+        tagline: site.tagline,
+        themeConfig: { navbar: { title: site.name } },
+      }
+      export default config
+    `)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/hookline-docs', platform: 'docusaurus' })
+    expect(bundle.site).toMatchObject({ name: 'Hookline', description: 'Deliver every webhook, once, securely.' })
+    expect(bundle.warnings.filter((warning) => /site title|site tagline|navbar title|project name/.test(warning.message))).toEqual([])
+  })
+
+  it('reads site identity through an imported object module', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'site.ts'), `
+      const site = { name: 'Acme', title: 'Acme Docs', tagline: 'Ship faster.' }
+      export default site
+    `)
+    writeFileSync(join(root, 'docusaurus.config.ts'), `
+      import site from './site'
+      const config = {
+        presets: [['classic', { docs: { sidebarPath: './sidebars.ts' } }]],
+        title: site.title,
+        tagline: site.tagline,
+      }
+      export default config
+    `)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/acme-docs', platform: 'docusaurus' })
+    expect(bundle.site).toMatchObject({ name: 'Acme Docs', description: 'Ship faster.' })
+  })
+
+  it('falls back to the source package name and warns once per unreadable identity field', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@acme/docs-site' }))
+    writeFileSync(join(root, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { sidebarPath: './sidebars.ts' } }]],
+        title: process.env.SITE_TITLE,
+        tagline: process.env.SITE_TAGLINE,
+      }
+    `)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.site?.name).toBe('docs-site')
+    const messages = bundle.warnings.map((warning) => warning.message)
+    const titleWarning = messages.find((message) => message.includes('site title') && message.includes('left out of the migration'))
+    expect(titleWarning).toBeDefined()
+    expect(titleWarning).toContain('taken from the source package.json name')
+    expect(messages.filter((message) => message.includes('site tagline') && message.includes('left out of the migration'))).toHaveLength(1)
+    expect(messages.filter((message) => message.includes('project name was taken from'))).toHaveLength(1)
+  })
+
+  it('falls back to the source repository name when the package has no name', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { sidebarPath: './sidebars.ts' } }]],
+        title: process.env.SITE_TITLE,
+      }
+    `)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/hookline-docs', platform: 'docusaurus' })
+    expect(bundle.site?.name).toBe('hookline-docs')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('source repository name')
+  })
+
   it('keeps site sections outside the Docusaurus docs mount on the source domain', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'docs', 'blog.md'), '---\ntitle: Blog\n---\n\nHow to configure the blog.')
