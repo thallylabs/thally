@@ -528,7 +528,10 @@ as a `/snippets/...` or page-relative one. A multi-line snippet keeps the
 indentation of the tag it replaces on every line (aligned with the item text
 after a list marker), so a list or block stays inside its `<Step>` or list item;
 lines inside a JS expression are left as written so a template literal keeps
-its text. An outer code fence that contains a
+its text. The string props a snippet is called with are its variables, as on
+Mintlify: `{mode === "x" && ...}` and `props.mode` in the snippet read the
+value of `<Snippet mode="x" />` at each use, so the content a prop selects is
+kept. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.

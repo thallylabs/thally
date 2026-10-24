@@ -498,13 +498,35 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
-/** Bind static partial invocation props inside expressions, preserving literals and code examples. */
+/** Names a function parameter, variable, class or catch clause declares anywhere inside an expression. */
+function declaredNamesIn(value: unknown, names: Set<string> = new Set()): Set<string> {
+  if (!value || typeof value !== 'object') return names
+  const node = value as acorn.AnyNode
+  if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
+    node.params.forEach((param) => collectPatternNames(param, names))
+  }
+  if ((node.type === 'FunctionExpression' || node.type === 'ClassExpression') && node.id) names.add(node.id.name)
+  if (node.type === 'CatchClause' && node.param) collectPatternNames(node.param, names)
+  collectDeclarationNames(node, names)
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) child.forEach((entry) => declaredNamesIn(entry, names))
+    else if (child && typeof child === 'object') declaredNamesIn(child, names)
+  }
+  return names
+}
+
+/**
+ * Bind static partial invocation props inside expressions, preserving literals and code examples.
+ * A snippet reads its props as variables (`{mode === "x" && ...}`) or as `props.mode`; both become
+ * the literal value. A name the expression declares itself, an object key, a member name and a
+ * lone `{name}` (replaced as text by the caller) are left alone.
+ */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
-  if (!body.includes('props') || properties.size === 0) return body
+  if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
   let tree: unknown
   try { tree = descriptionParser.parse(body) } catch { return body }
   const edits: Array<{ start: number; end: number; value: string }> = []
-  const inspectExpression = (value: unknown): void => {
+  const inspectExpression = (value: unknown, variables: ReadonlyMap<string, string>): void => {
     if (!value || typeof value !== 'object') return
     const node = value as acorn.AnyNode
     if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
@@ -521,15 +543,38 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         return
       }
     }
+    if (node.type === 'Identifier' && variables.has(node.name)) {
+      edits.push({ start: node.start, end: node.end, value: JSON.stringify(variables.get(node.name)) })
+      return
+    }
+    if (node.type === 'Property' && !node.computed) {
+      // `{ mode }` keeps its key; `{ mode: 1 }` has a key that is a name, not a reference.
+      if (node.shorthand && node.value.type === 'Identifier' && variables.has(node.value.name)) {
+        edits.push({ start: node.start, end: node.end, value: `${node.value.name}: ${JSON.stringify(variables.get(node.value.name))}` })
+      } else inspectExpression(node.value, variables)
+      return
+    }
+    if (node.type === 'MemberExpression' && !node.computed) {
+      inspectExpression(node.object, variables)
+      return
+    }
     for (const child of Object.values(value)) {
-      if (Array.isArray(child)) child.forEach(inspectExpression)
-      else if (child && typeof child === 'object') inspectExpression(child)
+      if (Array.isArray(child)) child.forEach((entry) => inspectExpression(entry, variables))
+      else if (child && typeof child === 'object') inspectExpression(child, variables)
     }
   }
   const visit = (value: unknown): void => {
     if (!value || typeof value !== 'object') return
     const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown }> }
-    if (node.data?.estree) inspectExpression(node.data.estree)
+    const program = node.data?.estree
+    if (program) {
+      const [statement] = program.body
+      const isLoneName = program.body.length === 1 && statement.type === 'ExpressionStatement' && statement.expression.type === 'Identifier'
+      const declared = declaredNamesIn(program)
+      const variables = node.type === 'mdxjsEsm' || isLoneName ? new Map<string, string>()
+        : new Map([...properties].filter(([name]) => name !== 'children' && !declared.has(name)))
+      inspectExpression(program, variables)
+    }
     for (const attribute of node.attributes ?? []) visit(attribute.value)
     for (const child of node.children ?? []) visit(child)
   }

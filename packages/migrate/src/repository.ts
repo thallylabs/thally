@@ -4907,6 +4907,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         { headingMarkers: platform === 'mintlify' },
       )
     }
+    // Relative to `componentRoot`, like the component warnings for this page, so one page has one label.
+    const pageWarningSource = relative(componentRoot, file.absolutePath).replace(/\\/g, '/')
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
       raw = componentMigrator.transform(raw, file.absolutePath)
@@ -4942,7 +4944,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         warnings.push({
           code: 'unsupported-config',
           message: 'A suspected math span looked like it needed converting, but doing so broke the page; the page was kept as originally authored instead.',
-          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+          source: pageWarningSource,
         })
       }
       raw = escapeFernLiteralBraces(protectedMath.body)
@@ -4957,7 +4959,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const page = parseMarkdownPage({
       id,
       navigationId,
-      warn: (message) => warnings.push({ code: 'unsupported-config', message, source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/') }),
+      warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
       raw,
       platform,
@@ -5010,7 +5012,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warnings.push({
         code: 'unsupported-config',
         message: `The page's frontmatter is not valid YAML (${page.frontmatterError}); the page was kept and as much of its metadata as could be read was used.`,
-        source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+        source: pageWarningSource,
       })
     }
     if (platform === 'fern' && !page.navTitle) {
