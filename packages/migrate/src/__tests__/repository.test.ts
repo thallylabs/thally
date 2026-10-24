@@ -5852,7 +5852,7 @@ describe('Mintlify default ignored documents', () => {
   }
   const repositoryOnly = (title: string) => `---\ntitle: ${title}\n---\n\nRepository file.`
 
-  it('skips README, LICENSE, CHANGELOG and CONTRIBUTING markdown at any depth without a warning', () => {
+  it('skips README, LICENSE, CHANGELOG and CONTRIBUTING markdown at any depth, warning for each one not already skipped at the root', () => {
     const root = mintlifySite({
       'CHANGELOG.md': repositoryOnly('Root changelog'),
       'tests/python-v2.1.0/README.md': repositoryOnly('Nested readme'),
@@ -5864,7 +5864,9 @@ describe('Mintlify default ignored documents', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.pages.map((page) => page.title)).toEqual(['Welcome'])
     expect(bundle.stats.skipped).toBe(6)
-    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file')).toEqual([])
+    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file').map((warning) => warning.source).sort()).toEqual([
+      'CHANGELOG.md', 'guides/CONTRIBUTING.md', 'guides/Readme.md', 'guides/deep/CHANGELOG.md', 'guides/deep/LICENSE.md', 'tests/python-v2.1.0/README.md',
+    ])
   })
 
   it('keeps a nested README.mdx and other nested markdown files', () => {

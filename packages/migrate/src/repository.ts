@@ -4766,10 +4766,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const filename = basename(file.relativePath).toLowerCase()
-    const isRepositoryOnly = (!file.relativePath.includes('/') && REPOSITORY_ONLY_DOCUMENTS.has(filename))
-      || (platform === 'mintlify' && MINTLIFY_DEFAULT_IGNORED_DOCUMENTS.has(filename))
-    if (isRepositoryOnly && !exactReferenceMap.has(exactReferenceKey(file.relativePath))) {
+    const isRootRepositoryOnly = !file.relativePath.includes('/') && REPOSITORY_ONLY_DOCUMENTS.has(filename)
+    const isMintlifyIgnored = platform === 'mintlify' && MINTLIFY_DEFAULT_IGNORED_DOCUMENTS.has(filename)
+    if ((isRootRepositoryOnly || isMintlifyIgnored) && !exactReferenceMap.has(exactReferenceKey(file.relativePath))) {
       skipped++
+      // Root repository files were always skipped quietly; say so for the rest, which may hold real text.
+      if (!isRootRepositoryOnly) {
+        warnings.push({ code: 'skipped-file', message: 'Mintlify does not publish README.md, LICENSE.md, CHANGELOG.md or CONTRIBUTING.md files (its default ignore list), so this file was not imported. Add it to the navigation to import it anyway.', source: file.relativePath })
+      }
       continue
     }
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) {
