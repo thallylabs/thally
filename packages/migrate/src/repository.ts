@@ -134,6 +134,12 @@ const MAX_ASSET_BYTES = 25_000_000
 // aggregate copy budget for untrusted repositories.
 const MAX_REFERENCED_ASSET_BYTES = 100_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
+/**
+ * Largest single file Cloudflare serves as a static asset (25 MiB). The
+ * Cloudflare build, which is also how Thally Cloud hosts a site, serves
+ * `public/` this way, so a larger copied file makes that deploy fail.
+ */
+const MAX_CLOUDFLARE_STATIC_ASSET_BYTES = 25 * 1024 * 1024
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
 const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
 
@@ -141,6 +147,32 @@ const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
 function listAssetPaths(paths: Array<string>): string {
   const shown = paths.slice(0, 5).join(', ')
   return paths.length > 5 ? `${shown}, and ${paths.length - 5} more` : shown
+}
+
+const CLOUDFLARE_ASSET_LIMIT_NOTE = 'serves static files only up to'
+
+/**
+ * One warning for the assets that will be written to `public/` over Cloudflare's
+ * static-file limit, each named by the path it lands at. Only an asset a page
+ * uses can be that large: unreferenced ones stop at `MAX_ASSET_BYTES`, below the
+ * limit. Null when none is over it.
+ */
+function cloudflareAssetWarning(assets: ReadonlyArray<MigrationAsset>): MigrationWarning | null {
+  const paths = assets.filter((asset) => !asset.projectRelative && asset.content.byteLength > MAX_CLOUDFLARE_STATIC_ASSET_BYTES).map((asset) => `public/${asset.path}`)
+  if (paths.length === 0) return null
+  const single = paths.length === 1
+  const mebibytes = MAX_CLOUDFLARE_STATIC_ASSET_BYTES / 1024 / 1024
+  return {
+    code: 'limit-reached',
+    message: `${paths.length} asset file${single ? ' is' : 's are'} larger than ${mebibytes} MiB: ${listAssetPaths(paths)}. `
+      + `Pages use ${single ? 'it' : 'them'}, so ${single ? 'it was' : 'they were'} copied, but Cloudflare (including Thally Cloud) ${CLOUDFLARE_ASSET_LIMIT_NOTE} ${mebibytes} MiB, `
+      + `so a Cloudflare deploy fails until ${single ? 'it is' : 'each is'} made smaller (for example, convert an animated GIF to a video) or hosted elsewhere.`,
+  }
+}
+
+/** Whether a warning is the one `cloudflareAssetWarning` builds. */
+export function isCloudflareAssetWarning(warning: MigrationWarning): boolean {
+  return warning.code === 'limit-reached' && warning.message.includes(CLOUDFLARE_ASSET_LIMIT_NOTE)
 }
 
 /** A small text file starting with the fixed Git LFS pointer line, not real asset content. */
@@ -6471,6 +6503,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   })
   pages.push(...sourceRefPages)
   assets.push(...sourceRefAssets)
+  // After the sub-sites' assets are mounted, so every path is where its file lands.
+  const cloudflareWarning = cloudflareAssetWarning(assets)
+  if (cloudflareWarning) warnings.push(cloudflareWarning)
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
