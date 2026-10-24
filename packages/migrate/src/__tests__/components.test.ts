@@ -2201,3 +2201,57 @@ describe('SCAFFOLD_PROVIDED_IMPORTS drift guard', () => {
     }
   })
 })
+
+describe('the names a client adapter binds never take one the page declared', () => {
+  const widget = 'export const Widget = ({ f, g, children }) => { const [open] = useState(true); return open ? <p>{f("x")}{g ? g("y") : null}{children}</p> : null }'
+  const adapterFor = (name: string, tag = `<Widget f={${name}} g={format}>Body.</Widget>`) => {
+    const root = fixture({ 'widget.jsx': widget, 'format.js': 'export default function format(value) { return value }' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = `import { Widget } from './widget.jsx'\nimport format from './format.js'\n\nexport const ${name} = ({children}) => (<div>{children}</div>);\n\n${tag}`
+    migrator.transform(source, join(root, 'index.mdx'))
+    const files = migrator.files()
+    const adapter = files.find((file) => file.path.includes('/callback-'))
+    return { warnings, content: String(adapter?.content), registry: String(files.find((file) => file.path === 'src/mdx/custom-components.tsx')?.content) }
+  }
+  // Declaring a name twice is an early error for any JavaScript parser, so the migrated site would not build.
+  const parses = (content: string) => expect(() => transformSync(content, { loader: 'jsx' })).not.toThrow()
+
+  it('renames the imported function when the page callback is called callback0', () => {
+    const { warnings, content } = adapterFor('callback0')
+    parses(content)
+    expect(content).toContain('export const callback0 =')
+    expect(content).toMatch(/import callback0_ from "\.\/[^"]*format\.js";/)
+    expect(content).toContain('<Original {...props} f={callback0} g={callback0_}>')
+    expect(warnings).toEqual([])
+  })
+
+  it('renames the component the adapter wraps when the page callback is called Original', () => {
+    const { content } = adapterFor('Original')
+    parses(content)
+    expect(content).toMatch(/import \{ Widget as Original_ \} from/)
+    expect(content).toContain('<Original_ {...props} f={Original} g={callback0}>{children}</Original_>')
+  })
+
+  it('renames the adapter when the page callback is called CallbackWrapper, and registers it by the new name', () => {
+    const { content, registry } = adapterFor('CallbackWrapper')
+    parses(content)
+    expect(content).toContain('export function CallbackWrapper_(')
+    expect(content).toContain('f={CallbackWrapper}')
+    expect(registry).toMatch(/CallbackWrapper_ as Migrated[a-f0-9]+/)
+  })
+
+  it('keeps f the page callback when it is called children or props, which the adapter also binds', () => {
+    for (const name of ['children', 'props']) {
+      const { content } = adapterFor(name)
+      parses(content)
+      expect(content).toContain(`f={${name}} g={callback0}`)
+      expect(content).toContain(name === 'children' ? '({ children: children_, ...props })' : '({ children, ...props_ })')
+    }
+  })
+
+  it('leaves every name as it was when the page declares none of them', () => {
+    const { content } = adapterFor('render')
+    expect(content).toContain('export function CallbackWrapper({ children, ...props }) { return <Original {...props} f={render} g={callback0}>{children}</Original>; }')
+  })
+})

@@ -1995,13 +1995,18 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
       const importedMoved = moved.flatMap(({ imported }) => imported ? [imported] : [])
       const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
-      const wrapperName = register(wrapperPath, 'CallbackWrapper')
+      // The adapter binds names of its own beside the one declaration copied from the page, and imports a function only under such a name.
+      // None may take the declaration's name, or the module would not parse or would pass the wrong value: it gets a trailing underscore.
+      const declared = declaration ? pageLocal[0].value : undefined
+      const own = (name: string): string => { while (name === declared) name += '_'; return name }
+      const [original, wrapper, kids, rest] = ['Original', 'CallbackWrapper', 'children', 'props'].map(own)
+      const wrapperName = register(wrapperPath, wrapper)
       copied.set(wrapperPath, { path: wrapperPath, content: [
         "'use client';",
-        `${importClause(binding.imported, 'Original')} from ${moduleSpecifier(binding.path)};`,
-        ...importedMoved.map((imported, index) => `${importClause(imported.imported, `callback${index}`)} from ${moduleSpecifier(imported.path)};`),
+        `${importClause(binding.imported, original)} from ${moduleSpecifier(binding.path)};`,
+        ...importedMoved.map((imported, index) => `${importClause(imported.imported, own(`callback${index}`))} from ${moduleSpecifier(imported.path)};`),
         ...(declaration ? [declaration.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')] : []),
-        `export function CallbackWrapper({ children, ...props }) { return <Original {...props}${moved.map(({ name, value, imported }) => ` ${name}={${imported ? `callback${importedMoved.indexOf(imported)}` : value}}`).join('')}>{children}</Original>; }`,
+        `export function ${wrapper}({ ${kids === 'children' ? kids : `children: ${kids}`}, ...${rest} }) { return <${original} {...${rest}}${moved.map(({ name, value, imported }) => ` ${name}={${imported ? own(`callback${importedMoved.indexOf(imported)}`) : value}}`).join('')}>{${kids}}</${original}>; }`,
       ].join('\n') })
       const start = node.position.start.offset
       const source = content.slice(start, node.position.end.offset)
