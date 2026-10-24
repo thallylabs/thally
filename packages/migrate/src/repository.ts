@@ -2324,6 +2324,24 @@ function endpointDescription(description: string | undefined, title: string): st
   return limited || title
 }
 
+/**
+ * The `api` bindings the migrator made for a spec that only pages name. Such a spec lives in a hidden tab of its own whose label
+ * (`OpenAPI: <spec>`) an author may give any tab, so the label says nothing; this does, as no authored tab can carry it. Copies of
+ * a tab share its `api` object, so the mark survives them.
+ */
+const pageOnlyBindings = new WeakSet<object>()
+
+/** Mark `api` as the binding of a spec only pages name, and return it. */
+export function pageOnlyApi(api: NonNullable<MigrationNavigationTab['api']>): NonNullable<MigrationNavigationTab['api']> {
+  pageOnlyBindings.add(api)
+  return api
+}
+
+/** The hidden tab the migrator made for a spec only pages name: never an authored tab, whatever its label. */
+export function isPageOnlyTab(tab: Pick<MigrationNavigationTab, 'api'>): boolean {
+  return Boolean(tab.api && pageOnlyBindings.has(tab.api))
+}
+
 /** Put an API tab back among its siblings: after the nearest of the tabs that preceded it that is still there, else first when none preceded it, else last. */
 function insertEndpointTab(tabs: Array<MigrationNavigationTab>, tab: MigrationNavigationTab, preceding: ReadonlyArray<string>): void {
   if (preceding.length === 0) {
@@ -2442,7 +2460,7 @@ export function addEndpointPages(options: {
   if (!tabs.some((tab) => tab.api?.source === spec.assetPath)) {
     // The shape every hidden page-only binding has: a hidden tab lists no navigation and its spec serves no `/api/` pages, and a validator
     // that does not exempt hidden tabs from the empty-tab rule accepts an API tab unless it sets `navigation: false`.
-    insertApiTab(tabs, { tab: `OpenAPI: ${spec.source}`, hidden: true, api: { source: spec.assetPath } })
+    insertApiTab(tabs, { tab: `OpenAPI: ${spec.source}`, hidden: true, api: pageOnlyApi({ source: spec.assetPath }) })
   }
   return { operations: listed }
 }
@@ -4058,19 +4076,20 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; sourcePath?: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean; pageReferenced?: boolean; groups?: Array<MigrationApiGroup>; navigation?: false }>,
+  specs: Array<{ filename: string; sourcePath?: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; pageOnly?: boolean; generatedNavigation?: boolean; pageReferenced?: boolean; groups?: Array<MigrationApiGroup>; navigation?: false }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const hiddenLabel = `OpenAPI: ${spec.sourcePath ?? spec.filename}`
-    const apiTab = spec.tabLabel
-      ? tabs.find((tab) => tab.tab === spec.tabLabel)
-      // A spec only pages name (hidden, with no label) never takes an existing tab by name: it always has the hidden tab of its own.
-      // That tab belongs to that spec: a spec with no label of its own never takes it over either.
-      : spec.hidden
-        ? tabs.find((tab) => tab.tab === hiddenLabel)
-        : tabs.find((tab) => tab.tab.toLowerCase().includes('api') && !(tab.hidden && tab.tab.startsWith('OpenAPI: ')))
+    // A spec only pages name (a label of the migrator's own, or none) never takes an existing tab: it always has the hidden tab of its own,
+    // and no authored tab is taken for one, whatever its label. That tab belongs to that spec: no other spec takes it over either.
+    const ownTab = spec.pageOnly || (spec.hidden && !spec.tabLabel)
+    const apiTab = ownTab
+      ? undefined
+      : spec.tabLabel
+        ? tabs.find((tab) => tab.tab === spec.tabLabel)
+        : tabs.find((tab) => tab.tab.toLowerCase().includes('api') && !isPageOnlyTab(tab))
     if (apiTab) {
       // Thally binds one API spec per tab; a second spec that resolves to
       // the same tab would otherwise silently replace the first one's
@@ -4079,7 +4098,7 @@ function injectOpenApiSpecs(
         const source = specAssetPath(spec.filename)
         // Pages that name this spec still resolve it from a hidden tab, which lists no navigation of its own.
         const pageBound = spec.pageReferenced && !tabs.some((tab) => tab.api?.source === source)
-        if (pageBound) insertApiTab(tabs, { tab: hiddenLabel, hidden: true, api: { source } })
+        if (pageBound) insertApiTab(tabs, { tab: hiddenLabel, hidden: true, api: pageOnlyApi({ source }) })
         warnings.push({
           code: 'unsupported-config',
           message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${source}" ${pageBound
@@ -4100,11 +4119,13 @@ function injectOpenApiSpecs(
         ...(spec.groups ? { groups: spec.groups } : {}),
       }
     } else {
+      const api = { source: specAssetPath(spec.filename), ...(spec.navigation === false ? { navigation: false } : {}), ...(spec.groups ? { groups: spec.groups } : {}) }
+      if (ownTab) pageOnlyApi(api)
       insertApiTab(tabs, {
         tab: spec.tabLabel ?? (spec.hidden ? hiddenLabel : 'API Reference'),
         ...(spec.icon ? { icon: spec.icon } : {}),
         ...(spec.hidden ? { hidden: true } : {}),
-        api: { source: specAssetPath(spec.filename), ...(spec.navigation === false ? { navigation: false } : {}), ...(spec.groups ? { groups: spec.groups } : {}) },
+        api,
       }, spec.parentTab)
     }
   }

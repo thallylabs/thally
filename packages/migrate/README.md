@@ -153,9 +153,10 @@ lists and that pages name in their `openapi:` frontmatter (a bare `GET /x` names
 it only when it is the site's one spec) gets no API tab, because Mintlify
 publishes just those pages: the spec is bound to a hidden tab (`OpenAPI: <spec>`)
 of its own that the pages' endpoints resolve against. It never binds to an
-existing tab whose label merely contains "API", and no other spec ever takes that
-tab over (one that cannot share a tab is left out with a warning, never swapped
-in for the first). A spec no page names keeps its API tab. Specs that share a file name across folders are
+existing tab whose label merely contains "API" or is the same as its own (an
+authored tab named `OpenAPI: <spec>` is an ordinary tab), and no other spec ever
+takes that tab over (one that cannot share a tab is left out with a warning, never
+swapped in for the first). A spec no page names keeps its API tab. Specs that share a file name across folders are
 kept as separate files in `openapi/`. A remote `https://` spec is not
 downloaded by `migrateRepository`; the bundle lists it and warns, and
 `hydrateRemoteApiSpecs` (which `create-thally-docs migrate` runs after the

@@ -187,3 +187,41 @@ describe('a spec only pages name never binds to an existing tab because its labe
     expectOwnTab(bundle, assetFor(A)!, assetFor(B)!, A)
   })
 })
+
+describe('a spec only pages name never binds to a tab an author gave the same label as its own', () => {
+  const specWith = (path: string, tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { [path]: { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  type Tab = { tab: string; hidden?: boolean; api: { source: string } }
+  const expectOwnTab = (bundle: Awaited<ReturnType<typeof hydrateRemoteApiSpecs>>, label: string, specA: string, specB: string) => {
+    const tabs = apiTabs(bundle) as Array<Tab>
+    // The authored tab is visible and holds B; A is in a hidden tab of its own, and nothing is dropped.
+    expect(tabs.filter((tab) => !tab.hidden).map((tab) => [tab.tab, tab.api.source])).toEqual([[label, specB]])
+    expect(tabs.filter((tab) => tab.hidden).map((tab) => [tab.tab, tab.api.source])).toEqual([[label, specA]])
+    expect(bundle.warnings.some((warning) => warning.message.includes('was not added') || warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
+  }
+
+  it('gives a local spec a hidden tab of its own beside the authored visible tab', () => {
+    const bundle = site(
+      { 'home.mdx': page('a.json GET /x'), 'a.json': specWith('/x', 'Alpha'), 'b.json': specWith('/users', 'Beta') },
+      { openapi: ['a.json', 'b.json'] },
+      { tabs: [{ tab: 'OpenAPI: a.json', pages: ['home'] }] },
+    )
+    expectOwnTab(bundle as never, 'OpenAPI: a.json', 'openapi/a.json', 'openapi/b.json')
+  })
+
+  it('gives a remote spec a hidden tab of its own beside the authored visible tab', async () => {
+    const A = 'https://example.com/a.json'
+    const B = 'https://example.com/b.json'
+    const bodies: Record<string, string> = { [A]: specWith('/x', 'Alpha'), [B]: specWith('/users', 'Beta') }
+    const fetchBoth: MigrationFetcher = async (url) => ({ finalUrl: url, body: bodies[url.toString()], contentType: 'application/json' })
+    const bundle = await hydrateRemoteApiSpecs(
+      site({ 'home.mdx': page(`${A} GET /x`) }, { openapi: [A, B] }, { tabs: [{ tab: `OpenAPI: ${A}`, pages: ['home'] }] }),
+      fetchBoth,
+    )
+    const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
+    expectOwnTab(bundle, `OpenAPI: ${A}`, assetFor(A)!, assetFor(B)!)
+  })
+})

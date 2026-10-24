@@ -11,6 +11,7 @@ import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEn
 import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
+import { isPageOnlyTab, pageOnlyApi } from './repository.js'
 
 function slug(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -34,17 +35,18 @@ interface BoundSpec {
 
 type ApiTabReference = Pick<RemoteApiSpec, 'tabLabel' | 'parentTab' | 'icon' | 'hidden'> & { url?: string }
 
-/** The hidden tab of a spec only pages name is labeled after its URL. It belongs to that spec alone. */
-const isPageOnlyTab = (tab: MigrationNavigationTab): boolean => Boolean(tab.hidden) && tab.tab.startsWith('OpenAPI: ')
-
 const apiTabLabel = (reference: ApiTabReference): string => reference.tabLabel ?? (reference.hidden ? `OpenAPI: ${reference.url}` : 'API Reference')
+
+/** A spec only pages name (hidden, with no label of its own) always has a hidden tab of its own, made for it alone. */
+const isPageOnlyReference = (reference: ApiTabReference): boolean => Boolean(reference.hidden) && !reference.tabLabel
 
 /**
  * The tab a reference binds to: the one it names, or else an existing API tab by name, which is never the page-only tab of another spec.
- * A spec only pages name (hidden, with no label) never takes an existing tab by name: it always has the hidden tab of its own.
+ * A spec only pages name never takes a tab by its label, which an author may give any tab: it has only the tab the migrator made for it.
  */
-function findApiTab(tabs: Array<MigrationNavigationTab>, reference: ApiTabReference): MigrationNavigationTab | undefined {
-  if (reference.tabLabel || reference.hidden) return tabs.find((candidate) => candidate.tab === apiTabLabel(reference))
+function findApiTab(tabs: Array<MigrationNavigationTab>, reference: ApiTabReference, source: string): MigrationNavigationTab | undefined {
+  if (isPageOnlyReference(reference)) return tabs.find((candidate) => isPageOnlyTab(candidate) && candidate.api?.source === source)
+  if (reference.tabLabel) return tabs.find((candidate) => candidate.tab === reference.tabLabel)
   return tabs.find((candidate) => candidate.tab.toLowerCase().includes('api') && !isPageOnlyTab(candidate))
 }
 
@@ -54,8 +56,9 @@ function bindApiTab(
   reference: ApiTabReference,
   api: NonNullable<MigrationNavigationTab['api']>,
 ): string {
-  const tab = findApiTab(tabs, reference)
+  const tab = findApiTab(tabs, reference, api.source)
   const label = apiTabLabel(reference)
+  if (isPageOnlyReference(reference)) pageOnlyApi(api)
   if (tab) tab.api = api
   else insertApiTab(tabs, { tab: label, ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api }, reference.parentTab)
   return tab?.tab ?? label
@@ -156,7 +159,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       }
       const api = { source: `openapi/${filename}`, ...(reference.navigation === false ? { navigation: false } : {}), ...(reference.groups ? { groups: reference.groups } : {}) }
       // Thally binds one API spec per tab: a second spec for a tab never silently replaces the first.
-      const taken = findApiTab(tabs, reference)
+      const taken = findApiTab(tabs, reference, api.source)
       if (taken?.api && taken.api.source !== api.source) {
         warnings.push({
           code: 'unsupported-config',
