@@ -51,6 +51,10 @@ const stylesheet = `
 .ifx-tile:hover .ifx-tile__icon { opacity: 1; }
 .ifx-lane--dim, .ifx-lane--focus { opacity: 0.4; }
 .ifx-lane--hidden { display: none; }
+.ifx-card__title [data-as="p"] { margin: 0; }
+.ifx-card__title ul + [data-as="p"], .ifx-card__title ol + [data-as="p"] { margin-top: 4px; }
+.ifx-card__title[data-as="h3"] { font-size: 1rem; }
+.ifx-card__title [data-as] { color: red; }
 `
 
 const catalog = [
@@ -158,5 +162,17 @@ describe('theme custom properties on :root and .dark', () => {
     const { css } = migrate({ 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />', 'style.css': stylesheet.replace(/var\(--[\w-]+\)/g, 'red') })
     expect(css).toContain('.ifx-catalog')
     expect(css).not.toMatch(/:root|--ifx/)
+  })
+})
+
+describe('a paragraph selector written for Mintlify\'s [data-as] marker', () => {
+  it('names the element the marker stands for, so no combinator is left dangling', () => {
+    const text = rules(migrate({}).css)
+    expect(text).toContain('.ifx-card__title p {')
+    expect(text).toContain('.ifx-card__title ul + p, .ifx-card__title ol + p {')
+    expect(text).toContain('.ifx-card__title {')
+    expect(text).not.toMatch(/data-as|[+>~] ?[,{]|\s,/)
+    // `[data-as]` with no element named has nothing to stand for: the rule is skipped, not applied to the whole ancestor.
+    expect(text).not.toContain('color: red')
   })
 })

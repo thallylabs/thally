@@ -166,8 +166,16 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
               else if (!isNestedInPseudo) hasAuthoredAnchor = true
             } else if (node.type === 'attribute' && node.attribute === 'data-as') {
               // Mintlify adds this implementation detail to transformed MDX
-              // paragraphs. Thally renders the native element and class.
-              node.remove()
+              // paragraphs. Thally renders the native element and class. On
+              // its own in a compound (`.x [data-as="p"]`) it stands for the
+              // element, which is named instead; beside a class or tag it is
+              // simply dropped. One that names no element has no stand-in, and
+              // dropping it would style the whole ancestor, so the selector goes.
+              const alone = (!node.prev() || node.prev()?.type === 'combinator') && (!node.next() || node.next()?.type === 'combinator')
+              const element = node.operator === '=' ? node.value : undefined
+              if (!alone) node.remove()
+              else if (element && /^[a-z][a-z0-9]*$/.test(element)) node.replaceWith(selectorParser.tag({ value: element }))
+              else hasPlatformAnchor = true
               rewrittenSelectors += 1
             }
           })
