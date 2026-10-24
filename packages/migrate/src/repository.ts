@@ -4085,7 +4085,8 @@ function injectOpenApiSpecs(
   for (const spec of specs) {
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
-      : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
+      // The hidden tab of a spec only pages name belongs to that spec: a spec with no label of its own never takes it over.
+      : tabs.find((tab) => tab.tab.toLowerCase().includes('api') && !(tab.hidden && tab.tab.startsWith('OpenAPI: ')))
     if (apiTab) {
       // Thally binds one API spec per tab; a second spec that resolves to
       // the same tab would otherwise silently replace the first one's

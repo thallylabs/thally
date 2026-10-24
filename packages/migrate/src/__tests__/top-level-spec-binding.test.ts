@@ -70,3 +70,63 @@ describe('a docs.json spec that only pages name', () => {
     expect(apiTabs(bundle).some((tab) => !tab.hidden)).toBe(true)
   })
 })
+
+describe('two remote specs in one docs.json, only one of them named by a page', () => {
+  const A = 'https://example.com/a.json'
+  const B = 'https://example.com/b.json'
+  const specWith = (path: string, tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { [path]: { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  const bodies: Record<string, string> = { [A]: specWith('/x', 'Alpha'), [B]: specWith('/users', 'Beta') }
+  const twoSpecs: MigrationFetcher = async (url) => ({ finalUrl: url, body: bodies[url.toString()], contentType: 'application/json' })
+  const bind = (order: Array<string>) => hydrateRemoteApiSpecs(site({ 'home.mdx': page(`${A} GET /x`) }, { openapi: order }), twoSpecs)
+
+  for (const order of [[A, B], [B, A]]) {
+    it(`keeps each spec in its own tab (${order.map((url) => url.slice(-6)).join(', ')})`, async () => {
+      const bundle = await bind(order)
+      const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
+      const hidden = apiTabs(bundle).filter((tab) => tab.hidden)
+      const listed = apiTabs(bundle).filter((tab) => !tab.hidden)
+      expect(hidden.map((tab) => tab.tab)).toEqual([`OpenAPI: ${A}`])
+      expect(hidden[0].api).toMatchObject({ source: assetFor(A) })
+      expect(listed).toHaveLength(1)
+      expect(listed[0].api).toMatchObject({ source: assetFor(B) })
+      expect(listed[0].api).not.toHaveProperty('navigation')
+      // Only when B's tab was already taken does A say it gets no endpoint list; B is never dropped or replaced.
+      const warned = bundle.warnings.filter((warning) => warning.code === 'unsupported-config').map((warning) => warning.source)
+      expect(warned).toEqual(order[0] === A ? [] : [A])
+    })
+  }
+
+  it('keeps the first of two specs no page names and warns, rather than replacing its binding with the second', async () => {
+    const bundle = await hydrateRemoteApiSpecs(site({ 'home.mdx': page() }, { openapi: [A, B] }), twoSpecs)
+    const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
+    expect(apiTabs(bundle)).toHaveLength(1)
+    expect(apiTabs(bundle)[0].api).toMatchObject({ source: assetFor(A) })
+    expect(bundle.warnings.some((warning) => warning.code === 'unsupported-config' && warning.source === B && warning.message.includes(`${B} was not added`))).toBe(true)
+  })
+})
+
+describe('two local specs in one docs.json, only one of them named by a page', () => {
+  const specWith = (path: string, tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { [path]: { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  for (const order of [['a.json', 'b.json'], ['b.json', 'a.json']]) {
+    it(`keeps each spec in its own tab (${order.join(', ')})`, () => {
+      const bundle = site(
+        { 'home.mdx': page('a.json GET /x'), 'a.json': specWith('/x', 'Alpha'), 'b.json': specWith('/users', 'Beta') },
+        { openapi: order },
+      )
+      expect(apiTabs(bundle).map((tab) => [tab.tab, tab.hidden === true, (tab.api as { source: string }).source])).toEqual(expect.arrayContaining([
+        ['OpenAPI: a.json', true, 'openapi/a.json'],
+        ['API Reference', false, 'openapi/b.json'],
+      ]))
+      expect(apiTabs(bundle)).toHaveLength(2)
+      expect(bundle.warnings.some((warning) => warning.message.includes('was not added'))).toBe(false)
+    })
+  }
+})
