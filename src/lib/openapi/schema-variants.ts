@@ -1,22 +1,28 @@
 /** Schema shapes shared by the API page and the Try it form: allOf merging and oneOf/anyOf variants. */
 
-/**
- * Merges allOf fragments into a single flat schema so the renderer can
- * iterate over a unified properties map instead of checking each fragment.
- */
-export function flattenSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  if (!Array.isArray(schema.allOf)) return schema
+function isSchema(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object'
+}
 
-  const merged: Record<string, unknown> = { ...schema }
-  const allOf = schema.allOf as Array<unknown>
-  delete (merged as Record<string, unknown>).allOf
+/** The object members of a schema's `oneOf` (else `anyOf`); null when it has none. */
+function unionMembers(schema: Record<string, unknown>): Array<Record<string, unknown>> | null {
+  const list = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : null
+  const members = list?.filter(isSchema)
+  return members?.length ? members : null
+}
 
+/** The part of a schema that fragments of an allOf contribute to the merged one. */
+function structure({ properties, required, type }: Record<string, unknown>) {
+  return { properties, required, type }
+}
+
+/** Adds the properties, required names and type of plain, already flat fragments to `base`. */
+function mergeFragments(base: Record<string, unknown>, fragments: Array<Record<string, unknown>>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base }
   const mergedProps: Record<string, unknown> = {}
   const mergedRequired: string[] = []
 
-  for (const fragment of allOf) {
-    if (!fragment || typeof fragment !== 'object') continue
-    const f = flattenSchema(fragment as Record<string, unknown>)
+  for (const f of fragments) {
     if (f.properties && typeof f.properties === 'object') {
       Object.assign(mergedProps, f.properties as Record<string, unknown>)
     }
@@ -36,6 +42,42 @@ export function flattenSchema(schema: Record<string, unknown>): Record<string, u
   return merged
 }
 
+/**
+ * Merges allOf fragments into a single flat schema so the renderer can
+ * iterate over a unified properties map instead of checking each fragment.
+ *
+ * A oneOf/anyOf that is a fragment of the allOf (or sits beside it) is never dropped. With one
+ * member it is merged like any other fragment. With several, the result is a union whose members
+ * each carry the properties around it, so the renderer lists them as it lists any other union.
+ * Two unions give every pairing of their members.
+ */
+export function flattenSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(schema.allOf)) return schema
+
+  const { allOf, anyOf, oneOf, ...rest } = schema as { allOf: Array<unknown>; anyOf?: unknown; oneOf?: unknown } & Record<string, unknown>
+  const fragments = [...allOf, ...(anyOf || oneOf ? [{ anyOf, oneOf }] : [])].filter(isSchema).map(flattenSchema)
+  const at = fragments.findIndex((fragment) => unionMembers(fragment))
+  if (at < 0) return mergeFragments(rest, fragments)
+
+  const members = unionMembers(fragments[at]) as Array<Record<string, unknown>>
+  // What the union fragment holds besides its members is shared by all of them.
+  const shared = { ...fragments[at], anyOf: undefined, oneOf: undefined }
+  const withMember = (member: Record<string, unknown>) => fragments.flatMap((fragment, index) => (index === at ? [shared, member] : [fragment]))
+  if (members.length === 1) return flattenSchema({ ...rest, allOf: withMember(members[0]) })
+
+  // The union has no type or properties of its own: each member lists them, with its own title and description.
+  const outer = { ...rest }
+  for (const key of ['properties', 'required', 'type']) delete outer[key]
+  return {
+    ...outer,
+    anyOf: members.map((member) => {
+      const flat = flattenSchema(member)
+      const own = { ...flat }
+      for (const key of ['properties', 'required', 'type']) delete own[key]
+      return flattenSchema({ ...own, allOf: [structure(rest), ...withMember(structure(flat))] })
+    }),
+  }
+}
 
 export interface SchemaVariant {
   /** The variant's own title, or its discriminator value. */
@@ -44,9 +86,8 @@ export interface SchemaVariant {
 }
 
 export function unionVariants(schema: Record<string, unknown>): Array<SchemaVariant> | null {
-  const list = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : null
-  const entries = list?.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-  if (!entries?.length) return null
+  const entries = unionMembers(schema)
+  if (!entries) return null
   const discriminator = (schema.discriminator as { propertyName?: unknown } | undefined)?.propertyName
   return entries.flatMap((entry) => {
     const flat = flattenSchema(entry)
