@@ -46,11 +46,17 @@ const stylesheet = `
 .ifx-tag--new { text-transform: uppercase; }
 .ifx-never-built { color: red; }
 .title { margin: 0; }
+.ifx-tile { padding: 8px; }
+.ifx-tile--wide { grid-column: span 2; }
+.ifx-tile:hover .ifx-tile__icon { opacity: 1; }
+.ifx-lane--dim, .ifx-lane--focus { opacity: 0.4; }
+.ifx-lane--hidden { display: none; }
 `
 
 const catalog = [
   'const cx = (...names) => names.filter(Boolean).join(" ")',
   'const heading = "title"',
+  'const stateClass = (base, on) => (on ? `${base} ${base}--focus` : `${base} ${base}--dim`)',
   'export const Catalog = ({ kinds }) => (',
   '  <div className="ifx-catalog">',
   '    {kinds.map((kind) => (',
@@ -59,6 +65,8 @@ const catalog = [
   '      </a>',
   '    ))}',
   '    <span className={"ifx-tag--" + "new"} />',
+  '    <b className={`ifx-tile${kinds.length > 1 ? " ifx-tile--wide" : ""}`}><i className="ifx-tile__icon" /></b>',
+  '    <u className={stateClass("ifx-lane", kinds.length > 1)} />',
   '  </div>',
   ')',
   '',
@@ -98,6 +106,12 @@ describe('stylesheet rules for the classes a copied component builds', () => {
     expect(text).toContain('.dark .ifx-card--pam {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).toContain('.ifx-tag--new {')
+    // A name a value follows (`ifx-tile${...}`), and a modifier added to a name held in a variable (`${base}--dim`).
+    expect(text).toContain('.ifx-tile {')
+    expect(text).toContain('.ifx-tile--wide {')
+    expect(text).toContain('.ifx-tile:hover .ifx-tile__icon {')
+    expect(text).toContain('.ifx-lane--dim, .ifx-lane--focus {')
+    expect(text).not.toContain('.ifx-lane--hidden')
     expect(text).not.toContain('.ifx-never-built')
   })
 

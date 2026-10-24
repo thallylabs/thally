@@ -55,21 +55,24 @@ export function navbarLinkButtons(css: string): Array<{ href: string; exact: boo
   return buttons
 }
 
-/** What a string says about the classes it names: whole class names, and the starts of names a template or a sum finishes at run time. */
-interface ClassNames { classes: Set<string>; prefixes: Set<string> }
+/** What a string says about the classes it names: whole names, the starts of names a template or a sum finishes, and the modifiers it adds. */
+interface ClassNames { classes: Set<string>; prefixes: Set<string>; suffixes: Set<string> }
 
 /**
- * Read class names off a string's text, where `\0` stands for a value the code fills in. A name that ends in `-` or `_` (`ifx-card--`
- * before `${kind}`) is the start of names, not a name. Outside a `className`, a bare word is as likely text as a class, so only a name
+ * Read class names off a string's text, where `\0` stands for a value the code fills in. A name that ends in `-` or `_`, or that a value
+ * follows (`ifx-card--${kind}`, `ifx-card${wide ? " wide" : ""}`), is the start of names as well as a name. A `--` or `__` suffix after a
+ * value (`${base}--dim`) is a modifier added to any name. Outside a `className`, a bare word is as likely text as a class, so only a name
  * with a dash or an underscore in it counts (`anyWord` is true for a `className` value, where every word does).
  */
 function addClassNames(text: string, into: ClassNames, anyWord: boolean): void {
   for (const token of text.split(/\s+/)) {
     const hole = token.indexOf('\0')
-    const name = hole < 0 ? token : token.slice(0, hole)
-    if (!/^[A-Za-z_][\w-]*$/.test(name)) continue
-    if (/[-_]$/.test(name)) into.prefixes.add(name)
-    else if (hole < 0 && (anyWord || /[-_]/.test(name))) into.classes.add(name)
+    const head = hole < 0 ? token : token.slice(0, hole)
+    const tail = hole < 0 ? '' : token.slice(token.lastIndexOf('\0') + 1)
+    if (/^(?:--|__)[\w-]+$/.test(tail)) into.suffixes.add(tail)
+    if (!/^[A-Za-z_][\w-]*$/.test(head) || (!anyWord && !/[-_]/.test(head))) continue
+    if (!/[-_]$/.test(head)) into.classes.add(head)
+    if (hole >= 0 || /[-_]$/.test(head)) into.prefixes.add(head)
   }
 }
 
@@ -83,10 +86,10 @@ function literalText(node: ts.Node): string | undefined {
 /**
  * Find classes and IDs actually authored in migrated pages and components. `modules` are the scripts and component modules: any string
  * they hold may be a class name (the code builds `className` from parts), and a template or a sum names the start of a family
- * (`ifx-card--${kind}`), which `prefixes` carries.
+ * (`ifx-card--${kind}`), which `prefixes` carries, or a modifier (`${base}--dim`), which `suffixes` does.
  */
-export function authoredStyleNames(contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): { classes: Set<string>; ids: Set<string>; prefixes: Set<string> } {
-  const names: ClassNames = { classes: new Set(), prefixes: new Set() }
+export function authoredStyleNames(contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): { classes: Set<string>; ids: Set<string>; prefixes: Set<string>; suffixes: Set<string> } {
+  const names: ClassNames = { classes: new Set(), prefixes: new Set(), suffixes: new Set() }
   const ids = new Set<string>()
   for (const { original, isModule } of [...contents.map((original) => ({ original, isModule: false })), ...modules.map((original) => ({ original, isModule: true }))]) {
     const content = withoutFencedCode(original)
@@ -129,7 +132,8 @@ export interface StyleProjection {
  */
 export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): StyleProjection {
   const names = authoredStyleNames(contents, modules)
-  const isAuthoredClass = (name: string): boolean => names.classes.has(name) || [...names.prefixes].some((prefix) => name.startsWith(prefix))
+  const isAuthoredClass = (name: string): boolean => names.classes.has(name)
+    || [...names.prefixes].some((prefix) => name.startsWith(prefix)) || [...names.suffixes].some((suffix) => name.endsWith(suffix))
   const root = postcss.parse(css)
   let omittedSelectors = 0
   let rewrittenSelectors = 0
