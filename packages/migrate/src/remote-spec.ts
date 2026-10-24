@@ -66,8 +66,11 @@ interface SpecResponse {
   body: Buffer
 }
 
-async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits): Promise<SpecResponse> {
+/** `deadlineAt` is the wall-clock end of the whole download, shared by every redirect hop. */
+async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits, deadlineAt: number): Promise<SpecResponse> {
   const pinned = await getPinnedAddress(url)
+  const remainingMs = deadlineAt - Date.now()
+  if (remainingMs <= 0) throw new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)
   return new Promise<SpecResponse>((resolve, reject) => {
     let response: IncomingMessage | undefined
     let decoder: Gunzip | undefined
@@ -93,13 +96,13 @@ async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits): Promise<
       response = incoming
       const status = incoming.statusCode ?? 0
       if (status >= 300 && status < 400) {
-        incoming.resume()
+        // Only the Location header is wanted: close the body now so it cannot hold a connection open.
         clearTimeout(deadline)
+        incoming.destroy()
         resolve({ status, location: incoming.headers.location, body: Buffer.alloc(0) })
         return
       }
       if (status < 200 || status >= 300) {
-        incoming.resume()
         abandon(new Error(`OpenAPI server returned ${status}.`))
         return
       }
@@ -134,7 +137,7 @@ async function requestPinnedSpec(url: URL, limits: SpecDownloadLimits): Promise<
       if (decoder) incoming.on('error', abandon)
     })
     req.setTimeout(limits.idleMs, () => abandon(new Error(`The OpenAPI server stopped sending data for ${limits.idleMs / 1000} seconds.`)))
-    const deadline = setTimeout(() => abandon(new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)), limits.totalMs)
+    const deadline = setTimeout(() => abandon(new Error(`Downloading the OpenAPI spec took longer than ${limits.totalMs / 1000} seconds.`)), remainingMs)
     req.on('error', abandon)
     req.end()
   })
@@ -150,8 +153,10 @@ export async function downloadSpec(value: string, fetcher?: MigrationFetcher, li
     if (body.length > MAX_SPEC_BYTES) throw new Error('Remote OpenAPI spec exceeds the 25 MB import limit.')
     return body
   }
+  const resolved = { ...DEFAULT_LIMITS, ...limits }
+  const deadlineAt = Date.now() + resolved.totalMs
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const response = await requestPinnedSpec(url, { ...DEFAULT_LIMITS, ...limits })
+    const response = await requestPinnedSpec(url, resolved, deadlineAt)
     if (response.status >= 300 && response.status < 400) {
       if (!response.location || hop === MAX_REDIRECTS) throw new Error('Remote OpenAPI spec redirected too many times.')
       url = validatedSpecUrl(new URL(response.location, url).toString())

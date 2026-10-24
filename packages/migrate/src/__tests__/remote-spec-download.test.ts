@@ -42,6 +42,7 @@ const specUrl = (path: string) => `https://specs.example.com${path}`
 const hugeBomb = gzipSync(Buffer.alloc(100_000_000, 32))
 
 let server: Server
+let dripClosed = Promise.resolve()
 let lastHeaders: IncomingHttpHeaders = {}
 const timers = new Set<NodeJS.Timeout>()
 
@@ -81,7 +82,27 @@ beforeAll(async () => {
         timers.add(timer)
         break
       }
-      default: response.writeHead(404); response.end()
+      case '/drip-redirect': {
+        // A redirect whose body never ends: one byte every 30 ms, forever.
+        let markClosed = () => {}
+        dripClosed = new Promise<void>((resolve) => { markClosed = resolve })
+        response.writeHead(302, { Location: '/always-gzip' })
+        response.flushHeaders()
+        const timer = setInterval(() => response.write('x'), 30)
+        timers.add(timer)
+        response.on('close', () => { clearInterval(timer); timers.delete(timer); markClosed() })
+        break
+      }
+      default: {
+        // /hop/N answers after 200 ms with a redirect to /hop/N-1, and /hop/0 is the spec itself.
+        const hops = /^\/hop\/(\d+)$/.exec(request.url ?? '')
+        if (!hops) { response.writeHead(404); response.end(); break }
+        const left = Number(hops[1])
+        setTimeout(() => {
+          if (left === 0) send(Buffer.from(spec))
+          else { response.writeHead(302, { Location: `/hop/${left - 1}` }); response.end() }
+        }, 200)
+      }
     }
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -126,6 +147,18 @@ describe('remote spec download', () => {
     const [{ decoder, bytes }] = decoders.made
     expect(decoder.destroyed).toBe(true)
     expect(bytes).toBeLessThan(30_000_000)
+  })
+
+  it('closes the body of a redirect it follows', async () => {
+    expect((await downloadSpec(specUrl('/drip-redirect'))).toString()).toBe(spec)
+    const closed = await Promise.race([dripClosed.then(() => true), new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, false))])
+    expect(closed).toBe(true)
+  })
+
+  it('counts one total time across every redirect of a download', async () => {
+    // Three 200 ms hops against 300 ms in all: each hop alone is well inside it.
+    await expect(downloadSpec(specUrl('/hop/2'), undefined, { idleMs: 5_000, totalMs: 300 })).rejects.toThrow('took longer than')
+    expect((await downloadSpec(specUrl('/hop/2'), undefined, { idleMs: 5_000, totalMs: 5_000 })).toString()).toBe(spec)
   })
 
   it('keeps waiting while bytes keep arriving, even past the idle time', async () => {
