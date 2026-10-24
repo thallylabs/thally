@@ -573,7 +573,9 @@ field, accessor, `#private`) are names, not uses, and are never replaced; a
 computed key (`[mode]`) is a use.
 A bare `{mode}` follows the same rules, so a callback parameter or a declaration
 of that name keeps its own value there too; it becomes the value as text in a
-Markdown snippet and `{"value"}` in a JSX one. An outer code fence that contains a
+Markdown snippet and `{"value"}` in a JSX one; `{children}` becomes the children as
+written in text and as the child of an element inside an expression
+(`{mode === "x" && <Note>{children}</Note>}`) alike. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.

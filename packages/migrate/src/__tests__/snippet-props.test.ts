@@ -229,6 +229,11 @@ describe('a snippet prop is bound where scope analysis says a reference is free'
     'snippets/role.mdx': snippet,
   }).body
 
+  it('binds children inside an expression a prop selects', () => {
+    const body = bind('{mode === "strict" && <Note>{children}</Note>}\n', 'mode="strict"', 'Important instructions')
+    expect(body).toContain('{"strict" === "strict" && <Note>Important instructions</Note>}')
+  })
+
   it('does not turn a label into a string, and binds the reference after it', () => {
     const body = bind('{(() => { mode: for (;;) { break mode; } return mode; })()}\n')
     expect(body).toContain('mode: for (;;) { break mode; } return "strict";')

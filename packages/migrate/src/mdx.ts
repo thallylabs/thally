@@ -572,11 +572,16 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         }
       }
       const bound = properties.get(name)
-      if (!variables || bound === undefined || name === 'children') continue
-      // `{ mode }` keeps its key; every other reference is replaced where it stands.
-      edits.push(parent?.type === 'Property' && parent.shorthand
-        ? { start: parent.start, end: parent.end, value: `${name}: ${JSON.stringify(bound)}` }
-        : { start, end, value: JSON.stringify(bound) })
+      if (!variables || bound === undefined) continue
+      if (name !== 'children') {
+        // `{ mode }` keeps its key; every other reference is replaced where it stands.
+        edits.push(parent?.type === 'Property' && parent.shorthand
+          ? { start: parent.start, end: parent.end, value: `${name}: ${JSON.stringify(bound)}` }
+          : { start, end, value: JSON.stringify(bound) })
+      } else if (parent?.type === 'JSXExpressionContainer' && ['JSXElement', 'JSXFragment'].includes(parents.get(parent)?.type ?? '')) {
+        // The children a call gives a snippet are text of the page, as a lone `{children}` has always been.
+        edits.push({ start: parent.start, end: parent.end, value: bound })
+      }
     }
   }
   /** `span` is where an attribute's value expression sits, which the value node itself does not say. */
