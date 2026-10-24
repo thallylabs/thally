@@ -1137,6 +1137,44 @@ describe('repository component migration', () => {
     expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
   })
 
+  describe('an imported function reaches a client component through its adapter however the module exports it', () => {
+    const viewer = 'export const Viewer = ({ format, items }) => { const [open] = useState(true); return open ? <p>{typeof format === "function" ? format("x") : format}{items}</p> : null }'
+    const migrate = (helpers: string, importClause: string, tag = '<Viewer format={format} />') => {
+      const root = fixture({ 'viewer.jsx': viewer, 'helpers.js': helpers })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const body = migrator.transform(`import { Viewer } from './viewer.jsx'\nimport ${importClause} from './helpers.js'\n\n${tag}`, join(root, 'index.mdx'))
+      return { body, warnings, adapter: migrator.files().find((file) => file.path.includes('/callback-')) }
+    }
+
+    for (const [name, helpers, importClause, imported] of [
+      ['a default export of a local function', 'const format = (value) => value.toUpperCase()\nexport default format', 'format', 'default'],
+      ['a named export list', 'const format = (value) => value.toUpperCase()\nexport { format }', '{ format }', 'format'],
+      ['a renamed export', 'const make = (value) => value.toUpperCase()\nexport { make as f }', '{ f as format }', 'f'],
+      ['a function declaration exported as default later', 'function format(value) { return value }\nexport default format', 'format', 'default'],
+    ] as const) {
+      it(`moves the function of ${name}`, () => {
+        const { body, adapter } = migrate(helpers, importClause)
+        expect(body).not.toContain('format={format}')
+        expect(adapter?.content).toContain('format={callback0}')
+        expect(adapter?.content).toContain(imported === 'default' ? 'import callback0 from' : `import { ${imported} as callback0 } from`)
+      })
+    }
+
+    it('moves an export it cannot classify, which is safe to import inside a client module', () => {
+      const { body, warnings, adapter } = migrate('const make = () => (value) => value\nexport const format = make()', '{ format }')
+      expect(body).not.toContain('format={format}')
+      expect(adapter?.content).toContain('format={callback0}')
+      expect(warnings).toEqual([])
+    })
+
+    it('keeps plain data on the page, however it is exported', () => {
+      const { body, adapter } = migrate('const items = ["a", "b"]\nexport { items }', '{ items }', '<Viewer items={items} />')
+      expect(body).toMatch(/<Migrated[a-f0-9]+ items=\{items\} \/>/)
+      expect(adapter).toBeUndefined()
+    })
+  })
+
   describe('a function passed as children is never moved into a client adapter', () => {
     const widget = 'export const Widget = ({ children, label }) => { const [open] = useState(true); return open ? <p>{typeof children === "function" ? children("x") : children}{label}</p> : null }'
     const migrate = (tag: string) => {

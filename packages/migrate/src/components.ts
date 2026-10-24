@@ -92,21 +92,23 @@ export function normalizeIndentedFences(content: string): string {
   }).join('\n')
 }
 
+/** A literal value: a string, number, boolean or null, or an array or object of them. */
+function isLiteralExpression(node: ts.Expression): boolean {
+  if (ts.isParenthesizedExpression(node)) return isLiteralExpression(node.expression)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isNumericLiteral(node)) return true
+  if ([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) return true
+  if (ts.isPrefixUnaryExpression(node)) return [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(node.operator) && ts.isNumericLiteral(node.operand)
+  if (ts.isArrayLiteralExpression(node)) return node.elements.every((element) => ts.isExpression(element) && isLiteralExpression(element))
+  if (ts.isObjectLiteralExpression(node)) return node.properties.every((property) => ts.isPropertyAssignment(property)
+    && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))
+    && isLiteralExpression(property.initializer))
+  return false
+}
+
 /** Lift a self-contained data helper out of a copied client module for server MDX expressions. */
 function staticServerHelper(path: string, imported: string, local: string): string | null {
   if (imported === 'default') return null
   const parsed = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const isLiteral = (node: ts.Expression): boolean => {
-    if (ts.isParenthesizedExpression(node)) return isLiteral(node.expression)
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isNumericLiteral(node)) return true
-    if ([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) return true
-    if (ts.isPrefixUnaryExpression(node)) return [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(node.operator) && ts.isNumericLiteral(node.operand)
-    if (ts.isArrayLiteralExpression(node)) return node.elements.every((element) => ts.isExpression(element) && isLiteral(element))
-    if (ts.isObjectLiteralExpression(node)) return node.properties.every((property) => ts.isPropertyAssignment(property)
-      && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))
-      && isLiteral(property.initializer))
-    return false
-  }
   for (const statement of parsed.statements) {
     if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
     for (const declaration of statement.declarationList.declarations) {
@@ -116,26 +118,61 @@ function staticServerHelper(path: string, imported: string, local: string): stri
       const result = ts.isBlock(arrow.body)
         ? arrow.body.statements.length === 1 && ts.isReturnStatement(arrow.body.statements[0]) ? arrow.body.statements[0].expression : undefined
         : arrow.body
-      if (result && isLiteral(result)) return `export const ${local} = () => (${result.getText(parsed)});`
+      if (result && isLiteralExpression(result)) return `export const ${local} = () => (${result.getText(parsed)});`
     }
   }
   return null
 }
 
-/** Whether a copied module exports `imported` (`'default'` included) as a function: an arrow, a function expression or a function declaration. */
-function exportsFunction(path: string, imported: string): boolean {
+/**
+ * What a copied module exports as `imported` (`'default'` included): a `function` (an arrow, a function expression, a function or
+ * class declaration), plain `data` (a literal), or `unknown` when only running the module would tell. A name is followed through
+ * the module's own top-level declarations, so `const f = ...; export default f`, `export { f }` and `export { f as g }` are read
+ * like `export const f = ...`. A re-export from another module is `unknown`.
+ */
+function exportedValueKind(path: string, imported: string): 'function' | 'data' | 'unknown' {
   const parsed = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const isFunction = (node: ts.Expression | undefined): boolean => !!node && (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
-  return parsed.statements.some((statement) => {
-    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
-    if (ts.isExportAssignment(statement)) return imported === 'default' && !statement.isExportEquals && isFunction(statement.expression)
-    if (!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) return false
-    if (ts.isFunctionDeclaration(statement)) {
-      return modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ? imported === 'default' : statement.name?.text === imported
+  const hasModifier = (statement: ts.Statement, kind: ts.SyntaxKind): boolean =>
+    ts.canHaveModifiers(statement) && !!ts.getModifiers(statement)?.some((modifier) => modifier.kind === kind)
+  const declared = (name: string, seen: ReadonlySet<string>): 'function' | 'data' | 'unknown' => {
+    if (seen.has(name)) return 'unknown'
+    for (const statement of parsed.statements) {
+      if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name?.text === name) return 'function'
+      if (!ts.isVariableStatement(statement)) continue
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
+          return declaration.initializer ? valueKind(declaration.initializer, new Set([...seen, name])) : 'unknown'
+        }
+      }
     }
-    return ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => (
-      ts.isIdentifier(declaration.name) && declaration.name.text === imported && isFunction(declaration.initializer)))
-  })
+    return 'unknown'
+  }
+  const valueKind = (node: ts.Expression, seen: ReadonlySet<string>): 'function' | 'data' | 'unknown' => {
+    let inner = node
+    while (ts.isParenthesizedExpression(inner) || ts.isAsExpression(inner) || ts.isSatisfiesExpression(inner) || ts.isNonNullExpression(inner)) inner = inner.expression
+    if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner) || ts.isClassExpression(inner)) return 'function'
+    if (ts.isIdentifier(inner)) return declared(inner.text, seen)
+    return isLiteralExpression(inner) ? 'data' : 'unknown'
+  }
+  for (const statement of parsed.statements) {
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals && imported === 'default') return valueKind(statement.expression, new Set())
+    if (ts.isExportDeclaration(statement) && !statement.isTypeOnly && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+      for (const specifier of statement.exportClause.elements) {
+        if (specifier.name.text !== imported) continue
+        return statement.moduleSpecifier ? 'unknown' : declared((specifier.propertyName ?? specifier.name).text, new Set())
+      }
+      continue
+    }
+    if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) continue
+    if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) {
+      if (hasModifier(statement, ts.SyntaxKind.DefaultKeyword) ? imported === 'default' : statement.name?.text === imported) return 'function'
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.name.text === imported) return declared(imported, new Set())
+      }
+    }
+  }
+  return 'unknown'
 }
 
 /** A bare `id`/`videoId`-style attribute value is safe to embed in an `iframe src` only when it looks like a real YouTube video id. */
@@ -1258,7 +1295,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
     const realPageImports: Array<string> = []
-    // Imported bindings that are functions: they cannot be passed from the page into a client component.
+    // Imported bindings that are, or may be, functions (anything not known to be plain data): a function cannot be passed from the page into a client component.
     const importedFunctions = new Map<string, { path: string; imported: string }>()
     const serverPageDeclarations: Array<string> = []
     const sharedImportEdits: Array<Replacement> = []
@@ -1549,7 +1586,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // where the generated runtime module that embeds this page
             // ends up on disk.
             if (!isSvgUsedAsTag && hasExpressionReference(new Set([binding.local]))) {
-              if (exportsFunction(sourcePath, binding.imported)) importedFunctions.set(binding.local, { path, imported: binding.imported })
+              if (exportedValueKind(sourcePath, binding.imported) !== 'data') importedFunctions.set(binding.local, { path, imported: binding.imported })
               const helper = staticServerHelper(sourcePath, binding.imported, binding.local)
               if (helper) {
                 serverPageDeclarations.push(helper)
