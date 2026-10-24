@@ -1137,6 +1137,45 @@ describe('repository component migration', () => {
     expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
   })
 
+  describe('a function passed as children is never moved into a client adapter', () => {
+    const widget = 'export const Widget = ({ children, label }) => { const [open] = useState(true); return open ? <p>{typeof children === "function" ? children("x") : children}{label}</p> : null }'
+    const migrate = (tag: string) => {
+      const root = fixture({ 'widget.jsx': widget, 'format.js': 'export default function format(value) { return value }' })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const body = migrator.transform(`import { Widget } from './widget.jsx'\nimport format from './format.js'\n\n${tag}`, join(root, 'index.mdx'))
+      return { body, warnings, adapter: migrator.files().find((file) => file.path.includes('/callback-')) }
+    }
+
+    it('keeps the imported function on the tag and says why', () => {
+      const { body, warnings, adapter } = migrate('<Widget children={format} />')
+      // The adapter would hand its own (empty) children to the component after the moved one and replace it.
+      expect(adapter).toBeUndefined()
+      expect(body).toMatch(/<Migrated[a-f0-9]+ children=\{format\} \/>/)
+      expect(warnings.map((warning) => warning.message).join('\n')).toMatch(/children.*not moved|not moved.*children/)
+    })
+
+    it('still moves another function prop of the same tag', () => {
+      const { body, warnings, adapter } = migrate('<Widget children={format} label={format} />')
+      expect(body).toContain('children={format}')
+      expect(body).not.toContain('label={format}')
+      expect(adapter?.content).toContain('<Original {...props} label={callback0}>')
+      expect(adapter?.content).not.toContain('children={')
+      expect(warnings.map((warning) => warning.message).join('\n')).toMatch(/children/)
+    })
+
+    it('keeps a page-local callback passed as children passive rather than moving it', () => {
+      const root = fixture({ 'playground.jsx': 'export const Playground = ({ children }) => <section>{children}</section>' })
+      const warnings: Array<MigrationWarning> = []
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      const source = "import { Playground } from './playground.jsx'\n\nexport const WidgetCodeBlock = ({ children, ...props }) => (<CodeBlock {...props}>{children}</CodeBlock>);\n\n<Playground children={WidgetCodeBlock}><Warning>Keep this.</Warning></Playground>"
+      const body = migrator.transform(source, join(root, 'index.mdx'))
+      expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
+      expect(body).toContain('<Warning>Keep this.</Warning>')
+      expect(warnings.some((warning) => warning.message.includes('Interactive <Playground>'))).toBe(true)
+    })
+  })
+
   it('leaves an imported function that is passed to a server component on the page', () => {
     const root = fixture({
       'widget.jsx': 'export default async function Widget({ format }) { return <p>{format(await Promise.resolve("x"))}</p> }',

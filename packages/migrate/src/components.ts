@@ -641,10 +641,11 @@ function isConfirmedClientBoundaryTag(name: string): boolean {
 /**
  * Whether moving attribute `attribute` of a tag into a wrapper keeps what the tag passes. JSX lets a later spread or a later prop
  * of the same name win, but the wrapper applies the props it moves after everything else, so a moved prop would win over them.
+ * `children` never moves: the wrapper hands the component its own children after its props, which would replace the moved one.
  */
-function keepsPropPrecedence(node: MdxNode, attribute: NonNullable<MdxNode['attributes']>[number]): boolean {
+function canMoveIntoWrapper(node: MdxNode, attribute: NonNullable<MdxNode['attributes']>[number]): boolean {
   const attributes = node.attributes ?? []
-  return attributes.slice(attributes.indexOf(attribute) + 1)
+  return attribute.name !== 'children' && attributes.slice(attributes.indexOf(attribute) + 1)
     .every((later) => later.type !== 'mdxJsxExpressionAttribute' && later.name !== attribute.name)
 }
 
@@ -1895,8 +1896,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           && [...declaration.source.matchAll(/\{([^{}]*)\}/g)].every((match) =>
             ['children', '...props', 'children, ...props'].includes(match[1].trim()))
         const binding = registrations.get(aliases.get(node.name)!)
-        // A later spread or prop of the same name would be overridden by the moved callback: keep the callback passive instead.
-        if (safeDeclaration && binding && keepsPropPrecedence(node, functionAttributes[0])) {
+        // A later spread or prop of the same name would be overridden by the moved callback, and `children` cannot be moved: keep the callback passive instead.
+        if (safeDeclaration && binding && canMoveIntoWrapper(node, functionAttributes[0])) {
           const fallbackDeclaration = declaration!.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')
           const wrapperPath = callbackWrapperPath(currentFile, node.position.start.offset)
           const imported = binding.imported === 'default' ? 'default' : binding.imported
@@ -1947,12 +1948,17 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const binding = registrations.get(aliases.get(node.name)!)
       // Only a client component refuses a function from the page; a server component keeps taking it as authored.
       if (candidates.length === 0 || !binding || !CLIENT_DIRECTIVE.test(String(copied.get(binding.path)?.content ?? ''))) return
-      // A function a later spread or prop of the same name overrides stays on the page, as authored, rather than win over it.
-      const overridden = candidates.filter(({ attribute }) => !keepsPropPrecedence(node, attribute))
+      // A function that cannot move stays on the page, as authored: one a later spread or prop of the same name overrides, rather than win over it, and `children`.
+      const unmoved = candidates.filter(({ attribute }) => !canMoveIntoWrapper(node, attribute))
+      const asChildren = unmoved.filter(({ name }) => name === 'children')
+      const overridden = unmoved.filter(({ name }) => name !== 'children')
+      if (asChildren.length > 0) {
+        warn(`<${node.name}> passes the imported function "children" as its children, which a client adapter cannot carry, so it was not moved and Next.js may refuse to build the page. Pass the function under another prop name, or import it inside the component.`, currentFile)
+      }
       if (overridden.length > 0) {
         warn(`<${node.name}> passes the imported function ${overridden.map(({ name }) => `"${name}"`).join(', ')} before a later prop or spread that overrides it, so ${overridden.length === 1 ? 'it was' : 'they were'} not moved into a client adapter and Next.js may refuse to build the page. Put the prop after the spread, or import the function inside the component.`, currentFile)
       }
-      const functionAttributes = candidates.filter((candidate) => !overridden.includes(candidate))
+      const functionAttributes = candidates.filter((candidate) => !unmoved.includes(candidate))
       if (functionAttributes.length === 0) return
       const moduleSpecifier = (path: string): string => JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))
       const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
