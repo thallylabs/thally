@@ -755,9 +755,12 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const rel2 = relative(projectDir, filePath)
     if (!data.title) issues.push({ severity: 'warning', message: `Missing "title" in frontmatter`, file: rel2 })
     const reference = parseDocReference(data.openapi)
+    // The stub the migrator writes for a Mintlify `url:` entry: a noindex page whose own address redirects to another site, so no
+    // visitor reads it and it has nothing to describe.
+    const isLinkStub = data.noindex === true && /^https?:\/\//i.test(redirectDestinations.get(pageIdToPath(pageId, secondaryLocales)) ?? '')
     // The site describes an API page by its operation when the page has no description, so only the spec can say it has none.
-    if (!data.description && !reference) issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
-    if (typeof data.openapi !== 'string' && content.trim().length < 50) {
+    if (!data.description && !reference && !isLinkStub) issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
+    if (typeof data.openapi !== 'string' && !isLinkStub && content.trim().length < 50) {
       issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
 

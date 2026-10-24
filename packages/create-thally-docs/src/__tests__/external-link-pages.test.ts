@@ -34,3 +34,45 @@ describe('thally check on a migrated page whose frontmatter url is another site'
     expect(output.join('\n')).not.toMatch(/orphan|no MDX file|Broken/)
   })
 })
+
+describe('thally check on the stub the migrator writes for a Mintlify url entry', () => {
+  const stubWarning = /Very short body|Missing "description"/
+
+  /** Migrate a site whose `github-repo` page is only a title and a `url`, plus an ordinary short page, and return the check issues by file. */
+  async function issuesByFile(extra: Record<string, string> = {}): Promise<Map<string, Array<string>>> {
+    const source = mkdtempSync(join(tmpdir(), 'thally-link-stub-source-'))
+    writeFileSync(join(source, 'docs.json'), JSON.stringify({
+      navigation: { groups: [{ group: 'Community', pages: ['introduction', 'github-repo', 'short'] }] },
+    }))
+    writeFileSync(join(source, 'introduction.mdx'), '---\ntitle: Introduction\ndescription: Where the project lives.\n---\n\nThis page has enough prose to avoid the short body notice, and it links nowhere.')
+    writeFileSync(join(source, 'github-repo.mdx'), '---\ntitle: GitHub repo\nurl: "https://github.com/acme/docs"\n---\n')
+    writeFileSync(join(source, 'short.mdx'), '---\ntitle: Short\n---\n')
+    for (const [file, content] of Object.entries(extra)) writeFileSync(join(source, file), content)
+    const bundle = migrateRepository({ repositoryDir: source, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    const site = mkdtempSync(join(tmpdir(), 'thally-link-stub-site-'))
+    for (const file of renderMigrationFiles(bundle)) {
+      mkdirSync(dirname(join(site, file.path)), { recursive: true })
+      writeFileSync(join(site, file.path), file.content)
+    }
+    const found: Array<{ file?: string; message: string }> = []
+    await runCheck(site, { fix: false, ci: true, silent: true, onIssues: (issues) => found.push(...issues) })
+    const byFile = new Map<string, Array<string>>()
+    for (const issue of found) byFile.set(issue.file ?? '', [...(byFile.get(issue.file ?? '') ?? []), issue.message])
+    return byFile
+  }
+
+  it('does not warn that the page has no description or body', async () => {
+    const byFile = await issuesByFile()
+    expect(byFile.get('src/content/github-repo.mdx') ?? []).toEqual([])
+  })
+
+  it('still warns about an ordinary short page next to it', async () => {
+    const byFile = await issuesByFile()
+    expect((byFile.get('src/content/short.mdx') ?? []).filter((message) => stubWarning.test(message))).toHaveLength(2)
+  })
+
+  it('still warns about a short page that is noindex but redirects nowhere', async () => {
+    const byFile = await issuesByFile({ 'short.mdx': '---\ntitle: Short\nnoindex: true\n---\n' })
+    expect((byFile.get('src/content/short.mdx') ?? []).filter((message) => stubWarning.test(message))).toHaveLength(2)
+  })
+})
