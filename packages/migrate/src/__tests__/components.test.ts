@@ -1031,6 +1031,64 @@ describe('repository component migration', () => {
     expect(warnings[0].message).toContain('basic code block')
   })
 
+  it('passes an imported function to a client component through a client adapter, not from the page', () => {
+    const root = fixture({
+      'browser.jsx': 'export const Browser = ({ items, badges, label, children }) => { const [open] = useState(true); return <ul>{open && items.map((item) => <li key={item}>{badges(item)}{label(item)}{children}</li>)}</ul> }',
+      'catalog.jsx': 'export const items = ["a"];\nexport const badgesFor = (item) => [item];\nexport function labelFor(item) { return item }\nexport const zeroArgument = () => ["z"];',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = [
+      "import { Browser } from './browser.jsx'",
+      "import { items, badgesFor, labelFor, zeroArgument } from './catalog.jsx'",
+      '',
+      '<Browser items={items} badges={badgesFor} label={labelFor} extra={zeroArgument}>',
+      '  Body text.',
+      '</Browser>',
+    ].join('\n')
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    // The page keeps passing data; the functions are resolved inside the client module.
+    expect(body).toMatch(/<Migrated[a-f0-9]+ items=\{items\}\s*>/)
+    expect(body).toMatch(/<\/Migrated[a-f0-9]+>/)
+    expect(body).not.toMatch(/badges=\{|label=\{|extra=\{/)
+    const adapter = migrator.files().find((file) => file.path.includes('/callback-'))!
+    expect(String(adapter.content)).toMatch(/^'use client';/)
+    expect(adapter.content).toContain('badges={')
+    expect(adapter.content).toContain('label={')
+    expect(adapter.content).toContain('extra={')
+    expect(adapter.content).toMatch(/import \{ badgesFor as callback0 \} from "\.\/[^"]*catalog\.jsx";/)
+    expect(adapter.content).toMatch(/import \{ labelFor as callback1 \} from "\.\/[^"]*catalog\.jsx";/)
+    expect(adapter.content).toContain('<Original {...props} badges={callback0} label={callback1} extra={callback2}>')
+    expect(warnings).toEqual([])
+  })
+
+  it('also resolves a default-exported function inside the client adapter', () => {
+    const root = fixture({
+      'browser.jsx': 'export const Browser = ({ format }) => { const [open] = useState(true); return open ? <p>{format("x")}</p> : null }',
+      'format.js': 'export default function format(value) { return value }',
+    })
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const body = migrator.transform("import { Browser } from './browser.jsx'\nimport format from './format.js'\n\n<Browser format={format} />", join(root, 'index.mdx'))
+    expect(body).not.toContain('format={format}')
+    const adapter = migrator.files().find((file) => file.path.includes('/callback-'))!
+    expect(adapter.content).toMatch(/import callback0 from "\.\/[^"]*format\.js";/)
+    expect(adapter.content).toContain('format={callback0}')
+  })
+
+  it('leaves an imported function that is only called in a page expression as it is', () => {
+    const root = fixture({
+      'browser.jsx': 'export const Browser = ({ items }) => { const [open] = useState(true); return <ul>{open && items.map((item) => <li key={item}>{item}</li>)}</ul> }',
+      'catalog.jsx': 'export const names = ["a"];\nexport const upper = (item) => item.toUpperCase();',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import { Browser } from './browser.jsx'\nimport { names, upper } from './catalog.jsx'\n\n<Browser items={names} />\n\n{upper('x')}"
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).toMatch(/<Migrated[a-f0-9]+ items=\{names\} \/>/)
+    expect(body).toContain("{upper('x')}")
+    expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
+  })
+
   it('removes a React hook import unused outside fenced examples', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []

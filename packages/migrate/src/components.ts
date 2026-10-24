@@ -122,6 +122,22 @@ function staticServerHelper(path: string, imported: string, local: string): stri
   return null
 }
 
+/** Whether a copied module exports `imported` (`'default'` included) as a function: an arrow, a function expression or a function declaration. */
+function exportsFunction(path: string, imported: string): boolean {
+  const parsed = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const isFunction = (node: ts.Expression | undefined): boolean => !!node && (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+  return parsed.statements.some((statement) => {
+    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined
+    if (ts.isExportAssignment(statement)) return imported === 'default' && !statement.isExportEquals && isFunction(statement.expression)
+    if (!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) return false
+    if (ts.isFunctionDeclaration(statement)) {
+      return modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ? imported === 'default' : statement.name?.text === imported
+    }
+    return ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => (
+      ts.isIdentifier(declaration.name) && declaration.name.text === imported && isFunction(declaration.initializer)))
+  })
+}
+
 /** A bare `id`/`videoId`-style attribute value is safe to embed in an `iframe src` only when it looks like a real YouTube video id. */
 const YOUTUBE_VIDEO_ID = /^[\w-]{1,64}$/
 /** Packages known to take a literal YouTube video id prop (as opposed to a URL, or a non-YouTube player). */
@@ -1223,6 +1239,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
     const realPageImports: Array<string> = []
+    // Imported bindings that are functions: they cannot be passed from the page into a client component.
+    const importedFunctions = new Map<string, { path: string; imported: string }>()
     const serverPageDeclarations: Array<string> = []
     const sharedImportEdits: Array<Replacement> = []
     let hasUnsupportedImports = false
@@ -1512,6 +1530,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // where the generated runtime module that embeds this page
             // ends up on disk.
             if (!isSvgUsedAsTag && hasExpressionReference(new Set([binding.local]))) {
+              if (exportsFunction(sourcePath, binding.imported)) importedFunctions.set(binding.local, { path, imported: binding.imported })
               const helper = staticServerHelper(sourcePath, binding.imported, binding.local)
               if (helper) {
                 serverPageDeclarations.push(helper)
@@ -1891,6 +1910,40 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         value: `<div data-migration-interactive-fallback="${node.name}">${children}</div>` })
       passiveRoots.push(node)
       warn(`Interactive <${node.name}> passes a page-local function into a client component; its child content was retained without the interactive control. Move the callback into a client component to restore it.`, currentFile)
+    })
+    // A function imported from a copied module cannot cross into a client component from the page
+    // either. The adapter imports it itself, and the page keeps passing only the data props.
+    walk(tree, (node) => {
+      if (!node.name || !aliases.has(node.name) || functionValuedAttribute(node, pageFunctions) !== undefined
+        || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      if (wrappedRoots.has(node) || passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
+        && node.position!.end.offset! <= root.position!.end.offset!)) return
+      const functionAttributes = (node.attributes ?? []).flatMap((attribute) => {
+        const value = attribute.value && typeof attribute.value === 'object' ? attribute.value.value?.trim() : undefined
+        const imported = value ? importedFunctions.get(value) : undefined
+        return attribute.name && imported && attribute.position?.start.offset !== undefined && attribute.position.end.offset !== undefined
+          ? [{ name: attribute.name, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
+      })
+      const binding = registrations.get(aliases.get(node.name)!)
+      if (functionAttributes.length === 0 || !binding) return
+      const moduleSpecifier = (path: string): string => JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))
+      const importClause = (imported: string, local: string): string => imported === 'default' ? `import ${local}` : `import { ${imported} as ${local} }`
+      const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`
+      const wrapperName = register(wrapperPath, 'CallbackWrapper')
+      copied.set(wrapperPath, { path: wrapperPath, content: [
+        "'use client';",
+        `${importClause(binding.imported, 'Original')} from ${moduleSpecifier(binding.path)};`,
+        ...functionAttributes.map(({ imported }, index) => `${importClause(imported.imported, `callback${index}`)} from ${moduleSpecifier(imported.path)};`),
+        `export function CallbackWrapper({ children, ...props }) { return <Original {...props}${functionAttributes.map(({ name }, index) => ` ${name}={callback${index}}`).join('')}>{children}</Original>; }`,
+      ].join('\n') })
+      const start = node.position.start.offset
+      const source = content.slice(start, node.position.end.offset)
+      const opening = source.indexOf(`<${node.name}`)
+      const closing = source.lastIndexOf(`</${node.name}`)
+      if (opening >= 0) edits.push({ start: start + opening + 1, end: start + opening + 1 + node.name.length, value: wrapperName })
+      if (closing >= 0) edits.push({ start: start + closing + 2, end: start + closing + 2 + node.name.length, value: wrapperName })
+      for (const { start: from, end } of functionAttributes) edits.push({ start: from, end, value: '' })
+      wrappedRoots.add(node)
     })
     walk(tree, (node) => {
       const replacement = node.name ? aliases.get(node.name) : undefined

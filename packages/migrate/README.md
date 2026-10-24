@@ -509,8 +509,11 @@ For a copied client component that receives a simple page-authored JSX callback,
 the importer moves the callback into a client wrapper and keeps the page. If
 the callback cannot be moved safely, it keeps the page and the control's child
 content as a passive fallback, with a warning identifying the control. A
-stateful local snippet component is kept as a client component instead of
-flattening away its hooks and state.
+function the page imports from a copied module and passes as a prop to such a
+component (`badges={badgesFor}`) is imported by a client adapter instead, so
+the page never hands a function across the server boundary. A stateful local
+snippet component is kept as a client component instead of flattening away its
+hooks and state.
 A component a page declares itself (`export const Counter = () => ...`) that
 calls a React hook is moved into its own `'use client'` module, together with
 every page-local component, helper and constant it uses (a sibling it renders,
