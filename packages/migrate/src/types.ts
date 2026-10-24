@@ -173,6 +173,8 @@ export interface MigrationPage {
   icon?: string
   iconType?: 'regular' | 'solid' | 'outline' | 'brands'
   description: string
+  /** The source sets no description, so `description` is the page's first paragraph. */
+  derivedDescription?: boolean
   /** Keep the SEO/search summary while prose is already in the body, or comes from the bound operation. */
   descriptionPlacement?: 'body' | 'operation'
   badge?: string
