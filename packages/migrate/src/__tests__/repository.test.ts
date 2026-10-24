@@ -326,6 +326,15 @@ describe('linked source anchors', () => {
     expect(body).not.toContain('<a id="get-started">')
   })
 
+  it('anchors a fragment that names a heading by the text of its inline component, which the renderer leaves out of the id', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-component-'))
+    writeFileSync(join(root, 'a.mdx'), '---\ntitle: A\n---\n\n[Pro setup](/b#setup-pro) [Plain](/b#setup)')
+    writeFileSync(join(root, 'b.mdx'), '---\ntitle: B\n---\n\n## Setup <Badge color="blue">Pro</Badge>\n\nText.')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'b')?.body
+    // The heading's own id is `setup`, which the second link already reaches; the first needs an anchor.
+    expect(body).toBe('<a id="setup-pro"></a>\n## Setup <Badge color="blue">Pro</Badge>\n\nText.')
+  })
+
   it('maps case-different fragments onto numbered ids of repeated headings', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

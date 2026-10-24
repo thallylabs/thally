@@ -73,7 +73,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -3306,8 +3306,11 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
       if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
       const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      return match ? { index, text: mdxVisibleText(match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, ''), definitions) } : null
-    }).filter((entry): entry is { index: number; text: string } => entry !== null)
+      if (!match) return null
+      const source = match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '')
+      // `own`: the text the renderer makes the id from, which leaves out inline components and what they hold.
+      return { index, text: mdxVisibleText(source, definitions), own: mdxTextWithoutInlineElements(source, definitions) }
+    }).filter((entry): entry is { index: number; text: string; own: string | undefined } => entry !== null)
     const existing = new Set<string>()
     replaceOutsideCode(page.body, (text) => {
       for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
@@ -3326,7 +3329,7 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
     const headingSlugs = new Map<string, number>()
     const slugCounts = new Map<string, number>()
     for (const heading of headings) {
-      const slug = heading.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      const slug = (heading.own ?? heading.text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
       existing.add(slug)
       const seen = slugCounts.get(slug) ?? 0
       slugCounts.set(slug, seen + 1)

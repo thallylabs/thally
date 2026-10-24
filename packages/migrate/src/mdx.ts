@@ -41,19 +41,40 @@ interface DescriptionNode {
 
 const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
-function plainText(node: DescriptionNode): string {
+/** `elements`, when given, leaves out every JSX element and what it holds, and is set once one is met. */
+function plainText(node: DescriptionNode, elements?: { found: boolean }): string {
+  if (elements && (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement')) {
+    elements.found = true
+    return ''
+  }
   if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
   if (node.type === 'image') return node.alt ?? ''
   if (node.type === 'break') return ' '
-  return (node.children ?? []).map(plainText).join('')
+  return (node.children ?? []).map((child) => plainText(child, elements)).join('')
+}
+
+function headingText(content: string, definitions?: ReadonlyMap<string, string>, elements?: { found: boolean }): string {
+  const references = [...content.matchAll(/\[([^\]\n]+)\]/g)]
+    .map((match) => definitions?.get(match[1].trim().replace(/\s+/g, ' ').toLowerCase()) ?? '').join('\n')
+  try { return plainText(descriptionParser.parse(`# ${content}\n\n${references}`) as DescriptionNode, elements).trim() }
+  catch { return content }
 }
 
 /** Read visible inline text without including JSX attributes or Markdown syntax. */
 export function mdxVisibleText(content: string, definitions?: ReadonlyMap<string, string>): string {
-  const references = [...content.matchAll(/\[([^\]\n]+)\]/g)]
-    .map((match) => definitions?.get(match[1].trim().replace(/\s+/g, ' ').toLowerCase()) ?? '').join('\n')
-  try { return plainText(descriptionParser.parse(`# ${content}\n\n${references}`) as DescriptionNode).trim() }
-  catch { return content }
+  return headingText(content, definitions)
+}
+
+/**
+ * The text the renderer builds a heading's id from: the heading's own text, without its inline components and what they hold
+ * (`Setup <Badge>Pro</Badge>` reads "Setup"). Undefined when the heading has no inline component, or when nothing an id is made of
+ * is left, so the caller reads the heading's whole text as it always did.
+ */
+export function mdxTextWithoutInlineElements(content: string, definitions?: ReadonlyMap<string, string>): string | undefined {
+  if (!/<[A-Za-z]/.test(content)) return undefined
+  const elements = { found: false }
+  const text = headingText(content, definitions, elements)
+  return elements.found && /[\p{L}\p{M}\p{N}]/u.test(text) ? text : undefined
 }
 
 function firstParagraph(content: string): string {
@@ -345,20 +366,23 @@ function headingIdMarker(id: string): string {
 }
 
 /** Characters Mintlify keeps in an id besides letters, marks and digits; the ones around which it also places a dash. */
-const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@\u2019\u201c\u201d\u2014\u2013\u2192]/u
+const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@%=<>|\u2019\u201c\u201d\u2014\u2013\u2192\u2026]/u
 
 /**
  * The id Mintlify gives a heading with no explicit `{#id}`, from its rendered
  * text. Derived from the live ids of two Mintlify sites: whitespace and `-`
  * become one dash, as does a `.` before a word, a `(` between a word and a
  * word or `{` (`start(body`), and a `)` glued to what follows it (`()`+`:`).
- * `{`, `:` and `"` drop out but end a run of dashes, so `(`, `{`, space gives
- * two. `+ & / _ @`, typographic quotes and dashes and arrows are kept, other
+ * `{`, `:`, `,` and `"` drop out but end a run of dashes, so `(`, `{`, space gives
+ * two, as does `), ` (`lower(x), upper(x)` is `lower-x--upper-x`). `+ & / _ @ % = < > |`,
+ * typographic quotes and dashes, arrows and the ellipsis are kept, other
  * punctuation and emoji are dropped, and repeats are numbered `-2`, `-3`, ...
- * by the renderer.
+ * by the renderer. Read from other sites' ids: a `.` before a `,` makes a dash
+ * (`e.g., x` is `e-g--x`), and `(s)` after a word is the plural (`domain(s)` is
+ * `domains`).
  */
 export function mintlifyHeadingSlug(text: string): string {
-  const chars = [...text.replace(/[\u200b*]/g, '').normalize('NFC').trim().toLowerCase()]
+  const chars = [...text.replace(/[\u200b*]/g, '').replace(/(?<=[\p{L}\p{M}\p{N}_])\(s\)(?![\p{L}\p{M}\p{N}_])/gu, 's').normalize('NFC').trim().toLowerCase()]
   const isWord = (char: string | undefined): boolean => char !== undefined && HEADING_ID_WORD.test(char)
   let id = ''
   let afterDash = false
@@ -372,14 +396,14 @@ export function mintlifyHeadingSlug(text: string): string {
       afterDash = false
     } else if (
       /[\s-]/.test(char)
-      || (char === '.' && isWord(after))
+      || (char === '.' && (isWord(after) || after === ','))
       || (char === '(' && isWord(before) && (isWord(after) || after === '{'))
       || (char === ')' && after !== undefined && !/\s/.test(after))
     ) {
       if (id && !afterDash) id += '-'
       afterDash = true
       endsWithDash = true
-    } else if (char === '{' || char === ':' || char === '"') {
+    } else if (char === '{' || char === ':' || char === '"' || char === ',') {
       afterDash = false
     }
   })
@@ -391,27 +415,106 @@ function thallyHeadingSlug(text: string): string {
   return text.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
 }
 
-/** Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. */
+/**
+ * Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. A heading that opens with a straight
+ * double quote and does not end with one gets a closing quote first (2 of 2 such headings on a live site); one quoted from end to end
+ * keeps its opening quote (another live site).
+ */
 function typesetQuotes(text: string): string {
+  const opensClosed = text.startsWith('"') && !text.trimEnd().endsWith('"')
   return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => {
     if (index % 2) return part
     return part
-      .replace(/(^|[\s([{\u2014\u2013])"/g, '$1\u201c').replace(/"/g, '\u201d')
-      .replace(/(^|[\s([{\u2014\u2013\u201c])'(?=\S)/g, '$1\u2018').replace(/'/g, '\u2019')
+      // The leading quote of such a heading is left straight here, so the next step closes it.
+      .replace(/(^|[\s([{\u2014\u2013])"/g, (match, before: string) => (opensClosed && index === 0 && before === '' ? match : `${before}\u201c`))
+      .replace(/"/g, '\u201d')
+      .replace(/(^|[\s([{\u2014\u2013\u201c])'(?=\S)(?!&lt;|<)/g, '$1\u2018').replace(/'/g, '\u2019')
   }).join('')
+}
+
+/** Mintlify typesets `...` as an ellipsis in a heading's text, not in its code, and its id keeps it (`f(x, ...)` is `f-x-…`). */
+function typesetEllipses(text: string): string {
+  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => (index % 2 ? part : part.replace(/\.{3}/g, '\u2026'))).join('')
 }
 
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
-  return source
+  // What a code span holds is text, whatever it looks like: no comment, link, tag or emphasis is read inside it (`Option<T>` keeps its `<T>`).
+  return source.split(/(`[^`]*`)/).map((part, index) => (index % 2 ? part.slice(1, -1) : part
     // An authored MDX comment is not rendered, so Mintlify's id never sees it.
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
-    .replace(/`([^`]*)`/g, '$1')
     .replace(/(?<!\\)(\*\*|__|~~|\*)/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-    .replace(/\\([\\`*_{}[\]()#+.!&<>|~-])/g, '$1')
+    .replace(/\\([\\`*_{}[\]()#+.!&<>|~-])/g, '$1'))).join('')
+}
+
+interface IdClaimNode extends DescriptionNode {
+  depth?: number
+  attributes?: Array<{ type: string; name?: string; value?: unknown }>
+  children?: Array<IdClaimNode>
+  position?: { start: { line: number } }
+}
+
+/** A string an attribute holds, written as `"x"` or as a static expression (`{"x"}`, `{'x'}`, `{`x`}`); undefined for anything computed. */
+function staticAttributeString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  const expression = (value as { value?: unknown } | null)?.value
+  if (typeof expression !== 'string') return undefined
+  return expression.match(/^\s*(?:"([^"\\]*)"|'([^'\\]*)'|`((?:[^`\\$]|\$(?!\{))*)`)\s*$/)?.slice(1).find((part) => part !== undefined)
+}
+
+/**
+ * Who could own which id on a page, read from the page as the renderer parses it (headings at any depth, the `title` and `id`
+ * attributes of any component, ids written in a heading), not from its lines: a line inside a code block, a heading in a blockquote
+ * and an attribute over several lines all read as what they are. Ids are compared without a trailing `-N`, which numbering adds.
+ * `free(id, line)` is true when the heading at `line` is a heading of the page and nothing but that heading's own text could own `id`
+ * (an anchor or title on the same line is something else); a page that does not parse has no free id.
+ */
+function pageIdClaims(body: string): { free: (id: string, line: number) => boolean } {
+  let tree: IdClaimNode
+  try { tree = descriptionParser.parse(body) as IdClaimNode } catch { return { free: () => false } }
+  const owners = new Map<string, { owner: string; shared: boolean }>()
+  const headingLines = new Set<number>()
+  let claims = 0
+  const root = (id: string): string => id.toLowerCase().replace(/-\d+$/, '')
+  const claim = (owner: string, ...ids: Array<string>): void => {
+    for (const id of ids) {
+      const key = root(id)
+      const held = owners.get(key)
+      if (!key) continue
+      if (!held) owners.set(key, { owner, shared: false })
+      else if (held.owner !== owner) held.shared = true
+    }
+  }
+  const visit = (node: IdClaimNode): void => {
+    const line = node.position?.start.line ?? 0
+    if (node.type === 'heading' && (node.depth ?? 0) >= 2) {
+      headingLines.add(line)
+      const text = typesetQuotes(plainText(node))
+      claim(`heading ${line}`, mintlifyHeadingSlug(text), thallyHeadingSlug(text), thallyHeadingSlug(plainText(node, { found: false })))
+      for (const child of node.children ?? []) {
+        const authored = child.type === 'mdxTextExpression' ? child.value?.match(/^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/)?.[1] : undefined
+        if (authored) claim(`claim ${claims++}`, authored)
+      }
+    } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+      for (const { type, name, value } of node.attributes ?? []) {
+        const text = type === 'mdxJsxAttribute' ? staticAttributeString(value) : undefined
+        if (text === undefined) continue
+        if (name === 'id') claim(`claim ${claims++}`, text)
+        else if (name === 'title') claim(`claim ${claims++}`, mintlifyHeadingSlug(text), thallyHeadingSlug(text))
+      }
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  return {
+    free: (id, line) => {
+      const held = owners.get(root(id))
+      return headingLines.has(line) && (!held || (held.owner === `heading ${line}` && !held.shared))
+    },
+  }
 }
 
 /**
@@ -419,10 +522,15 @@ function plainHeadingText(source: string): string {
  * `#anchor` links from the source still land. Only headings whose id differs
  * from Thally's own slug get a marker, which leaves every other anchor alone.
  * Straight quotes in heading text are typeset as Mintlify does.
+ *
+ * The renderer builds an id from a heading's own text, without its inline components and what they hold, which Mintlify's id keeps
+ * (`Setup <Badge>Pro</Badge>`: `setup` against `setup-pro`). Such a heading is marked too, unless something else on the page
+ * could own that id: a marker reserves its id for the whole page, so it would move the other holder's anchor.
  */
 export function markMintlifyHeadings(body: string): string {
   let fence: string | undefined
-  return body.split('\n').map((line) => {
+  let claims: ReturnType<typeof pageIdClaims> | undefined
+  return body.split('\n').map((line, index) => {
     const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
     if (marker) {
       if (!fence) fence = marker[1]
@@ -438,8 +546,13 @@ export function markMintlifyHeadings(body: string): string {
     const source = typesetQuotes(explicit ? explicit[1] : heading[2])
     if (explicit) return `${heading[1]}${source}${explicit[2]}`
     const text = plainHeadingText(source)
-    const id = mintlifyHeadingSlug(text)
-    return `${heading[1]}${source}${id && id !== thallyHeadingSlug(text) ? ` ${headingIdMarker(id)}` : ''}`
+    const id = mintlifyHeadingSlug(plainHeadingText(typesetEllipses(source)))
+    let marked = id !== thallyHeadingSlug(text)
+    if (id && !marked) {
+      const visible = mdxTextWithoutInlineElements(source)
+      if (visible !== undefined && id !== thallyHeadingSlug(visible)) marked = (claims ??= pageIdClaims(body)).free(id, index + 1)
+    }
+    return `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
   }).join('\n')
 }
 
