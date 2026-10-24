@@ -1275,8 +1275,32 @@ function legacyTopbarNavbar(config: Record<string, unknown>): Record<string, unk
   return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined
 }
 
+/**
+ * Sidebar shortcuts from Mintlify `global.anchors`, each paired with the
+ * authored anchor it came from so the navbar projection can skip exactly the
+ * entries that became shortcuts.
+ */
+function projectedGlobalShortcuts(
+  global: Record<string, unknown> | null,
+): Array<{ source: object; shortcut: NonNullable<NonNullable<MigrationDocsConfig['navigation']>['shortcuts']>[number] }> {
+  if (!Array.isArray(global?.anchors)) return []
+  return global.anchors.flatMap((value) => {
+    const anchor = objectValue(value)
+    const label = typeof anchor?.anchor === 'string' ? anchor.anchor.trim() : ''
+    const href = projectedHref(anchor?.href)
+    if (!anchor || !label || !href) return []
+    return [{ source: anchor, shortcut: { label, href, ...(iconName(anchor.icon) ? { icon: iconName(anchor.icon) } : {}) } }]
+  })
+}
+
+/**
+ * Navbar links for the entries of a Mintlify `navigation.global` tree. An
+ * authored anchor already projected as a sidebar shortcut is skipped so it is
+ * shown once, in the sidebar, as it is on Mintlify; every other entry stays.
+ */
 function projectedGlobalNavigationLinks(
   value: unknown,
+  shortcutSources: ReadonlySet<object>,
 ): NonNullable<NonNullable<MigrationDocsConfig['navbar']>['links']> {
   const global = objectValue(value)
   if (!global) return []
@@ -1289,7 +1313,7 @@ function projectedGlobalNavigationLinks(
     const item = objectValue(entry)
     if (!item) return
     const href = projectedHref(item.href)
-    if (href) {
+    if (href && !shortcutSources.has(item)) {
       const label = labelFor(item, '')
       if (label) links.push({ label, href })
     }
@@ -1347,7 +1371,7 @@ function projectedFont(value: unknown): { family: string; weight?: Array<string>
   return { family, ...(weight && weight.length > 0 ? { weight } : {}) }
 }
 
-function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Omit<MigrationDocsConfig, 'tabs' | 'i18n' | 'redirects'> {
+function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Array<MigrationWarning>, shortcutSources: ReadonlySet<object>): Omit<MigrationDocsConfig, 'tabs' | 'i18n' | 'redirects'> {
   const banner = objectValue(config.banner)
   const bannerContent = banner && (typeof banner.content === 'string' || objectValue(banner.content))
     ? banner.content as string | Record<string, string>
@@ -1408,7 +1432,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
         ...(docsNavbar?.primary ?? legacyNavbar?.primary ? { primary: docsNavbar?.primary ?? legacyNavbar?.primary } : {}),
       }
     : undefined
-  const globalLinks = projectedGlobalNavigationLinks(objectValue(config.navigation)?.global)
+  const globalLinks = projectedGlobalNavigationLinks(objectValue(config.navigation)?.global, shortcutSources)
   const navbarLinks = [...new Map(
     [...(navbar?.links ?? []), ...globalLinks].map((link) => [`${link.label}:${link.href}`, link]),
   ).values()]
@@ -1778,15 +1802,8 @@ export function projectMintlifyNavigation(
   // and a route prefix for selecting the matching version on deep links.
   const versionOwner = defaultLanguage ?? navigation
   const globalNavigation = objectValue(versionOwner.global) ?? objectValue(navigation.global)
-  const shortcuts = Array.isArray(globalNavigation?.anchors)
-    ? globalNavigation.anchors.flatMap((value) => {
-        const anchor = objectValue(value)
-        const label = typeof anchor?.anchor === 'string' ? anchor.anchor.trim() : ''
-        const href = projectedHref(anchor?.href)
-        if (!label || !href) return []
-        return [{ label, href, ...(iconName(anchor?.icon) ? { icon: iconName(anchor?.icon) } : {}) }]
-      })
-    : []
+  const globalShortcuts = projectedGlobalShortcuts(globalNavigation)
+  const shortcuts = globalShortcuts.map((entry) => entry.shortcut)
   const rawVersions = Array.isArray(versionOwner.versions)
     ? versionOwner.versions.map(objectValue).filter((value): value is Record<string, unknown> => value !== null)
       .sort((left, right) => Number(right.default === true) - Number(left.default === true))
@@ -1865,7 +1882,7 @@ export function projectMintlifyNavigation(
           ...(shortcuts.length > 0 ? { shortcuts } : {}),
         } }
         : {}),
-      ...projectedCompatibleConfig(config, warnings),
+      ...projectedCompatibleConfig(config, warnings, new Set(globalShortcuts.map((entry) => entry.source))),
       ...projectedApi(config, warnings),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
