@@ -137,6 +137,14 @@ warning instead of being dropped silently. For public Mintlify
 sites, the URL adapter reads the structured configuration embedded in the
 rendered application before falling back to DOM link inference.
 
+A group with a `root` page and a `directory` of `card` or `accordion` (set on
+the group or inherited from a group above it; `none` turns it off) ends its root
+page with the group's pages as cards, as Mintlify's page directory does: the
+group's own pages first, in order, then each nested group, as a label with its
+cards (a group nested deeper becomes one card that gives its page count). A
+hidden or access-restricted page is left out and named in a warning, and
+`accordion` is shown as cards with a warning.
+
 An `openapi` (or `asyncapi`) reference is resolved wherever Mintlify allows
 it — the top-level `api.openapi`, or on any individual
 tab/anchor/dropdown/product/version, e.g. `navigation.tabs[].openapi` — and

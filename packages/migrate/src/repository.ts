@@ -72,6 +72,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
+import { appendMintlifyDirectories } from './mintlify-directory.js'
 import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -4181,6 +4182,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let mintlifyConfig: Record<string, unknown> | null = null
   /** The API tabs of the projected navigation that list operations and nothing else: left out of `docsConfig.tabs` until their spec is bound. */
   let mintlifyApiTabSlots: MintlifyNavigationResult['apiTabSlots'] = []
+  /** Groups whose `directory` setting has their root page list the group's pages as cards. */
+  let mintlifyDirectories: MintlifyNavigationResult['directories'] = []
   /** Access each navigation appearance of a Mintlify page imposes, keyed like page references. */
   const mintlifyNavigationAccess = new Map<string, Array<NavigationAccess>>()
   let fernRawConfig: Record<string, unknown> | null = null
@@ -4232,6 +4235,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
         docsConfig = projected.docsConfig
         mintlifyApiTabSlots = projected.apiTabSlots
+        mintlifyDirectories = projected.directories
         warnings.push(...projected.warnings)
         for (const repo of projected.gatedSourceRefs) gatedSourceRepos.add(repo.toLowerCase())
         for (const appearance of projected.referenceAccess) {
@@ -6144,6 +6148,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (source) page.body = rewriteFernRelativePageLinks(page.body, source, routes)
     }
   }
+  appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
   preserveLinkedAnchors(pages)
   if (platform === 'fern' && fernRawConfig) {
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)

@@ -2444,8 +2444,9 @@ export function parseMarkdownPage(input: {
       ? sourceMode as MigrationPage['mode']
       : undefined
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
-  const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
-    ? parsed.data.description.trim()
+  const authoredDescription = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
+  const description = authoredDescription
+    ? authoredDescription
     // An API reference page is described by its operation, not by its prose.
     : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
       ? ''
@@ -2459,6 +2460,7 @@ export function parseMarkdownPage(input: {
     icon,
     iconType,
     description,
+    ...(!authoredDescription && description ? { derivedDescription: true } : {}),
     ...(input.platform === 'docusaurus' || input.platform === 'fern'
       ? { descriptionPlacement: 'body' as const }
       : {}),
