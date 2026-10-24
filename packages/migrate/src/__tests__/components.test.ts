@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -25,6 +25,30 @@ function fixture(files: Record<string, string>): string {
   return root
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+describe('hasClientDirective', () => {
+  it.each([
+    ["'use client'"],
+    ['"use client";'],
+    ['\uFEFF"use client"'],
+    ["// @ts-nocheck\n'use client';\n"],
+    ["/* license */\n'use client'"],
+    ['\uFEFF/**\n * Docs\n */\n// note\n  "use client";'],
+  ])('finds the directive in %j', (source) => {
+    expect(hasClientDirective(source)).toBe(true)
+  })
+
+  it.each([
+    ['export const a = 1\n"use client"'],
+    ['// "use client"\nexport const a = 1'],
+    ['/* "use client" */'],
+    ['/* a */ export const a = 1 /* b */ "use client"'],
+    ['"use clients"'],
+    [''],
+  ])('does not find one in %j', (source) => {
+    expect(hasClientDirective(source)).toBe(false)
+  })
+})
 
 describe('repository component migration', () => {
   it('resolves extensionless declaration dependencies used by typed components', () => {

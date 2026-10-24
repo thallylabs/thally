@@ -440,8 +440,10 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   for (const child of node.children ?? []) walk(child, visitor)
 }
 
-/** A copied module's emitted source opens with the `'use client'` directive (only comments may come before it). */
-const CLIENT_DIRECTIVE = /^\s*(?:\/\/[^\n]*\n\s*)*['"]use client['"]/
+/** Whether a module's source opens with the `'use client'` directive: only a byte order mark, whitespace and comments may come before it, and either quote may spell it. */
+export function hasClientDirective(source: string): boolean {
+  return /^[\uFEFF\s]*(?:(?:\/\/[^\n]*(?:\n|$)|\/\*(?:(?!\*\/)[\s\S])*\*\/)[\uFEFF\s]*)*['"]use client['"]/.test(source)
+}
 
 const BROWSER_GLOBALS = new Set(['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'location', 'history', 'matchMedia',
   'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self',
@@ -1162,7 +1164,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // a module imported from an earlier graph is judged by its emitted directive.
     const clientModules = new Set([...modules].filter(([, module]) => module.local).map(([path]) => path))
     const isClient = (path: string): boolean => clientModules.has(path)
-      || (!modules.has(path) && CLIENT_DIRECTIVE.test(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
+      || (!modules.has(path) && hasClientDirective(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
     for (let changed = true; changed;) {
       changed = false
       for (const [path, module] of modules) {
@@ -1986,7 +1988,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       })
       const binding = registrations.get(aliases.get(node.name)!)
       // Only a client component refuses a function from the page; a server component keeps taking it as authored.
-      if (candidates.length === 0 || !binding || !CLIENT_DIRECTIVE.test(String(copied.get(binding.path)?.content ?? ''))) return
+      if (candidates.length === 0 || !binding || !hasClientDirective(String(copied.get(binding.path)?.content ?? ''))) return
       // A function that cannot move stays on the page, as authored: one a later spread or prop of the same name overrides, rather than win over it, and `children`.
       const unmoved = candidates.filter(({ attribute }) => !canMoveIntoWrapper(node, attribute))
       const asChildren = unmoved.filter(({ name }) => name === 'children')
