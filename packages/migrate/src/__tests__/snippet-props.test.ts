@@ -129,3 +129,32 @@ describe('a snippet prop is bound only where it is a free variable', () => {
   })
 })
 
+
+describe('a snippet binds props.name only where props itself is the snippet argument', () => {
+  it('leaves props.mode alone when the snippet declares props at the top of its own module', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': 'export const props = { mode: "local" };\n\n{props.mode === "local" && <span>Keep this</span>}\n',
+    })
+    expect(body).toContain('{props.mode === "local" && <span>Keep this</span>}')
+    expect(body).not.toContain('"strict"')
+  })
+
+  it('leaves props.mode alone inside a block that declares props', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{(() => { const props = { mode: "local" }; return props.mode === "local" && <span>Keep this</span> })()}\n',
+    })
+    expect(body).toContain('const props = { mode: "local" }; return props.mode === "local" && <span>Keep this</span>')
+    expect(body).not.toContain('"strict"')
+  })
+
+  it('still binds the free variables of a function whose parameter is named props', () => {
+    const { body, warnings } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{["a"].map((props) => <span key={props}>{mode + props + props.mode}</span>)}\n',
+    })
+    expect(body).toContain('{["a"].map((props) => <span key={props}>{"strict" + props + props.mode}</span>)}')
+    expect(warnings.map((warning) => warning.message).join('\n')).not.toContain('Expressions that use')
+  })
+})

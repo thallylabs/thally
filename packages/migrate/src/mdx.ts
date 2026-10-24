@@ -551,25 +551,24 @@ function scopeNames(node: acorn.AnyNode): Set<string> {
  * A snippet reads its props as variables (`{mode === "x" && ...}`) or as `props.mode`; both become
  * the literal value. A prop binds only where its name is a free variable: a name the snippet declares
  * at the top of its own module (`export const mode = ...`, a function, a class, an import) or that a
- * function, block or catch clause declares around the use is that declaration's. An object key, a
- * member name and a lone `{name}` (replaced as text by the caller) are left alone too.
+ * function, block or catch clause declares around the use is that declaration's. `props` is a name
+ * like any other: `props.mode` binds only where `props` is not declared, and a function that takes a
+ * parameter named `props` shields only its uses of `props`. An object key, a member name and a lone
+ * `{name}` (replaced as text by the caller) are left alone too.
  */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
   if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
   let tree: unknown
   try { tree = descriptionParser.parse(body) } catch { return body }
   const edits: Array<{ start: number; end: number; value: string }> = []
-  const inspectExpression = (value: unknown, outer: ReadonlyMap<string, string>): void => {
+  const inspectExpression = (value: unknown, outer: ReadonlyMap<string, string>, propsFree: boolean): void => {
     if (!value || typeof value !== 'object') return
     const node = value as acorn.AnyNode
     const own = scopeNames(node)
     const variables = own.size > 0 ? new Map([...outer].filter(([name]) => !own.has(name))) : outer
-    if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
-      const names = new Set<string>()
-      node.params.forEach((param) => collectPatternNames(param, names))
-      if (names.has('props')) return
-    }
-    if (node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'props') {
+    // `props` is a name like any other: a declaration of it around a use is that declaration's, and only its own uses are affected.
+    const free = propsFree && !own.has('props')
+    if (free && node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'props') {
       const key = !node.computed && node.property.type === 'Identifier' ? node.property.name
         : node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string' ? node.property.value : undefined
       const replacement = key === undefined ? undefined : properties.get(key)
@@ -586,16 +585,16 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
       // `{ mode }` keeps its key; `{ mode: 1 }` has a key that is a name, not a reference.
       if (node.shorthand && node.value.type === 'Identifier' && variables.has(node.value.name)) {
         edits.push({ start: node.start, end: node.end, value: `${node.value.name}: ${JSON.stringify(variables.get(node.value.name))}` })
-      } else inspectExpression(node.value, variables)
+      } else inspectExpression(node.value, variables, free)
       return
     }
     if (node.type === 'MemberExpression' && !node.computed) {
-      inspectExpression(node.object, variables)
+      inspectExpression(node.object, variables, free)
       return
     }
     for (const child of Object.values(value)) {
-      if (Array.isArray(child)) child.forEach((entry) => inspectExpression(entry, variables))
-      else if (child && typeof child === 'object') inspectExpression(child, variables)
+      if (Array.isArray(child)) child.forEach((entry) => inspectExpression(entry, variables, free))
+      else if (child && typeof child === 'object') inspectExpression(child, variables, free)
     }
   }
   // What the snippet declares at the top of its own module is not a free variable anywhere in it.
@@ -616,7 +615,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
       const isLoneName = program.body.length === 1 && statement.type === 'ExpressionStatement' && statement.expression.type === 'Identifier'
       const variables = node.type === 'mdxjsEsm' || isLoneName ? new Map<string, string>()
         : new Map([...properties].filter(([name]) => name !== 'children' && !moduleNames.has(name)))
-      inspectExpression(program, variables)
+      inspectExpression(program, variables, !moduleNames.has('props'))
     }
     for (const attribute of node.attributes ?? []) visit(attribute.value)
     for (const child of node.children ?? []) visit(child)
