@@ -1137,6 +1137,21 @@ describe('repository component migration', () => {
     expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
   })
 
+  it('leaves an imported function that is passed to a server component on the page', () => {
+    const root = fixture({
+      'widget.jsx': 'export default async function Widget({ format }) { return <p>{format(await Promise.resolve("x"))}</p> }',
+      'helpers.js': 'export const format = (value) => value.toUpperCase()',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const body = migrator.transform("import Widget from './widget.jsx'\nimport { format } from './helpers.js'\n\n<Widget format={format} />", join(root, 'index.mdx'))
+    // A server component takes the function as it always did; wrapping it would make it an unsupported async client component.
+    expect(body).toMatch(/<Migrated[a-f0-9]+ format=\{format\} \/>/)
+    expect(migrator.files().some((file) => file.path.includes('/callback-'))).toBe(false)
+    expect(String(migrator.files().find((file) => file.path.endsWith('/widget.jsx'))!.content)).not.toContain("'use client'")
+    expect(warnings).toEqual([])
+  })
+
   it('names callback adapters and the component registry the same on every run, wherever the repository is cloned', () => {
     const files = {
       'docs.json': JSON.stringify({ navigation: { pages: ['home'] } }),

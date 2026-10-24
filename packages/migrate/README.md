@@ -527,7 +527,9 @@ the callback cannot be moved safely, it keeps the page and the control's child
 content as a passive fallback, with a warning identifying the control. A
 function the page imports from a copied module and passes as a prop to such a
 component (`badges={badgesFor}`) is imported by a client adapter instead, so
-the page never hands a function across the server boundary. A function prop
+the page never hands a function across the server boundary. Only a component
+that is already a client component gets an adapter: a copied server component
+(an async one, say) keeps receiving the function from the page, as authored. A function prop
 that a later spread or a later prop of the same name overrides is never moved
 (the adapter would put it over them): a page-authored callback then stays
 passive, and an imported function stays on the page, each with a warning. A stateful local

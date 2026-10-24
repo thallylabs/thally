@@ -401,6 +401,9 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   for (const child of node.children ?? []) walk(child, visitor)
 }
 
+/** A copied module's emitted source opens with the `'use client'` directive (only comments may come before it). */
+const CLIENT_DIRECTIVE = /^\s*(?:\/\/[^\n]*\n\s*)*['"]use client['"]/
+
 const BROWSER_GLOBALS = new Set(['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'location', 'history', 'matchMedia',
   'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self',
   'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'addEventListener', 'removeEventListener', 'getComputedStyle', 'XMLHttpRequest', 'WebSocket'])
@@ -1119,7 +1122,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // a module imported from an earlier graph is judged by its emitted directive.
     const clientModules = new Set([...modules].filter(([, module]) => module.local).map(([path]) => path))
     const isClient = (path: string): boolean => clientModules.has(path)
-      || (!modules.has(path) && /^\s*(?:\/\/[^\n]*\n\s*)*['"]use client['"]/.test(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
+      || (!modules.has(path) && CLIENT_DIRECTIVE.test(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
     for (let changed = true; changed;) {
       changed = false
       for (const [path, module] of modules) {
@@ -1928,7 +1931,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       warn(`Interactive <${node.name}> passes a page-local function into a client component; its child content was retained without the interactive control. Move the callback into a client component to restore it.`, currentFile)
     })
     // A function imported from a copied module cannot cross into a client component from the page
-    // either. The adapter imports it itself, and the page keeps passing only the data props.
+    // either. The adapter imports it itself, and the page keeps passing only the data props. A
+    // component that is not already a client component is left to take its props from the page.
     walk(tree, (node) => {
       if (!node.name || !aliases.has(node.name) || functionValuedAttribute(node, pageFunctions) !== undefined
         || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
@@ -1941,7 +1945,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           ? [{ attribute, name: attribute.name, imported, start: attribute.position.start.offset, end: attribute.position.end.offset }] : []
       })
       const binding = registrations.get(aliases.get(node.name)!)
-      if (candidates.length === 0 || !binding) return
+      // Only a client component refuses a function from the page; a server component keeps taking it as authored.
+      if (candidates.length === 0 || !binding || !CLIENT_DIRECTIVE.test(String(copied.get(binding.path)?.content ?? ''))) return
       // A function a later spread or prop of the same name overrides stays on the page, as authored, rather than win over it.
       const overridden = candidates.filter(({ attribute }) => !keepsPropPrecedence(node, attribute))
       if (overridden.length > 0) {
