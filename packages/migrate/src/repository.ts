@@ -2342,6 +2342,16 @@ export function isPageOnlyTab(tab: Pick<MigrationNavigationTab, 'api'>): boolean
   return Boolean(tab.api && pageOnlyBindings.has(tab.api))
 }
 
+/** The specs whose binding is marked page-only, as data: the mark itself does not survive a structured clone. */
+export function pageOnlySources(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'api'>>): Array<string> {
+  return [...new Set(tabs.flatMap((tab) => tab.api && isPageOnlyTab(tab) ? [tab.api.source] : []))]
+}
+
+/** Mark the hidden tabs of `sources` again, in a bundle that was cloned after conversion. */
+export function markPageOnlyTabs(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'api' | 'hidden'>>, sources: ReadonlyArray<string> = []): void {
+  for (const tab of tabs) if (tab.hidden && tab.api && sources.includes(tab.api.source)) pageOnlyApi(tab.api)
+}
+
 /** Put an API tab back among its siblings: after the nearest of the tabs that preceded it that is still there, else first when none preceded it, else last. */
 function insertEndpointTab(tabs: Array<MigrationNavigationTab>, tab: MigrationNavigationTab, preceding: ReadonlyArray<string>): void {
   if (preceding.length === 0) {
@@ -6530,6 +6540,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...(importedSourceRefs.length > 0 ? { sourceRefs: importedSourceRefs } : {}),
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(remoteApiSpecs.length > 0 && localApiMounts.length > 0 ? { localApiMounts } : {}),
+    ...(remoteApiSpecs.length > 0 && pageOnlySources(docsConfig.tabs).length > 0 ? { pageOnlySpecs: pageOnlySources(docsConfig.tabs) } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),
     ...(droppedGatedFiles.length > 0 ? { droppedGatedPages: droppedGatedFiles.length } : {}),

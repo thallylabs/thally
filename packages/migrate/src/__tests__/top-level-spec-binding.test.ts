@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
+import { renderMigrationFiles } from '../render.js'
 import type { MigrationFetcher } from '../types.js'
 
 const REMOTE = 'https://specs.example.com/openapi.json'
@@ -223,5 +224,38 @@ describe('a spec only pages name never binds to a tab an author gave the same la
     )
     const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
     expectOwnTab(bundle, `OpenAPI: ${A}`, assetFor(A)!, assetFor(B)!)
+  })
+})
+
+describe('a spec only pages name, once the bundle has crossed the CLI worker boundary', () => {
+  const B = 'https://example.com/b.json'
+  const specWith = (path: string, tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { [path]: { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  const bodyB = specWith('/users', 'Beta')
+  const fetchB: MigrationFetcher = async (url) => ({ finalUrl: url, body: bodyB, contentType: 'application/json' })
+  const convert = () => site(
+    { 'home.mdx': page('a.json GET /x'), 'a.json': specWith('/x', 'Alpha') },
+    { openapi: ['a.json', B] },
+  )
+
+  it('keeps its hidden tab to itself, and binds the remote spec to a tab of its own', async () => {
+    // The worker posts the conversion result with structuredClone, which keeps data and nothing else.
+    const hydrated = await hydrateRemoteApiSpecs(structuredClone(convert()), fetchB)
+    const tabs = apiTabs(hydrated) as Array<{ tab: string; hidden?: boolean; api: { source: string } }>
+    const assetB = hydrated.assets.find((asset) => Buffer.from(asset.content).toString() === bodyB)?.path
+    expect(tabs.filter((tab) => tab.hidden).map((tab) => [tab.tab, tab.api.source])).toEqual([['OpenAPI: a.json', 'openapi/a.json']])
+    expect(tabs.filter((tab) => !tab.hidden).map((tab) => [tab.tab, tab.api.source])).toEqual([['API Reference', assetB]])
+    expect(hydrated.warnings.filter((warning) => warning.code === 'unsupported-config')).toEqual([])
+  })
+
+  it('gives the same result as hydrating without the clone, and writes nothing of the mark to docs.json', async () => {
+    const direct = await hydrateRemoteApiSpecs(convert(), fetchB)
+    const cloned = await hydrateRemoteApiSpecs(structuredClone(convert()), fetchB)
+    expect(cloned.docsConfig).toEqual(direct.docsConfig)
+    const docsJson = String(renderMigrationFiles(cloned).find((file) => file.path === 'docs.json')!.content)
+    expect(docsJson).not.toMatch(/page-?only/i)
   })
 })

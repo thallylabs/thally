@@ -11,7 +11,7 @@ import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEn
 import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
-import { isPageOnlyTab, pageOnlyApi } from './repository.js'
+import { isPageOnlyTab, markPageOnlyTabs, pageOnlyApi } from './repository.js'
 
 function slug(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -79,6 +79,8 @@ function bindApiTab(
  */
 export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: MigrationFetcher): Promise<MigrationBundle> {
   if (!bundle.remoteApiSpecs?.length) return bundle
+  // A bundle that was sent between threads lost the marks of the hidden tabs of specs only pages name.
+  markPageOnlyTabs(bundle.docsConfig.tabs, bundle.pageOnlySpecs)
   const assets = [...bundle.assets]
   const tabs = bundle.docsConfig.tabs.map((tab) => ({ ...tab }))
   const redirects = [...(bundle.docsConfig.redirects ?? [])]

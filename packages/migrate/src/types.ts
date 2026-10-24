@@ -273,6 +273,12 @@ export interface MigrationBundle {
    * URLs are those pages, so nothing is redirected from them.
    */
   localApiMounts?: Array<{ filename: string; directory: string; tab?: string; endpointOperations?: Array<string> }>
+  /**
+   * The `api.source` of each hidden tab the migrator made for a spec only pages name. The tabs are told apart by data that stays beside
+   * docs.json, never in it: a bundle sent between threads keeps a tab's data and nothing else, and an author may give any tab any label.
+   * Present only alongside remote specs, which hydration binds to tabs once the bundle has been sent.
+   */
+  pageOnlySpecs?: Array<string>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /**
