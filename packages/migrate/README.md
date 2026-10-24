@@ -135,7 +135,9 @@ both exist). Invalid values are skipped with a warning, and every other
 Mintlify provider (Amplitude, Mixpanel, Segment, and so on) is listed once in a
 warning instead of being dropped silently. For public Mintlify
 sites, the URL adapter reads the structured configuration embedded in the
-rendered application before falling back to DOM link inference.
+rendered application before falling back to DOM link inference. A navigation
+entry's `tag` label and `boost` search weight have no Thally counterpart: one
+warning for each says how many entries had it.
 
 An `openapi` (or `asyncapi`) reference is resolved wherever Mintlify allows
 it — the top-level `api.openapi`, or on any individual

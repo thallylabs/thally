@@ -743,6 +743,46 @@ function collectGatedSourceRefs(node: unknown, gate: string | undefined, out: Ma
   for (const value of Object.values(object)) collectGatedSourceRefs(value, reason, out, limits, depth + 1)
 }
 
+/** The `tag` labels and `boost` values on navigation entries, which Thally has no counterpart for. */
+interface DroppedNavigationKeys {
+  tags: Array<string>
+  boosts: number
+}
+
+/** Count them over the whole navigation, whatever kind of container holds the entry. */
+function collectDroppedNavigationKeys(node: unknown, out: DroppedNavigationKeys, depth = 0): void {
+  if (depth > SWEEP_DEPTH_LIMIT) return
+  if (Array.isArray(node)) {
+    for (const item of node) collectDroppedNavigationKeys(item, out, depth + 1)
+    return
+  }
+  const object = objectValue(node)
+  if (!object) return
+  if (typeof object.tag === 'string' && object.tag.trim()) out.tags.push(object.tag.trim())
+  if (typeof object.boost === 'number') out.boosts++
+  for (const value of Object.values(object)) collectDroppedNavigationKeys(value, out, depth + 1)
+}
+
+/** One summary warning per key that was dropped, never one per entry. */
+function droppedNavigationKeyWarnings(navigation: unknown): Array<MigrationWarning> {
+  const dropped: DroppedNavigationKeys = { tags: [], boosts: 0 }
+  collectDroppedNavigationKeys(navigation, dropped)
+  const entries = (count: number): string => `${count} ${count === 1 ? 'entry' : 'entries'}`
+  const shown = [...new Set(dropped.tags)]
+  return [
+    ...(dropped.tags.length > 0 ? [{
+      code: 'unsupported-config' as const,
+      message: `Navigation tags (${shown.slice(0, 3).map((tag) => JSON.stringify(tag)).join(', ')}${shown.length > 3 ? ', ...' : ''}) on ${entries(dropped.tags.length)} were dropped: Thally navigation shows no tag next to an entry. Set \`badge\` in a page's frontmatter to show a label next to that page in the sidebar.`,
+      source: 'docs.json',
+    }] : []),
+    ...(dropped.boosts > 0 ? [{
+      code: 'unsupported-config' as const,
+      message: `Navigation \`boost\` values (search ranking weights) on ${entries(dropped.boosts)} were dropped: Thally ranks search results by relevance alone.`,
+      source: 'docs.json',
+    }] : []),
+  ]
+}
+
 /**
  * Container-agnostic sweep for pages under a node that sets access rules. The
  * projection only walks container kinds it understands; a page under any
@@ -1679,6 +1719,7 @@ export function projectMintlifyNavigation(
       message: 'The navigation is too deeply nested to check its access rules, so no pages or sourceRef mounts were published from it. Flatten the navigation nesting in docs.json.',
     })
   }
+  warnings.push(...droppedNavigationKeyWarnings(navigation))
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
         const language = objectValue(value)
