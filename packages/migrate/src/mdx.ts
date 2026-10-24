@@ -553,7 +553,7 @@ function scopeNames(node: acorn.AnyNode): Set<string> {
  * at the top of its own module (`export const mode = ...`, a function, a class, an import) or that a
  * function, block or catch clause declares around the use is that declaration's. `props` is a name
  * like any other: `props.mode` binds only where `props` is not declared, and a function that takes a
- * parameter named `props` shields only its uses of `props`. An object key, a member name and a lone
+ * parameter named `props` shields only its uses of `props`. An object key, a member name, a class member name and a lone
  * `{name}` (replaced as text by the caller) are left alone too.
  */
 export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
@@ -590,6 +590,11 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     }
     if (node.type === 'MemberExpression' && !node.computed) {
       inspectExpression(node.object, variables, free)
+      return
+    }
+    // A class member's name (method, field, accessor, static or `#private`) is not a reference; a computed key `[mode]` is, and what the member holds is.
+    if ((node.type === 'MethodDefinition' || node.type === 'PropertyDefinition') && !node.computed) {
+      if (node.value) inspectExpression(node.value, variables, free)
       return
     }
     for (const child of Object.values(value)) {

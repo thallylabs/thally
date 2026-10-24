@@ -158,3 +158,30 @@ describe('a snippet binds props.name only where props itself is the snippet argu
     expect(warnings.map((warning) => warning.message).join('\n')).not.toContain('Expressions that use')
   })
 })
+
+describe('a snippet prop is never bound to a class member name', () => {
+  it('keeps the name of a method, field, accessor and private member, and binds a computed key', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': [
+        '{(() => { class X { mode() { return "local" } }; return new X().mode() })()}',
+        '',
+        '{(() => { class Y { mode = 1; static mode = 2; get mode2() { return this.#mode } #mode = 3; static get mode3() { return W.#mode } }; class W { static #mode = 4 }; return [new Y().mode, Y.mode] })()}',
+        '',
+        '{(() => { class Z { [mode]() { return 1 } }; return new Z() })()}',
+        '',
+      ].join('\n'),
+    })
+    expect(body).toContain('class X { mode() { return "local" } }; return new X().mode()')
+    expect(body).toContain('class Y { mode = 1; static mode = 2; get mode2() { return this.#mode } #mode = 3; static get mode3() { return W.#mode } }; class W { static #mode = 4 }')
+    expect(body).toContain('class Z { ["strict"]() { return 1 } }')
+  })
+
+  it('still binds the prop where a class method reads it as a variable', () => {
+    const { body } = migrate({
+      'home.mdx': page('<Role mode="strict" />'),
+      'snippets/role.mdx': '{(() => { class X { mode() { return mode } }; return new X().mode() })()}\n',
+    })
+    expect(body).toContain('class X { mode() { return "strict" } }; return new X().mode()')
+  })
+})
