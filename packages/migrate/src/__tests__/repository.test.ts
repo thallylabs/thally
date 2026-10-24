@@ -1438,10 +1438,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.docsConfig).toMatchObject({
       theme: 'maple',
       navbar: {
-        links: [
-          { label: 'Status', href: 'https://status.example.com' },
-          { label: 'Community', href: 'https://community.example.com' },
-        ],
+        links: [{ label: 'Status', href: 'https://status.example.com' }],
         primary: { label: 'GitHub', href: 'https://github.com/acme/product' },
       },
       footer: {
