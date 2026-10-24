@@ -5359,11 +5359,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // assets pages reference, then the rest, so a tight budget drops decorative/unused files first
   // (each group keeps its original scan order).
   const configAssetPaths = new Set<string>()
+  // A name with no slash (`logo.svg`) is lowercased into the loose set. In the config, which sits at the
+  // site root, it can only mean the root file of that name, so it earns the same priority as a full path.
+  const configLooseNames = new Set<string>()
   addPathReferences(platform === 'mintlify'
     ? JSON.stringify(mintlifyConfig ?? {})
-    : JSON.stringify([docsConfig, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null]), '', configAssetPaths, new Set(), docusaurusPaths(''))
-  if (fernRawConfig) addFernConfigPathReferences(fernRawConfig, configAssetPaths, new Set())
+    : JSON.stringify([docsConfig, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null]), '', configAssetPaths, configLooseNames, docusaurusPaths(''))
+  if (fernRawConfig) addFernConfigPathReferences(fernRawConfig, configAssetPaths, configLooseNames)
   const isSiteAsset = (candidate: AssetCandidate): boolean => siteAssetPaths.has(candidate.assetPath) || configAssetPaths.has(candidate.assetPath)
+    || (!candidate.assetPath.includes('/') && configLooseNames.has(candidate.assetPath.toLowerCase()))
   const isReferenced = (candidate: AssetCandidate): boolean => referencedAssetPaths.has(candidate.assetPath)
   const orderedAssetCandidates = [
     ...assetCandidates.filter((candidate) => isSiteAsset(candidate)),

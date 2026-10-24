@@ -331,7 +331,8 @@ files with its own warning. Individual assets over 25 MB, or beyond 500 MB in
 total, are not copied; one warning per reason gives the count, the first five
 paths, and the next step (copy them into `public/` manually). The budget is
 spent in order: the root stylesheet, the site's own scripts and fonts, and the
-files `docs.json` names (logo, favicon, background) first, then the assets pages
+files `docs.json` names (logo, favicon, background; a bare `logo.svg` counts
+like `/logo.svg`) first, then the assets pages
 use, then the rest, so a full budget never costs the site its branding.
 
 Headings written with an explicit `{#custom-id}` become a preceding
