@@ -1863,10 +1863,12 @@ describe('Mintlify repository migration', () => {
           ] },
         })
         expect(boundSources(bundle).sort()).toEqual(['openapi/openapi.yml', 'openapi/v3-openapi.yaml'])
-        const hidden = bundle.docsConfig.tabs.filter((tab) => tab.api?.source === 'openapi/v3-openapi.yaml')
-        expect(hidden).toEqual([expect.objectContaining({ hidden: true })])
-        const visible = bundle.docsConfig.tabs.filter((tab) => tab.api && !tab.hidden)
-        expect(visible.map((tab) => tab.api?.source)).toEqual(['openapi/openapi.yml'])
+        // Only pages name them: each spec is bound to a hidden tab of its own, and the API dropdown (a tab whose label merely
+        // contains "API") keeps the authored pages it lists and no endpoint list of either spec.
+        for (const source of ['openapi/openapi.yml', 'openapi/v3-openapi.yaml']) {
+          expect(bundle.docsConfig.tabs.filter((tab) => tab.api?.source === source)).toEqual([expect.objectContaining({ hidden: true })])
+        }
+        expect(bundle.docsConfig.tabs.filter((tab) => tab.api && !tab.hidden)).toEqual([])
         expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining(['openapi/openapi.yml', 'openapi/v3-openapi.yaml']))
         const refs = bundle.pages.flatMap((page) => (page.openapi ? [page.openapi] : []))
         expect(refs).toHaveLength(tasks.length + 3)
@@ -1876,10 +1878,7 @@ describe('Mintlify repository migration', () => {
         expect(openapiOf(bundle, 'management/tasks/by-path')).toBe('openapi/v3-openapi.yaml POST /api/v1/tasks/{taskIdentifier}/trigger')
         const all = messages(bundle)
         expect(all.filter((message) => /not migrated|could not be loaded/.test(message))).toEqual([])
-        const perTab = all.filter((message) => message.includes('already uses another OpenAPI spec'))
-        expect(perTab).toHaveLength(1)
-        expect(perTab[0]).not.toMatch(/was not added/)
-        expect(perTab[0]).toContain('v3-openapi.yaml')
+        expect(all.filter((message) => message.includes('already uses another OpenAPI spec'))).toEqual([])
       })
     })
   })

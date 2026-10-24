@@ -4063,10 +4063,14 @@ function injectOpenApiSpecs(
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
+    const hiddenLabel = `OpenAPI: ${spec.sourcePath ?? spec.filename}`
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
-      // The hidden tab of a spec only pages name belongs to that spec: a spec with no label of its own never takes it over.
-      : tabs.find((tab) => tab.tab.toLowerCase().includes('api') && !(tab.hidden && tab.tab.startsWith('OpenAPI: ')))
+      // A spec only pages name (hidden, with no label) never takes an existing tab by name: it always has the hidden tab of its own.
+      // That tab belongs to that spec: a spec with no label of its own never takes it over either.
+      : spec.hidden
+        ? tabs.find((tab) => tab.tab === hiddenLabel)
+        : tabs.find((tab) => tab.tab.toLowerCase().includes('api') && !(tab.hidden && tab.tab.startsWith('OpenAPI: ')))
     if (apiTab) {
       // Thally binds one API spec per tab; a second spec that resolves to
       // the same tab would otherwise silently replace the first one's
@@ -4075,7 +4079,7 @@ function injectOpenApiSpecs(
         const source = specAssetPath(spec.filename)
         // Pages that name this spec still resolve it from a hidden tab, which lists no navigation of its own.
         const pageBound = spec.pageReferenced && !tabs.some((tab) => tab.api?.source === source)
-        if (pageBound) insertApiTab(tabs, { tab: `OpenAPI: ${spec.sourcePath ?? spec.filename}`, hidden: true, api: { source } })
+        if (pageBound) insertApiTab(tabs, { tab: hiddenLabel, hidden: true, api: { source } })
         warnings.push({
           code: 'unsupported-config',
           message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${source}" ${pageBound
@@ -4097,7 +4101,7 @@ function injectOpenApiSpecs(
       }
     } else {
       insertApiTab(tabs, {
-        tab: spec.tabLabel ?? (spec.hidden ? `OpenAPI: ${spec.sourcePath ?? spec.filename}` : 'API Reference'),
+        tab: spec.tabLabel ?? (spec.hidden ? hiddenLabel : 'API Reference'),
         ...(spec.icon ? { icon: spec.icon } : {}),
         ...(spec.hidden ? { hidden: true } : {}),
         api: { source: specAssetPath(spec.filename), ...(spec.navigation === false ? { navigation: false } : {}), ...(spec.groups ? { groups: spec.groups } : {}) },

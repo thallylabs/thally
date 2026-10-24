@@ -94,9 +94,8 @@ describe('two remote specs in one docs.json, only one of them named by a page', 
       expect(listed).toHaveLength(1)
       expect(listed[0].api).toMatchObject({ source: assetFor(B) })
       expect(listed[0].api).not.toHaveProperty('navigation')
-      // Only when B's tab was already taken does A say it gets no endpoint list; B is never dropped or replaced.
-      const warned = bundle.warnings.filter((warning) => warning.code === 'unsupported-config').map((warning) => warning.source)
-      expect(warned).toEqual(order[0] === A ? [] : [A])
+      // A has a tab of its own whichever binds first, so nothing is dropped, replaced or reported.
+      expect(bundle.warnings.filter((warning) => warning.code === 'unsupported-config')).toEqual([])
     })
   }
 
@@ -129,4 +128,40 @@ describe('two local specs in one docs.json, only one of them named by a page', (
       expect(bundle.warnings.some((warning) => warning.message.includes('was not added'))).toBe(false)
     })
   }
+})
+
+describe('a spec only pages name never binds to an existing tab because its label contains "API"', () => {
+  const specWith = (path: string, tag: string) => JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: tag, version: '1' },
+    paths: { [path]: { get: { summary: `Get ${tag}`, tags: [tag], responses: { 200: { description: 'OK' } } } } },
+  })
+  const guides = { tabs: [{ tab: 'API Guides', pages: ['home'] }] }
+  const expectOwnTab = (bundle: Awaited<ReturnType<typeof hydrateRemoteApiSpecs>>, specA: string, specB: string, nameA: string) => {
+    const tabs = apiTabs(bundle) as Array<{ tab: string; hidden?: boolean; api: { source: string } }>
+    const sourceOf = (tab: string) => tabs.find((candidate) => candidate.tab === tab)?.api.source
+    // A is in a hidden tab of its own, the visible "API Guides" tab holds B, and nothing is dropped or reported as conflicting.
+    expect(tabs.filter((tab) => tab.hidden).map((tab) => [tab.tab, tab.api.source])).toEqual([[`OpenAPI: ${nameA}`, specA]])
+    expect(sourceOf('API Guides')).toBe(specB)
+    expect(bundle.warnings.some((warning) => warning.message.includes('was not added') || warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
+  }
+
+  it('gives a local spec a hidden tab of its own and binds the other spec to the visible tab', () => {
+    const bundle = site(
+      { 'home.mdx': page('a.json GET /x'), 'a.json': specWith('/x', 'Alpha'), 'b.json': specWith('/users', 'Beta') },
+      { openapi: ['a.json', 'b.json'] },
+      guides,
+    )
+    expectOwnTab(bundle as never, 'openapi/a.json', 'openapi/b.json', 'a.json')
+  })
+
+  it('gives a remote spec a hidden tab of its own and lists none of its endpoints in the visible tab', async () => {
+    const A = 'https://example.com/a.json'
+    const B = 'https://example.com/b.json'
+    const bodies: Record<string, string> = { [A]: specWith('/x', 'Alpha'), [B]: specWith('/users', 'Beta') }
+    const fetchBoth: MigrationFetcher = async (url) => ({ finalUrl: url, body: bodies[url.toString()], contentType: 'application/json' })
+    const bundle = await hydrateRemoteApiSpecs(site({ 'home.mdx': page(`${A} GET /x`) }, { openapi: [A, B] }, guides), fetchBoth)
+    const assetFor = (url: string) => bundle.assets.find((asset) => Buffer.from(asset.content).toString() === bodies[url])?.path
+    expectOwnTab(bundle, assetFor(A)!, assetFor(B)!, A)
+  })
 })

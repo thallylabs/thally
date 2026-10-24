@@ -39,11 +39,13 @@ const isPageOnlyTab = (tab: MigrationNavigationTab): boolean => Boolean(tab.hidd
 
 const apiTabLabel = (reference: ApiTabReference): string => reference.tabLabel ?? (reference.hidden ? `OpenAPI: ${reference.url}` : 'API Reference')
 
-/** The tab a reference binds to: the one it names, or else an existing API tab by name, which is never the page-only tab of another spec. */
+/**
+ * The tab a reference binds to: the one it names, or else an existing API tab by name, which is never the page-only tab of another spec.
+ * A spec only pages name (hidden, with no label) never takes an existing tab by name: it always has the hidden tab of its own.
+ */
 function findApiTab(tabs: Array<MigrationNavigationTab>, reference: ApiTabReference): MigrationNavigationTab | undefined {
-  return reference.tabLabel
-    ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
-    : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api') && !isPageOnlyTab(candidate))
+  if (reference.tabLabel || reference.hidden) return tabs.find((candidate) => candidate.tab === apiTabLabel(reference))
+  return tabs.find((candidate) => candidate.tab.toLowerCase().includes('api') && !isPageOnlyTab(candidate))
 }
 
 /** Bind a spec to the tab its reference names, or to a new API tab beside it; returns that tab's label. How every spec was bound before operations could become pages. */
@@ -152,22 +154,17 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         continue
       }
       const api = { source: `openapi/${filename}`, ...(reference.navigation === false ? { navigation: false } : {}), ...(reference.groups ? { groups: reference.groups } : {}) }
-      // Thally binds one API spec per tab: a second spec for a tab never silently replaces the first. A spec only pages name still
-      // resolves from a hidden tab of its own; any other is left out.
+      // Thally binds one API spec per tab: a second spec for a tab never silently replaces the first.
       const taken = findApiTab(tabs, reference)
-      const conflict = taken?.api && taken.api.source !== api.source ? taken : undefined
-      const ownTab = Boolean(conflict && reference.hidden && !reference.tabLabel)
-      if (conflict) {
+      if (taken?.api && taken.api.source !== api.source) {
         warnings.push({
           code: 'unsupported-config',
           source: reference.url,
-          message: `Tab "${conflict.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so ${reference.url} ${ownTab
-            ? 'gets no endpoint list of its own; the pages that name it still show their endpoint. Put it in its own tab to list all its endpoints.'
-            : 'was not added. Put it in its own tab to include it.'}`,
+          message: `Tab "${taken.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so ${reference.url} was not added. Put it in its own tab to include it.`,
         })
-        if (!ownTab) continue
+        continue
       }
-      bound.push({ reference, filename, content: body, operations, tabName: bindApiTab(tabs, ownTab ? { ...reference, tabLabel: apiTabLabel(reference) } : reference, api) })
+      bound.push({ reference, filename, content: body, operations, tabName: bindApiTab(tabs, reference, api) })
     } catch (error) {
       warnings.push({
         code: 'fetch-failed',
