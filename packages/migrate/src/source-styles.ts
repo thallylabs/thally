@@ -193,6 +193,25 @@ export interface StyleProjection {
   skippedThemeDeclarations: number
 }
 
+/**
+ * `value` with each top-level word or string that is a key of `names` replaced by its value, the way `animation: spin 1s` names a
+ * keyframes rule. A function's name and arguments (`steps(4, end)`) are left alone, and a name has to be the whole word (`spinner` is not
+ * `spin`).
+ */
+function renameWords(value: string, names: ReadonlyMap<string, string>): string {
+  let depth = 0
+  return value.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[()]|[^\s,()"']+/g, (token, offset: number) => {
+    if (token === '(') depth += 1
+    else if (token === ')') depth = Math.max(0, depth - 1)
+    else if (depth === 0 && value[offset + token.length] !== '(') {
+      const quote = /^["']/.test(token) ? token[0] : ''
+      const renamed = names.get(quote ? token.slice(1, -1) : token)
+      if (renamed !== undefined) return `${quote}${renamed}${quote}`
+    }
+    return token
+  })
+}
+
 /** Whether `node` is written inside a rule, directly or through a condition (`.a { @media (...) { .b {} } }`). */
 function isInRule(node: postcss.Node): boolean {
   for (let ancestor: postcss.Node | undefined = node.parent; ancestor; ancestor = ancestor.parent) if (ancestor.type === 'rule') return true
@@ -206,9 +225,10 @@ function isInRule(node: postcss.Node): boolean {
  * only the custom properties that an imported rule reads, directly or through another kept property, and declares them on that
  * container, under `.dark` for the dark theme; nothing else in it is taken. A rule nested in another rule is left out and counted: it is read
  * relative to the rule around it, where `&` and the theme blocks' own selectors can reach past the container. A condition written inside a
- * rule (`.a { @media (...) { color: red } }`) only changes that rule's declarations, so it stays.
+ * rule (`.a { @media (...) { color: red } }`) only changes that rule's declarations, so it stays. Keyframes names are global to the page, so
+ * each `@keyframes` is renamed with `namespace` and the animations that name it follow, and none can replace one the runtime defines.
  */
-export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): StyleProjection {
+export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string>, namespace: string): StyleProjection {
   const names = authoredStyleNames(contents, modules)
   const isAuthoredClass = (name: string): boolean => names.classes.has(name)
     || [...names.prefixes].some((prefix) => name.startsWith(prefix)) || [...names.suffixes].some((suffix) => name.endsWith(suffix))
@@ -324,6 +344,18 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
       return
     }
     if (!hasStyleRule(rule)) rule.remove()
+  })
+  const keyframes = new Map<string, string>()
+  root.walkAtRules(/^(?:-[a-z]+-)?keyframes$/i, (rule) => {
+    const quote = /^["']/.test(rule.params) ? rule.params[0] : ''
+    const name = rule.params.trim().slice(quote ? 1 : 0, quote ? -1 : undefined)
+    const renamed = `${namespace}-${name}`
+    keyframes.set(name, renamed)
+    rule.params = `${quote}${renamed}${quote}`
+  })
+  // A custom property can hold an animation (`--a: spin 1s` read by `animation: var(--a)`), so those follow too.
+  if (keyframes.size > 0) root.walkDecls((decl) => {
+    if (/^(?:-[a-z]+-)?animation(?:-name)?$/i.test(decl.prop) || decl.prop.startsWith('--')) decl.value = renameWords(decl.value, keyframes)
   })
   root.walkComments((comment) => { comment.remove() })
   return { css: root.toString(), omittedSelectors, omittedNestedRules, skippedProperties, skippedVariables: [...skippedVariables], skippedThemeDeclarations }

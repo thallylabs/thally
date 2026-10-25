@@ -1005,6 +1005,18 @@ describe('custom stylesheet migration', () => {
     expect(warnings[0].message).toMatch(/Left out of the style\.css stylesheet: @property --docs-bg/)
   })
 
+  it('gives the keyframes of the stylesheet a prefix of the site\'s own, so none replaces one of the runtime', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
+      'a.mdx': '---\ntitle: A\n---\n\n<div className="widget">Hi</div>\n',
+      'style.css': '@keyframes spin { to { opacity: 1 } }\n.widget { animation: spin 1s }\n',
+    })
+    const sheet = bundle.assets.find((asset) => /migrated\/[0-9a-f]{12}\/style\.css$/.test(asset.path))
+    const prefix = /migrated\/([0-9a-f]{12})\/style\.css$/.exec(sheet?.path ?? '')?.[1]
+    expect(String(sheet?.content)).toContain(`@keyframes src-${prefix}-spin`)
+    expect(String(sheet?.content)).toContain(`animation: src-${prefix}-spin 1s`)
+  })
+
   it('does not warn when there is no stylesheet', () => {
     expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })

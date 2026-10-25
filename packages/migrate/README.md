@@ -771,8 +771,12 @@ kept rule reads the property and the site's own `:root` or `.dark` block declare
 properties with the same prefix (`--ifx-` in `--ifx-glow`), which shows the name
 is the site's and not the shell's; any other is left out and named in a warning.
 Every `@layer` is kept, even an empty one or a bare `@layer a, b;`, since
-the order of the layers decides which rule wins. Keyframes and `@font-face` are
-kept as written. A warning counts what was skipped. Thally renders a page in `mode: custom` with no such element, so the
+the order of the layers decides which rule wins. A keyframes name is global to the page, so a site's `spin` would replace
+the runtime's: each `@keyframes` is kept under a prefix of the site's own
+(`src-<id>-spin`, the id being that of the stylesheet's directory in
+`public/migrated/`), and the `animation` and `animation-name` declarations (and
+custom properties) that name it follow. `@font-face` is kept as written. A
+warning counts what was skipped. Thally renders a page in `mode: custom` with no such element, so the
 migration wraps that page's content (everything after its imports and exports)
 in `<div data-thally-source-page>`, and every rule is confined to that as well
 (`:where(.thally-docs-prose, [data-thally-source-page])`). A custom page that

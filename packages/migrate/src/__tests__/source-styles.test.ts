@@ -45,7 +45,7 @@ function reach(css: string): { inside: number; outside: number } {
   return { inside: reached.size - outside, outside }
 }
 
-const project = (css: string, content = '<i className="ifx-a ifx-b x y" />') => projectAuthoredStyles(css, [content])
+const project = (css: string, content = '<i className="ifx-a ifx-b x y" />') => projectAuthoredStyles(css, [content], [], 'src-test')
 const text = (css: string) => css.replace(/\s+/g, ' ').trim()
 
 describe('a rule a site wrote for a name Thally uses too', () => {
@@ -105,7 +105,7 @@ describe('the way a selector is confined', () => {
     expect(mixed.omittedSelectors).toBe(1)
   })
 
-  it('confines the rules inside @media, @supports, @layer and @container, and leaves keyframes and @font-face as they are', () => {
+  it('confines the rules inside @media, @supports, @layer and @container, and leaves @font-face as it is', () => {
     const keyframes = '@keyframes spin { from { transform: none; } to { transform: rotate(1turn); } }'
     const fontFace = '@font-face { font-family: Site; src: url(site.woff2); }'
     const css = [
@@ -117,12 +117,12 @@ describe('the way a selector is confined', () => {
       '.ifx-a { animation: spin 1s; }',
     ].join('\n')
     const projected = text(project(css).css)
-    expect(projected).toContain(keyframes)
+    expect(projected).toContain(keyframes.replace('spin', 'src-test-spin'))
     expect(projected).toContain(fontFace)
     expect(projected).toContain(`@media (min-width: 600px) { ${SCOPE} .ifx-a { color: red; } @supports (display: grid) { ${SCOPE} .ifx-a { display: grid; } } }`)
     expect(projected).toContain(`@layer site { ${SCOPE} .ifx-a { color: blue; } }`)
     expect(projected).toContain(`@container (min-width: 10px) { ${SCOPE} .ifx-a, .dark ${SCOPE} .ifx-b { color: teal; } }`)
-    expect(projected).toContain(`${SCOPE} .ifx-a { animation: spin 1s; }`)
+    expect(projected).toContain(`${SCOPE} .ifx-a { animation: src-test-spin 1s; }`)
   })
 
 })
@@ -280,5 +280,36 @@ describe('the layers of a stylesheet (@layer)', () => {
 
   it('still removes a condition that is left with nothing in it', () => {
     expect(project('@media (min-width: 1px) { #navbar { color: red; } }').css).toBe('')
+  })
+})
+
+describe('keyframes names', () => {
+  const frames = (name: string) => `@keyframes ${name} { from { opacity: 0; } to { opacity: 1; } }`
+
+  it('are given the site\'s prefix, and so are the animations that name them', () => {
+    const css = `${frames('spin')}\n${frames('fade-in')}\n.ifx-a { animation: spin 1s linear infinite; }\n.ifx-b { animation: 2s ease-in fade-in, 1s spin; animation-name: fade-in, spin; }`
+    const projected = text(project(css).css)
+    expect(projected).toContain(`@keyframes src-test-spin { from { opacity: 0; } to { opacity: 1; } }`)
+    expect(projected).toContain(`@keyframes src-test-fade-in { from { opacity: 0; } to { opacity: 1; } }`)
+    expect(projected).toContain(`${SCOPE} .ifx-a { animation: src-test-spin 1s linear infinite; }`)
+    expect(projected).toContain(`${SCOPE} .ifx-b { animation: 2s ease-in src-test-fade-in, 1s src-test-spin; animation-name: src-test-fade-in, src-test-spin; }`)
+  })
+
+  it('are matched as whole words: a longer name, a function and its arguments, and other properties are left alone', () => {
+    const css = `${frames('spin')}\n${frames('end')}\n.ifx-a { animation: spinner 1s, spin-slow 1s, end 1s steps(4, end), spin 1s cubic-bezier(0, 0, 1, 1); transition: spin 1s; font-family: spin; content: "spin"; }`
+    expect(text(project(css).css)).toContain(`${SCOPE} .ifx-a { animation: spinner 1s, spin-slow 1s, src-test-end 1s steps(4, end), src-test-spin 1s cubic-bezier(0, 0, 1, 1); transition: spin 1s; font-family: spin; content: "spin"; }`)
+  })
+
+  it('are renamed in a quoted name, a prefixed at-rule, a condition and a custom property', () => {
+    const css = `@media (min-width: 1px) { ${frames('spin')} }\n@-webkit-keyframes "my spin" { to { opacity: 1; } }\n.ifx-a { -webkit-animation: "my spin" 1s; animation-name: 'spin'; --ifx-anim: spin 1s; animation: var(--ifx-anim); }`
+    const projected = text(project(css).css)
+    expect(projected).toContain('@media (min-width: 1px) { @keyframes src-test-spin {')
+    expect(projected).toContain('@-webkit-keyframes "src-test-my spin" {')
+    expect(projected).toContain(`${SCOPE} .ifx-a { -webkit-animation: "src-test-my spin" 1s; animation-name: 'src-test-spin'; --ifx-anim: src-test-spin 1s; animation: var(--ifx-anim); }`)
+  })
+
+  it('cannot replace a keyframes rule the Thally runtime defines', () => {
+    const projected = project(`${frames('spin')}\n.ifx-a { animation: spin 1s; }`).css
+    expect([...projected.matchAll(/@keyframes\s+([^\s{]+)/g)].map((match) => match[1])).not.toContain('spin')
   })
 })

@@ -84,8 +84,10 @@ describe('Mintlify root styles', () => {
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     const href = result.docsConfig.stylesheets?.[0]
     const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
-    expect(css).toContain('@keyframes pulse')
-    expect(css).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .widget { animation: pulse 1s; }')
+    // The keyframes name is global to the page, so it carries a prefix of the site's own and the animation follows it.
+    const pulse = /@keyframes (src-[0-9a-f]{12}-pulse) /.exec(css)?.[1]
+    expect(pulse).toBeDefined()
+    expect(css).toContain(`:where(.thally-docs-prose, [data-thally-source-page]) .widget { animation: ${pulse} 1s; }`)
     expect(css).not.toContain('platform-shell')
   })
 })

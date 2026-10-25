@@ -5303,6 +5303,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : undefined
   const hasRootStylesheet = Boolean(rootStylesheetPath && existsSync(rootStylesheetPath)
     && lstatSync(rootStylesheetPath).isFile() && !lstatSync(rootStylesheetPath).isSymbolicLink())
+  // Names this migration gives the stylesheet: its directory in `public/migrated/`, and the prefix of its keyframes.
+  const rootStyleIdentity = mintlifyProjectRoot
+    ? createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
+    : ''
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
   let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
@@ -5327,7 +5331,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ], [
           // A copied component builds its class names at run time, so every string in one may be a class.
           ...(componentMigrator?.files() ?? []).flatMap((file) => typeof file.content === 'string' && /\.[cm]?[jt]sx?$/i.test(file.path) ? [file.content] : []),
-        ])
+        ], `src-${rootStyleIdentity}`)
       } catch {
         rootStyleProblem = 'parse'
       }
@@ -5582,8 +5586,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           source: 'style.css',
           message: `${bare} page${bare === 1 ? ' uses' : 's use'} \`mode: custom\`, which Thally renders without a page content container, and could not be given one (it has no content, or an export follows its content), so the rules kept from style.css do not apply there. Move the export above the content, or style the page inline.`,
         })
-        const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
-        const assetPath = `migrated/${identity}/style.css`
+        const assetPath = `migrated/${rootStyleIdentity}/style.css`
         const content = Buffer.from(rootStyleProjection.css)
         assets.push({ path: assetPath, content })
         docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
