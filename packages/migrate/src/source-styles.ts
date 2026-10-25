@@ -8,6 +8,7 @@ import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
 import ts from 'typescript'
 
+import { RUNTIME_CLASS_NAMES } from './runtime-class-names.js'
 import { RUNTIME_CSS_VARIABLES } from './runtime-css-variables.js'
 
 const PLATFORM_CLASSES = new Set(['navbar-link'])
@@ -16,7 +17,7 @@ const PLATFORM_CLASS_PREFIX = /^(?:mintlify[-_]|fern[-_]|docusaurus[-_]|theme-do
 const SHARED_THEME_CLASSES = new Set(['dark', 'light'])
 // Framework utility selectors are unsafe global targets even when the same
 // utility happens to occur in an authored example elsewhere in the site.
-const UTILITY_CLASS = /^(?:[mp][trblxy]?|w|h|min-w|max-w|min-h|max-h|text|bg|border|rounded|flex|grid|gap|space-[xy]|items|justify|overflow|truncate|hidden|block|inline|relative|absolute|sticky|z|opacity)-/
+export const UTILITY_CLASS = /^(?:[mp][trblxy]?|w|h|min-w|max-w|min-h|max-h|text|bg|border|rounded|flex|grid|gap|space-[xy]|items|justify|overflow|truncate|hidden|block|inline|relative|absolute|sticky|z|opacity)-/
 
 function withoutFencedCode(content: string): string {
   let fence: { marker: string; length: number } | undefined
@@ -130,12 +131,16 @@ export interface StyleProjection {
   skippedVariables: { runtime: Array<string>; unused: Array<string> }
   /** Declarations left out of a theme block that are not custom properties (`:root { background: ... }`): they would restyle the page. */
   skippedThemeDeclarations: number
+  /** Classes the Thally runtime uses itself, which a rule the site would otherwise keep selects: the rule is left out. */
+  skippedRuntimeClasses: Array<string>
 }
 
 /**
  * Remove platform DOM selectors while preserving CSS for authored widgets. `modules` are the component modules and scripts, whose
  * strings count as class names. A theme block (`:root`, `.dark`) keeps only the custom properties that an imported rule reads, directly
- * or through another kept property, and that the Thally runtime does not define itself: nothing else in it is taken.
+ * or through another kept property, and that the Thally runtime does not define itself: nothing else in it is taken. A rule that
+ * selects a class the Thally runtime uses itself is never kept, however the site comes to use that class too, unless that class sits on
+ * the same element as a class the site built: the rule then styles only the site's own element.
  */
 export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): StyleProjection {
   const names = authoredStyleNames(contents, modules)
@@ -144,6 +149,7 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   const root = postcss.parse(css)
   let omittedSelectors = 0
   let rewrittenSelectors = 0
+  const skippedRuntimeClasses = new Set<string>()
   const themeRules: Array<postcss.Rule> = []
   root.walkRules((rule) => {
     if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
@@ -154,6 +160,15 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
         selectors.each((selector) => {
           let hasAuthoredAnchor = false
           let hasPlatformAnchor = false
+          // The runtime classes in the selector, and which compounds (runs between combinators) hold a class the site built itself.
+          const runtimeClasses: Array<{ name: string; compound: number }> = []
+          const anchored = new Set<number>()
+          const compoundOf = (node: selectorParser.Node): number => {
+            let outer = node
+            while (outer.parent && outer.parent !== selector) outer = outer.parent as selectorParser.Node
+            return (selector.nodes as Array<selectorParser.Node>).slice(0, (selector.nodes as Array<selectorParser.Node>).indexOf(outer))
+              .filter((sibling) => sibling.type === 'combinator').length
+          }
           selector.walk((node) => {
             // A class inside :not() or :has() does not constrain the element
             // being styled. Treating it as the only authored anchor could
@@ -167,7 +182,11 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
             if (node.type === 'class') {
               if (SHARED_THEME_CLASSES.has(node.value)) return
               if (PLATFORM_CLASSES.has(node.value) || PLATFORM_CLASS_PREFIX.test(node.value) || UTILITY_CLASS.test(node.value) || !isAuthoredClass(node.value)) hasPlatformAnchor = true
-              else if (!isNestedInPseudo) hasAuthoredAnchor = true
+              else {
+                if (RUNTIME_CLASS_NAMES.has(node.value)) runtimeClasses.push({ name: node.value, compound: compoundOf(node) })
+                else if (!isNestedInPseudo) anchored.add(compoundOf(node))
+                if (!isNestedInPseudo) hasAuthoredAnchor = true
+              }
             } else if (node.type === 'id') {
               if (PLATFORM_IDS.has(node.value) || !names.ids.has(node.value)) hasPlatformAnchor = true
               else if (!isNestedInPseudo) hasAuthoredAnchor = true
@@ -186,8 +205,14 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
               rewrittenSelectors += 1
             }
           })
-          if (hasAuthoredAnchor && !hasPlatformAnchor) retained.push(selector.toString())
-          else omittedSelectors += 1
+          // A runtime class beside one of the site's own on the same element picks out the site's element, as `.ifx-body.prose` does.
+          const unanchored = runtimeClasses.filter(({ compound }) => !anchored.has(compound))
+          if (hasAuthoredAnchor && !hasPlatformAnchor && unanchored.length === 0) retained.push(selector.toString())
+          else {
+            omittedSelectors += 1
+            // A rule the site would have kept, but that would restyle the Thally interface as well: said, not dropped quietly.
+            if (hasAuthoredAnchor && !hasPlatformAnchor) unanchored.forEach(({ name }) => skippedRuntimeClasses.add(name))
+          }
         })
       }).processSync(rule.selector)
     } catch {
@@ -228,7 +253,11 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     if (rule.name === 'font-face' || rule.name === 'property') return
     if (!hasStyleRule(rule.nodes)) rule.remove()
   })
-  const skipped = { skippedVariables: { runtime: [...skippedVariables.runtime], unused: [...skippedVariables.unused] }, skippedThemeDeclarations }
+  const skipped = {
+    skippedVariables: { runtime: [...skippedVariables.runtime], unused: [...skippedVariables.unused] },
+    skippedThemeDeclarations,
+    skippedRuntimeClasses: [...skippedRuntimeClasses].sort(),
+  }
   if (omittedSelectors === 0 && rewrittenSelectors === 0 && !changedTheme) return { css, omittedSelectors, ...skipped }
   root.walkComments((comment) => { comment.remove() })
   return { css: root.toString(), omittedSelectors, ...skipped }

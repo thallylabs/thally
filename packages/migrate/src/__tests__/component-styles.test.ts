@@ -202,3 +202,41 @@ describe('a class a template builds from a value', () => {
     expect(text).not.toMatch(/ifx-card-title|ifx-cardinal|ifx-card--wide/)
   })
 })
+
+describe('a rule on a class the Thally runtime itself uses', () => {
+  const component = 'export const Box = () => (\n  <div className="ifx-box">\n    <i className="sticky" /><b className="ifx-box__tag hidden" /><p className="ifx-box__body prose" />\n  </div>\n)\n'
+  const css = [
+    '.ifx-box { color: blue; }',
+    '.ifx-box__tag { color: teal; }',
+    '.dark .ifx-box { color: white; }',
+    '.ifx-box__body.prose { max-width: none; }',
+    '.ifx-box:not(.hidden) { margin: 0; }',
+    '.sticky { display: none !important; }',
+    '.ifx-box .sticky { top: 0; }',
+    '.sticky .ifx-box { top: 1px; }',
+    '.ifx-box__tag, .hidden { display: block; }',
+  ].join('\n')
+  const result = migrate({ 'snippets/catalog.jsx': component, 'style.css': css })
+
+  it('is never kept, unless the same element is one of the site\'s own', () => {
+    const text = rules(result.css)
+    expect(text).toContain('.ifx-box {')
+    expect(text).toContain('.ifx-box__tag {')
+    expect(text).toContain('.dark .ifx-box {')
+    // The element a rule styles must carry a class the site built, or `.prose` and `:not(.hidden)` would make no difference to it.
+    expect(text).toContain('.ifx-box__body.prose { max-width: none; }')
+    expect(text).toContain('.ifx-box:not(.hidden) { margin: 0; }')
+    // On its own, below an ancestor or above a descendant, it can style an element the Thally pages render themselves.
+    expect(text).not.toMatch(/\.sticky|\.hidden \{|display: none|top: /)
+    expect(text).toContain('.ifx-box__tag { display: block; }')
+  })
+
+  it('is said plainly when it is skipped', () => {
+    expect(result.warnings.join('\n')).toMatch(/\.hidden, \.sticky: Thally's own pages use those classes/)
+  })
+
+  it('does not warn about a rule nothing in the site builds', () => {
+    const quiet = migrate({ 'style.css': '.ifx-catalog { gap: 1px; }\n.sticky { display: none; }\n.flex { display: block; }' })
+    expect(quiet.warnings.join('\n')).not.toMatch(/sticky|flex/)
+  })
+})

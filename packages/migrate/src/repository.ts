@@ -5550,6 +5550,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: 'style.css',
         message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
       })
+      const runtimeClasses = rootStyleProjection.skippedRuntimeClasses
+      if (runtimeClasses.length > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Skipped stylesheet rules that select ${runtimeClasses.map((name) => `.${name}`).join(', ')}: Thally's own pages use ${runtimeClasses.length === 1 ? 'that class' : 'those classes'} too, so the rules would restyle them. Rename the class in the component, or recreate the styling with Thally configuration.`,
+      })
       const { runtime, unused } = rootStyleProjection.skippedVariables
       const otherDeclarations = rootStyleProjection.skippedThemeDeclarations
       if (runtime.length + unused.length + otherDeclarations > 0) warnings.push({
