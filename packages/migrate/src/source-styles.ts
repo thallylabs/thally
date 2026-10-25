@@ -185,6 +185,8 @@ export interface StyleProjection {
   omittedSelectors: number
   /** Rules written inside another rule (CSS nesting) that were left out: read relative to what they are in, they can match outside the content. */
   omittedNestedRules: number
+  /** Custom properties whose `@property` registration was left out: it applies to the whole page, so it could change a property the shell uses. */
+  skippedProperties: Array<string>
   /** Custom properties left out of a theme block because no imported rule reads them. */
   skippedVariables: Array<string>
   /** Declarations left out of a theme block that are not custom properties (`:root { background: ... }`): they would restyle the page. */
@@ -287,6 +289,9 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   }
   const skippedVariables = new Set<string>()
   let skippedThemeDeclarations = 0
+  // The names the site's own theme blocks declare, whether or not a rule reads them: where the site's own prefix shows.
+  const themeNames = new Set<string>()
+  for (const rule of themeRules) rule.walkDecls((decl) => { if (decl.prop.startsWith('--')) themeNames.add(decl.prop) })
   for (const rule of themeRules) {
     const dropped = rule.nodes.filter((node): node is postcss.Declaration => node.type === 'decl' && !isKept(node))
     for (const decl of dropped) {
@@ -303,10 +308,21 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   // A condition inside a rule (`@media`) holds declarations for that rule, which is what it is there to change.
   const hasStyleRule = (atRule: postcss.AtRule): boolean => Boolean(atRule.nodes?.some((node) =>
     node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node)) || (node.type === 'decl' && isInRule(atRule))))
+  const skippedProperties: Array<string> = []
   root.walkAtRules((rule) => {
-    if (rule.name === 'font-face' || rule.name === 'property') return
+    if (rule.name === 'font-face') return
+    if (rule.name === 'property') {
+      // A registration applies to the whole page, so it must be for a name the shell cannot be using: one a kept rule reads, and whose
+      // first word (`--ifx-` in `--ifx-glow`) is one the site's own theme blocks use for its properties too.
+      const name = rule.params.trim()
+      const prefix = name.slice(0, name.indexOf('-', 2) + 1)
+      if (read.has(name) && prefix && [...themeNames].some((own) => own.startsWith(prefix))) return
+      skippedProperties.push(name)
+      rule.remove()
+      return
+    }
     if (!hasStyleRule(rule)) rule.remove()
   })
   root.walkComments((comment) => { comment.remove() })
-  return { css: root.toString(), omittedSelectors, omittedNestedRules, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
+  return { css: root.toString(), omittedSelectors, omittedNestedRules, skippedProperties, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
 }

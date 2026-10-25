@@ -994,6 +994,17 @@ describe('custom stylesheet migration', () => {
     expect(warnings[0].message).toMatch(/Skipped 2 rules nested inside other rules/)
   })
 
+  it('reports a registered custom property it left out', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
+      'a.mdx': '---\ntitle: A\n---\n\n<div className="widget">Hi</div>\n',
+      'style.css': '@property --docs-bg { syntax: "<color>"; inherits: false; initial-value: red }\n.widget { color: red }\n',
+    })
+    const warnings = cssWarnings(bundle)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/Left out of the style\.css stylesheet: @property --docs-bg/)
+  })
+
   it('does not warn when there is no stylesheet', () => {
     expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })

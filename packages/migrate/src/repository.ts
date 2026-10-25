@@ -5555,6 +5555,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: 'style.css',
         message: `Skipped ${rootStyleProjection.omittedNestedRules} rule${rootStyleProjection.omittedNestedRules === 1 ? '' : 's'} nested inside other rules (CSS nesting) in the style.css stylesheet: Thally confines each kept rule to the page content, and a nested selector is read relative to the rule around it. Write them as separate rules to keep them.`,
       })
+      if (rootStyleProjection.skippedProperties.length > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Left out of the style.css stylesheet: ${rootStyleProjection.skippedProperties.map((name) => `@property ${name}`).join(', ')}. A registration applies to the whole page, so Thally keeps one only when an imported rule reads the property and the site's own :root or .dark block declares properties with the same prefix (--ifx-, say), which shows the name is the site's and not the Thally shell's. Recreate an intentional registration in a stylesheet of your own.`,
+      })
       const { skippedVariables: unused, skippedThemeDeclarations: otherDeclarations } = rootStyleProjection
       if (unused.length + otherDeclarations > 0) warnings.push({
         code: 'unsupported-config',

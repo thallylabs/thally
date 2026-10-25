@@ -225,3 +225,34 @@ describe('the theme blocks of a stylesheet', () => {
     expect(cheerio.load(page.replace('<html class="dark">', '<html>'))(dark).length).toBe(0)
   })
 })
+
+describe('a registered custom property (@property)', () => {
+  const registration = (name: string) => `@property ${name} { syntax: "<color>"; inherits: false; initial-value: red; }`
+
+  it('is left out when no kept rule reads it, as it would change the shell\'s own custom property of that name', () => {
+    const result = project(`${registration('--docs-bg')}\n.ifx-a { color: red; }`)
+    expect(text(result.css)).toBe(`${SCOPE} .ifx-a { color: red; }`)
+    expect(result.skippedProperties).toEqual(['--docs-bg'])
+  })
+
+  it('is left out when a kept rule reads it but the site has no custom properties of that prefix of its own', () => {
+    const css = `:root { --ifx-a: red; }\n${registration('--docs-bg')}\n${registration('--glow')}\n${registration('--ifx-angle')}\n.ifx-a { background: var(--docs-bg); color: var(--glow); outline-color: var(--ifx-angle); }`
+    const result = project(css)
+    expect(result.skippedProperties).toEqual(['--docs-bg', '--glow'])
+    expect(text(result.css)).not.toContain('--docs-bg {')
+    expect(text(result.css)).not.toContain('--glow {')
+    expect(text(result.css)).toContain(`@property --ifx-angle { syntax: "<color>"; inherits: false; initial-value: red; }`)
+  })
+
+  it('is kept when a kept rule reads it and the site\'s own theme block declares properties with the same prefix', () => {
+    const css = `:root { --ifx-glow: red; }\n.dark { --ifx-glow: blue; }\n${registration('--ifx-glow')}\n.ifx-a { color: var(--ifx-glow); }`
+    const result = project(css)
+    expect(text(result.css)).toContain(`@property --ifx-glow { syntax: "<color>"; inherits: false; initial-value: red; }`)
+    expect(result.skippedProperties).toEqual([])
+  })
+
+  it('is left out when only a theme property no rule reads reads it', () => {
+    const result = project(`:root { --ifx-a: var(--ifx-glow); --ifx-glow: red; }\n${registration('--ifx-glow')}\n.ifx-a { color: red; }`)
+    expect(result.skippedProperties).toEqual(['--ifx-glow'])
+  })
+})
