@@ -131,6 +131,12 @@ export interface SidebarCollection {
   description?: string
   icon?: string
   sections: Array<NavigationSection>
+  /**
+   * Pages the tab lists but their frontmatter hides. They are not in `sections`,
+   * so no sidebar, pagination or machine listing shows them, yet the tab (and
+   * their authored `groupPath`) still owns them: opening one keeps this tab.
+   */
+  hiddenItems?: Array<NavigationItem>
   href?: string
   api?: DocsJsonApiConfig
 }
@@ -1151,11 +1157,12 @@ function buildNavigationGroup(
   ancestors: Array<string> = [],
   locale: string | undefined,
   isVisible: PageVisibility,
+  hiddenItems: Array<NavigationItem>,
 ): NavigationGroup | null {
   if (group.hidden) return null
 
   const groupPath = [...ancestors, group.group].filter(Boolean)
-  const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale, isVisible)
+  const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale, isVisible, hiddenItems)
   if (nodes.length === 0) return null
 
   return {
@@ -1173,18 +1180,21 @@ function buildNavigationNodes(
   ancestors: Array<string>,
   locale: string | undefined,
   isVisible: PageVisibility,
+  hiddenItems: Array<NavigationItem>,
 ): Array<NavigationNode> {
   return pages.flatMap<NavigationNode>((page, index) => {
     if (typeof page === 'string') {
-      // Fern and some legacy docs configs list pages that are reachable by
-      // direct link but explicitly hidden from the rendered sidebar.
-      if (readFrontmatter(page, locale).hidden) return []
       if (!isDocPublished(page, locale)) return []
       // A page the reader may not open must not leak its title either.
       if (!isVisible(page, locale)) return []
-      return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
+      const item = resolveNavItem(page, locale, ancestors)
+      // Fern, Mintlify and some legacy docs configs list pages that are
+      // reachable by direct link but hidden from the rendered sidebar. The tab
+      // that lists one still owns it.
+      if (readFrontmatter(page, locale).hidden) { hiddenItems.push(item); return [] }
+      return [{ type: 'page', item }]
     }
-    const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale, isVisible)
+    const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale, isVisible, hiddenItems)
     return child ? [{ type: 'group', group: child }] : []
   })
 }
@@ -1226,8 +1236,9 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
     .map((tab) => {
       const id = tabCollectionId(tab.tab)
       const groups = tab.groups ?? []
+      const hiddenItems: Array<NavigationItem> = []
       const groupSections = groups.flatMap((group, index) => {
-        const tree = buildNavigationGroup(group, [index], [], locale, isVisible)
+        const tree = buildNavigationGroup(group, [index], [], locale, isVisible, hiddenItems)
         if (!tree) return []
         return [{
           id: tree.id,
@@ -1241,7 +1252,7 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
         }]
       })
       const rootNodes = tab.pages
-        ? buildNavigationNodes(tab.pages, [groups.length], [], locale, isVisible)
+        ? buildNavigationNodes(tab.pages, [groups.length], [], locale, isVisible, hiddenItems)
         : []
       const sections = [
         ...(rootNodes.length > 0 ? [{
@@ -1260,6 +1271,7 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
         description: tab.description,
         icon: tab.icon,
         sections,
+        ...(hiddenItems.length > 0 ? { hiddenItems } : {}),
         href: tab.href,
         api: tab.api,
       }
@@ -1354,33 +1366,43 @@ function navigationGroupParts(section: NavigationSection, item: NavigationItem):
   return section.id?.startsWith('nav-root-') ? [] : [section.title]
 }
 
-export function getBreadcrumbs(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): Array<BreadcrumbItem> {
-  const collections = getSidebarCollections(navigationLocaleForHref(currentHref), reader)
-
+/**
+ * The tab, authored group path and entry that own `href`: the first tab that
+ * lists it in its sidebar. A page its frontmatter hides is not listed there,
+ * but the tab that lists it in navigation still owns it.
+ */
+function findNavigationOwner(collections: Array<SidebarCollection>, href: string) {
   for (const collection of collections) {
     for (const section of collection.sections) {
-      const match = section.items.find((item) => item.href === currentHref)
-      if (match) {
-        const crumbs: Array<BreadcrumbItem> = []
-        // Tab level
-        const firstPageHref = collection.sections[0]?.items[0]?.href
-        crumbs.push({ label: collection.label, href: firstPageHref })
-        // Group level follows the authored recursive path without flattening
-        // those groups into duplicate visual sections.
-        // A group named after its tab (e.g. "Get started" › "Get started")
-        // would stutter — collapse consecutive duplicate labels.
-        const groupParts = navigationGroupParts(section, match)
-        for (const part of groupParts) {
-          if (crumbs[crumbs.length - 1]?.label !== part) crumbs.push({ label: part })
-        }
-        // Current page
-        crumbs.push({ label: match.title })
-        return crumbs
-      }
+      const item = section.items.find((candidate) => candidate.href === href)
+      if (item) return { collection, item, groupPath: navigationGroupParts(section, item) }
     }
   }
+  for (const collection of collections) {
+    const item = collection.hiddenItems?.find((candidate) => candidate.href === href)
+    if (item) return { collection, item, groupPath: item.groupPath ?? [] }
+  }
+  return undefined
+}
 
-  return []
+export function getBreadcrumbs(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): Array<BreadcrumbItem> {
+  const owner = findNavigationOwner(getSidebarCollections(navigationLocaleForHref(currentHref), reader), currentHref)
+  if (!owner) return []
+
+  const crumbs: Array<BreadcrumbItem> = []
+  // Tab level
+  const firstPageHref = owner.collection.sections[0]?.items[0]?.href
+  crumbs.push({ label: owner.collection.label, href: firstPageHref })
+  // Group level follows the authored recursive path without flattening
+  // those groups into duplicate visual sections.
+  // A group named after its tab (e.g. "Get started" › "Get started")
+  // would stutter — collapse consecutive duplicate labels.
+  for (const part of owner.groupPath) {
+    if (crumbs[crumbs.length - 1]?.label !== part) crumbs.push({ label: part })
+  }
+  // Current page
+  crumbs.push({ label: owner.item.title })
+  return crumbs
 }
 
 /**
@@ -1397,13 +1419,7 @@ export function getNavCategory(currentHref: string, reader: ReaderContext = ANON
 
 /** Every authored group above the page, outermost first; empty outside any group. */
 export function getNavGroupPath(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): Array<string> {
-  for (const collection of getSidebarCollections(navigationLocaleForHref(currentHref), reader)) {
-    for (const section of collection.sections) {
-      const item = section.items.find((candidate) => candidate.href === currentHref)
-      if (item) return [...navigationGroupParts(section, item)]
-    }
-  }
-  return []
+  return [...(findNavigationOwner(getSidebarCollections(navigationLocaleForHref(currentHref), reader), currentHref)?.groupPath ?? [])]
 }
 
 // ---------------------------------------------------------------------------
@@ -1430,22 +1446,10 @@ export function getNavContext(pageId: string, locale?: string, reader: ReaderCon
   const breadcrumb = getBreadcrumbs(href, reader)
 
   // Find which tab and group this page belongs to
-  const collections = getSidebarCollections(locale, reader)
-  let tabName = ''
-  let groupPath: Array<string> = []
+  const owner = findNavigationOwner(getSidebarCollections(locale, reader), href)
+  const groupPath = [...(owner?.groupPath ?? [])]
 
-  outer: for (const collection of collections) {
-    for (const section of collection.sections) {
-      const item = section.items.find((candidate) => candidate.href === href)
-      if (item) {
-        tabName = collection.label
-        groupPath = [...navigationGroupParts(section, item)]
-        break outer
-      }
-    }
-  }
-
-  return { tab: tabName, group: groupPath.at(-1) ?? '', groupPath, prev, next, breadcrumb }
+  return { tab: owner?.collection.label ?? '', group: groupPath.at(-1) ?? '', groupPath, prev, next, breadcrumb }
 }
 
 /** Async managed-release twin of {@link getNavContext}. */
