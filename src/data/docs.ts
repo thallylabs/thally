@@ -141,6 +141,8 @@ export interface NavigationItem {
   id: string
   title: string
   href: string
+  /** Where the redirect from `href` ends, fragment included. `href` stays the page's identity; only the link follows this. */
+  redirectTo?: string
   badge?: string
   /** Sidebar icon from page frontmatter (name, or an image path/URL). */
   icon?: string
@@ -646,6 +648,45 @@ function servedRootHref(href: string): string {
     : href
 }
 
+const redirectDestinations = new WeakMap<Array<DocsJsonRedirect>, Map<string, string>>()
+
+function redirectKey(path: string): string {
+  return (path.replace(/\/+$/, '') || '/').toLowerCase()
+}
+
+/**
+ * Where a visit to `href` ends: an exact docs.json redirect source leads to its
+ * destination, and a destination that is itself a source leads on. The Next.js
+ * client router drops the fragment of a redirect it follows, so a link has to
+ * name the final address. A destination the site cannot link to, or a loop,
+ * leaves the page's own route as the link.
+ */
+function redirectedHref(href: string): string | undefined {
+  const redirects = docsConfig().redirects
+  if (!redirects?.length) return undefined
+  let destinations = redirectDestinations.get(redirects)
+  if (!destinations) {
+    destinations = new Map()
+    // Next.js applies the first redirect whose source matches.
+    for (const { source, destination } of redirects) if (!destinations.has(redirectKey(source))) destinations.set(redirectKey(source), destination)
+    redirectDestinations.set(redirects, destinations)
+  }
+  let target: string | undefined
+  let fragment = ''
+  let path = href
+  const visited = new Set<string>()
+  for (let next = destinations.get(redirectKey(path)); next !== undefined; next = destinations.get(redirectKey(path))) {
+    if (!/^(?:https?:\/\/|\/(?![/\\]))/i.test(next) || visited.has(redirectKey(path))) return undefined
+    visited.add(redirectKey(path))
+    const hash = next.indexOf('#')
+    target = hash < 0 ? next : next.slice(0, hash)
+    // A browser keeps the fragment across a redirect that names none.
+    if (hash >= 0) fragment = next.slice(hash)
+    path = target.split('?', 1)[0]
+  }
+  return target === undefined ? undefined : target + fragment
+}
+
 function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: FrontmatterData): DocEntry {
   const fm = indexedFrontmatter ?? readFrontmatter(pageId)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
@@ -1086,11 +1127,13 @@ function resolveNavItem(
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
   const href = servedRootHref(locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref)
+  const redirectTo = redirectedHref(href)
   return {
     id: slugifyId(pageId) || 'introduction',
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     ...(method ? { method } : {}),
     href,
+    ...(redirectTo ? { redirectTo } : {}),
     badge: fm.badge,
     ...(typeof fm.icon === 'string' && fm.icon ? { icon: fm.icon } : {}),
     ...(fm.iconType ? { iconType: fm.iconType } : {}),
