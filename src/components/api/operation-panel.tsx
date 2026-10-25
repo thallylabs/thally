@@ -214,7 +214,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
   const t = useApiLabels()
   if (!schema) return null
 
-  const flat = flattenSchema(schema)
+  const flat = listedObject(schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
@@ -335,7 +335,7 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
   const t = useApiLabels()
   if (!schema) return null
 
-  const flat = flattenSchema(schema)
+  const flat = listedObject(schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
@@ -484,6 +484,16 @@ function getNestedProperties(schema: Record<string, unknown>): boolean {
   const variants = unionVariants(flat)
   if (variants) return variants.some((variant) => getNestedProperties(variant.schema))
   return flat.type === 'array' && Boolean(flat.items) && typeof flat.items === 'object' && getNestedProperties(flat.items as Record<string, unknown>)
+}
+
+/**
+ * What a body or response schema lists. A list of objects shows its item's fields as an object
+ * does (as live does), through the same rows, tabs for a union, and Expandable for deeper
+ * levels. An array of anything else stays one row.
+ */
+function listedObject(schema: Record<string, unknown>): Record<string, unknown> {
+  const flat = flattenSchema(schema)
+  return flat.type === 'array' && getNestedProperties(flat) ? getNestedSchema(flat) : flat
 }
 
 function getNestedSchema(schema: Record<string, unknown>): Record<string, unknown> {

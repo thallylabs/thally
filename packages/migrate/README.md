@@ -128,6 +128,11 @@ versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
 compatible page frontmatter, site identity, and OpenAPI configuration.
+A page with no `description`, other than one that names an API operation, gets
+one from its first paragraph, which keeps it for search and metadata but marks it
+`descriptionPlacement: body`, so the runtime does not print the same sentence under
+the title and again in the body; an authored description is shown under the title as
+written. (Docusaurus and Fern pages are always marked `body`.)
 Analytics come across too: docs.json `integrations` and legacy mint.json
 `analytics` for GA4, Google Tag Manager, PostHog, and Plausible are validated
 and written to `docs.json` `integrations` (`integrations` wins per provider when
@@ -237,6 +242,17 @@ the spec has none of the listed operations, or the tab is bound to another spec.
 A reference that lists no operation (Mintlify generated every endpoint) is not
 affected. Operations whose path item is a local `$ref` are read as the renderer
 reads them (hidden or excluded on any level of the reference withholds them).
+
+An authored page that names an operation (`openapi: post /links`) or a webhook
+(`openapi: webhook link.created`, read from the spec's `webhooks`) and sets neither
+a `title` nor a leading heading is titled by that operation, as Mintlify titles it:
+the summary, else the operation id, else `METHOD /path` (`POST link.created` for a
+webhook), where its file name would otherwise give it "Create" for `links/create.mdx`. A page that names its spec reads
+that spec; a bare reference reads the first spec that publishes the operation, so
+when a site has a remote spec, `hydrateRemoteApiSpecs` titles these pages once every
+spec is bound. A page whose operation no spec publishes (a remote spec that failed to
+download, say) keeps its file name title. `sidebarTitle` still becomes
+`navTitle`, and an authored title always wins.
 The renderer tries the first visible API tab's spec first for a bare
 `openapi: "METHOD /path"` page; when converting a tab to pages stops its spec being
 that one, each bare reference to an operation the converted spec defines is
@@ -317,7 +333,14 @@ URLs case-sensitively. Next.js reads a redirect source as a route pattern, so on
 whose address has a `+ ? ( ) [ ] { }` character (a `directory` such as
 `sdk/c++`) would fail the build; every redirect from authored config, a local
 spec or a downloaded spec is left out instead, and one warning lists the first
-ten of them.
+ten of them. A source that ends in a catch-all `/:name*` also matches the path
+without that segment, so when that path is a page of the site, or is where the
+redirect itself goes (`/docs/sdks/typescript/:path*` to `/docs/sdks/typescript`),
+the redirect would send the page to itself. Its source is rewritten to
+`/:name+`, which keeps redirecting every deeper path and leaves the page alone.
+For `/:name*` that path is the root `/`, which the site answers with its
+introduction page or with a redirect of its own, so such a catch-all
+(`/:path*` to `https://example.com/docs`) becomes `/:path+` in either case.
 
 A Mintlify page whose frontmatter `url` is a web address is a link in the
 source sidebar. It is imported as a page that is kept out of the sitemap, stays
@@ -327,6 +350,37 @@ purpose; a `url` that is not an `http(s)` address is ignored. The home page
 (`index.mdx` or `introduction.mdx`) is served at `/` and at `/introduction`, so
 both redirect, and the redirect from `/` replaces the generated one to the first
 page. A redirect for `/` that the source site wrote stays, and a warning says so.
+
+An authored redirect (Mintlify and Fern `redirects`, Docusaurus
+`plugin-client-redirects`) starts at a path on the site and ends at another
+path on it or at an absolute `http(s)` address, which is kept exactly as written
+(`/docs/examples` to `https://github.com/dubinc/examples`). A destination that
+starts with `//`, uses another scheme such as `javascript:` or `data:`, or holds
+a backslash, whitespace, a control character, credentials or a bracketed IPv6
+host is left out for safety, and one warning lists the first ten sources skipped.
+Only the path of a destination is checked as route syntax: its query is kept as
+written (`https://example.com/?next=https://other.com`), and so is a fragment
+unless it holds a character Next.js reads as route syntax (`: * + ? ( ) { }`). An
+address whose host name, once its percent escapes are read, is not a valid one
+(letters, digits, hyphens, underscores and dots, then an optional port) is left out with a
+warning, since Next.js fails when it follows such a redirect. A `:name` in a
+destination that the source does not define is kept as text (its colon is written
+`%3A`), because Next.js fails when it has no value for it; a wildcard
+(`:name*`, `:name+`) the source does not have, or a wildcard of the source that
+the destination writes without its `*` or `+`, is left out with a warning. A
+redirect that still cannot be carried (a `:` inside a path segment such as
+`Category:Foo`, a `*` anywhere but as the whole last segment, or such a fragment)
+is left out with a warning that names that reason.
+A Mintlify source or destination written without its leading slash
+(`features/extract-beta`) is read as the path it names, as Mintlify's own site
+does, and one warning lists the first ten redirects given a slash; one starting
+with `./` or `../`, a source with a scheme, or a destination with a scheme other
+than `http:` or `https:` is left out like any other unsafe value. Fern
+and Docusaurus ask for a rooted path, so theirs are not read that way.
+A Mintlify or Fern redirect that does not set `permanent` is permanent (308), the
+default both platforms document, so search engines move to the new address;
+`permanent: false` stays temporary (307), and so do the route aliases, endpoint
+URLs and page links the migrator adds itself.
 
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
@@ -737,13 +791,20 @@ page. Those files are copied to `public/` (tooling config such as
 output, dot-directories, and `node_modules` are not) under the normal asset
 size limits. Scripts are added to `docs.json` `customScripts` (URL-encoded),
 except modules that pages import as components, which are copied as components
-instead. Thally cannot
-load a stylesheet from `docs.json`, so each `.css` is preserved with a warning
-that it is not applied and likely targets Mintlify's DOM. Fonts named by
+instead. Thally loads a local stylesheet that `docs.json` lists under
+`stylesheets`, but the migrator does not list the `.css` files it copies, since
+their rules likely target Mintlify's DOM: each is preserved with a warning that it
+is not applied. Fonts named by
 `fonts.source` (top level, `heading`, `body`) that are local `.woff`, `.woff2`,
-`.ttf`, or `.otf` files are copied; Thally's `fonts` setting loads Google Fonts
-by family only, so a warning says the file is not applied. Remote font URLs
-are not downloaded, and unsafe or missing paths are warned about.
+`.ttf`, or `.otf` files are copied. Thally's `fonts` setting loads Google Fonts
+by family only, so a font with a `source` of its own is not written to it (the
+page would ask Google for a family it does not have, and fail): the site keeps its
+default font, and one warning per font says so and how to use the copied file (an
+`@font-face` rule in a stylesheet in `public/` that `docs.json` lists under
+`stylesheets`, then `--font-heading` or `--font-sans`). A `source` that is a
+Google Fonts address (`fonts.googleapis.com`, `fonts.gstatic.com`) still loads by
+family. Remote font URLs are not downloaded, and unsafe or missing paths are
+warned about.
 
 The root `style.css` is the exception to that: it is projected, and the
 projection is listed under `stylesheets`. It keeps the rules for markup the

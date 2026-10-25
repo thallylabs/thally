@@ -10,15 +10,13 @@ import { execFileSync } from 'node:child_process'
 import { compile, pathToRegexp, regexpToFunction, type Key } from 'path-to-regexp'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
-import remarkMdx from 'remark-mdx'
-import remarkParse from 'remark-parse'
-import { unified } from 'unified'
 import { readDocsJson, writeDocsJson, type DocsJsonConfig } from './docs-json.js'
 import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
+import { parseMdxTree } from '@thallylabs/core/markdown'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { plainInlineText, slugify } from '@thallylabs/core/slugify'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -165,45 +163,15 @@ function forEachNonFencedLine(content: string, visit: (line: string, lineNumber:
   }
 }
 
-/**
- * Headings and explicit anchor targets a rendered page actually exposes.
- * CommonMark still parses a heading marker indented up to 3 spaces (only 4+
- * turns it into a code block), including inside JSX children, so markdown
- * headings authored with light indentation must count too. Any JSX/HTML
- * element carrying a literal `id` attribute is also a valid link target,
- * independent of headings.
- */
-function renderedHeadingText(source: string): string {
-  let visible = ''
-  let inTag = false
-  let quote: '"' | "'" | null = null
-  for (let index = 0; index < source.length; index++) {
-    const character = source[index]
-    if (!inTag) {
-      if (character === '<') inTag = true
-      else visible += character
-      continue
-    }
-    if (quote) {
-      if (character === quote && source[index - 1] !== '\\') quote = null
-    } else if (character === '"' || character === "'") {
-      quote = character
-    } else if (character === '>') {
-      inTag = false
-    }
-  }
-  return visible
-}
-
-const mdxParser = unified().use(remarkParse).use(remarkMdx)
-
 /** A node of the MDX syntax tree, the one the renderer and the content parser read; JSX elements carry their tag name and attributes. */
 interface MdxNode {
   type: string
   name?: string | null
+  depth?: number
+  value?: string
+  identifier?: string
   attributes?: Array<{ type: string; name?: string; value?: unknown }>
   children?: Array<MdxNode>
-  position?: { start: { line: number } }
 }
 
 /** A literal string attribute, as MDX decodes it; `null` for an expression, `undefined` when the attribute is absent. */
@@ -213,56 +181,122 @@ function stringAttribute(node: MdxNode, name: string): string | null | undefined
   return typeof attribute.value === 'string' ? attribute.value : null
 }
 
+/** A string attribute as the renderer's heading pass reads it: a literal, or a constant string in braces (`title={"Param name"}`); `null` for any other expression, `undefined` when absent. */
+function constantAttribute(node: MdxNode, name: string): string | null | undefined {
+  const attribute = node.attributes?.find((item) => item.type === 'mdxJsxAttribute' && item.name === name)
+  if (!attribute) return undefined
+  return typeof attribute.value === 'string' ? attribute.value : constantString(attribute.value)
+}
+
+/** A heading may hold a JSX comment with `#id` to keep an id its text would not slugify to; the same pattern as the renderer's heading pass. */
+const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
+
 /**
- * Titles of the `<Step>`s that render as headings: `titleSize` h2, h3 or h4 on
- * the step or, failing that, on the `<Steps>` around it. Only literal strings
- * count, as in the runtime. Each carries the line its tag starts on. The steps
- * are read from the MDX syntax tree, so a tag written inside inline code or a
- * comment is not one; a page MDX cannot read has none, as for the content parser.
+ * What the renderer's heading pass reads as a heading's text: plain text, inline
+ * code and the text of inline markup, and nothing from a JSX element or a `{…}`
+ * expression inside it (`## Deploy <Badge>New</Badge>` is `deploy`). A footnote
+ * reference is the superscript number the renderer gives it. With `components`,
+ * the text the heading component renders instead, which it slugs when the pass
+ * gave the heading no id: the children of a component and a string in braces
+ * count too.
  */
-function extractStepHeadings(content: string): Array<{ line: number; base: string; explicit: boolean }> {
-  // Parsing costs milliseconds per page; skip it on the many pages with no step.
-  if (!content.includes('<Step')) return []
-  let tree: MdxNode
-  try {
-    tree = mdxParser.parse(content) as unknown as MdxNode
-  } catch {
-    return []
+function headingText(node: MdxNode, components: boolean, footnoteNumber: (identifier: string) => number): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+  if (node.type === 'break') return '\n'
+  if (node.type === 'footnoteReference') return String(footnoteNumber(node.identifier ?? ''))
+  if (node.type === 'mdxTextExpression') return components ? constantString(node) ?? '' : ''
+  if (node.type === 'mdxJsxTextElement' && !components) return ''
+  return (node.children ?? []).map((child) => headingText(child, components, footnoteNumber)).join('')
+}
+
+/** Step title sizes that render a heading; `p` is plain text. */
+const STEP_HEADING_SIZES = ['h2', 'h3', 'h4']
+
+/** What a page gives ids to, read from its MDX syntax tree as the renderer's heading pass reads the rendered one. */
+interface PageIds {
+  /** Headings (h2 to h6) and the `<Step>` titles that render as headings, in document order. */
+  headings: Array<{ base: string; explicit: boolean }>
+  /** The anchor base of each `<ParamField>` and `<ResponseField>` that has a literal name and no `id` of its own, in document order. */
+  fieldBases: Array<string>
+  /** Every `id` an author wrote on a JSX element, and each one a component makes from its text. */
+  reserved: Set<string>
+}
+
+/**
+ * Read the ids of a page the way the renderer's heading pass does: a heading is an
+ * h2 to h6 of any form (ATX or setext, inside a component, a list or a quote; a
+ * code fence or an indented block is code), with the id of a `{/* #id *\/}`
+ * comment in it if it has one; a `<Step>` whose title renders as a heading (`titleSize`
+ * h2, h3 or h4, on the step or, failing that, on the `<Steps>` around it) is one
+ * too. A tag written inside inline code or a comment is not an element, so it counts
+ * for nothing. Only literal strings count, as in the renderer, except where a
+ * constant string in braces (`title={"x"}`) names a field, makes a component's
+ * id or is a step's own id: the renderer reads that as the string it is. The page
+ * is parsed as the renderer parses it, MDX with GFM (`parseMdxTree` in
+ * `@thallylabs/core`), since GFM turns a tight `a~b~c` in a heading into a
+ * strikethrough and a footnote reference into a number, and so into another id.
+ */
+function readPageIds(content: string): PageIds {
+  const tree = parseMdxTree(content) as unknown as MdxNode
+  // A footnote reference renders as its number: the order the notes are first referenced in the page, outside the notes themselves.
+  const footnotes = new Map<string, number>()
+  const footnoteNumber = (identifier: string): number => {
+    if (!footnotes.has(identifier)) footnotes.set(identifier, footnotes.size + 1)
+    return footnotes.get(identifier)!
   }
-  const steps: Array<{ line: number; base: string; explicit: boolean }> = []
-  const visit = (node: MdxNode, stepSize: string | undefined): void => {
+  const page: PageIds = { headings: [], fieldBases: [], reserved: new Set() }
+  const visit = (node: MdxNode, stepSize: string | undefined, inNote: boolean): void => {
     let childSize = stepSize
-    if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+    if (node.type === 'footnoteReference' && !inNote) footnoteNumber(node.identifier ?? '')
+    if (node.type === 'heading' && (node.depth ?? 0) >= 2) {
+      const children = node.children ?? []
+      const marker = children.findIndex((child) => child.type === 'mdxTextExpression' && HEADING_ID_MARKER.test(child.value ?? ''))
+      const given = marker < 0 ? undefined : HEADING_ID_MARKER.exec(children[marker].value ?? '')![1]
+      const heading = marker < 0 ? node : { ...node, children: children.filter((_, index) => index !== marker) }
+      // A heading made only of components has no id of its own in the renderer's pass, but the heading component slugs the text it renders: that id is numbered with the rest.
+      const base = given ?? (slugify(headingText(heading, false, footnoteNumber)) || slugify(headingText(heading, true, footnoteNumber)))
+      page.headings.push({ base, explicit: given !== undefined })
+    } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+      const authored = constantAttribute(node, 'id')?.trim()
+      if (authored) page.reserved.add(authored)
+      for (const id of componentIds(node.name ?? '', (attribute) => constantAttribute(node, attribute))) page.reserved.add(id)
       // `<Steps>` hands its size to every step below it, set or not (a React context).
       if (node.name === 'Steps') childSize = stringAttribute(node, 'titleSize') ?? undefined
       if (node.name === 'Step') {
         const own = stringAttribute(node, 'titleSize')
         const size = own === undefined ? stepSize : own
         const title = stringAttribute(node, 'title')?.trim()
-        if (title && size && ['h2', 'h3', 'h4'].includes(size)) {
-          const id = stringAttribute(node, 'id')?.trim()
-          steps.push({ line: node.position?.start.line ?? 0, base: id || slugify(plainInlineText(title)), explicit: !!id })
+        // A step's own id is a literal or a constant string in braces; any other expression is kept as it is and takes no id from the numbering, as in the renderer and the content parser.
+        const stepId = constantAttribute(node, 'id')
+        if (title && size && STEP_HEADING_SIZES.includes(size) && stepId !== null) {
+          const given = stepId?.trim()
+          page.headings.push({ base: given || slugify(plainInlineText(title)), explicit: !!given })
         }
       }
+      if (node.name === 'ParamField' || node.name === 'ResponseField') {
+        const name = fieldAnchorName(node.name, (attribute) => constantAttribute(node, attribute))
+        const base = name === undefined ? undefined : fieldAnchorBase(name)
+        // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
+        if (base && constantAttribute(node, 'id') === undefined) page.fieldBases.push(base)
+      }
     }
-    for (const child of node.children ?? []) visit(child, childSize)
+    for (const child of node.children ?? []) visit(child, childSize, inNote || node.type === 'footnoteDefinition')
   }
-  visit(tree, undefined)
-  return steps
+  visit(tree, undefined, false)
+  return page
 }
 
-function extractHeadingAnchors(content: string): Set<string> {
+/**
+ * Every id a rendered page exposes as a link target: its headings, numbered as
+ * the renderer numbers them (`numberHeadingIds`), then its fields (`numberFieldIds`,
+ * which skips every id an author wrote and every one a component makes), the ids
+ * authored on JSX elements and made by components, and any element in the text
+ * with a literal `id` attribute or legacy `<a name>`. Read from the syntax tree
+ * like the renderer, so a heading's level, form and place agree with the page.
+ */
+export function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
-  const headings: Array<{ base: string; explicit: boolean; line: number }> = []
-  forEachNonFencedLine(content, (line, lineNumber) => {
-    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
-    if (heading) {
-      // The runtime hashes rendered heading text. JSX badges and inline
-      // anchors contribute their visible children, never their tag/props.
-      // A trailing `{/* #id */}` is the id the runtime uses instead of the text's slug.
-      const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}$/.exec(heading[1])
-      headings.push({ base: explicit?.[1] ?? slugify(renderedHeadingText(heading[1])), explicit: !!explicit, line: lineNumber })
-    }
+  forEachNonFencedLine(content, (line) => {
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
       const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
       if (id) anchors.add(id)
@@ -274,27 +308,11 @@ function extractHeadingAnchors(content: string): Set<string> {
       if (name) anchors.add(name)
     }
   })
-  // Same numbering as the runtime and the content parser: `foo`, `foo-2`, `foo-3`;
-  // an explicit id reserves its id, so generated ids skip it.
-  headings.push(...extractStepHeadings(content))
-  headings.sort((left, right) => left.line - right.line)
-  const reserved = new Set(headings.filter((heading) => heading.explicit).map((heading) => heading.base))
-  const used = new Set<string>()
-  const occurrences = new Map<string, number>()
-  for (const { base, explicit } of headings) {
-    let id = base
-    let n = 1
-    if (explicit) {
-      while (used.has(id)) id = `${base}-${++n}`
-    } else {
-      n = occurrences.get(base) ?? 0
-      do id = ++n === 1 ? base : `${base}-${n}`
-      while (used.has(id) || reserved.has(id))
-      occurrences.set(base, n)
-    }
-    used.add(id)
-    anchors.add(id)
-  }
+  const page = readPageIds(content)
+  const { ids, used } = numberHeadingIds(page.headings)
+  for (const id of ids) if (id) anchors.add(id)
+  for (const id of numberFieldIds(page.fieldBases, used, page.reserved)) anchors.add(id)
+  for (const id of page.reserved) anchors.add(id)
   return anchors
 }
 
