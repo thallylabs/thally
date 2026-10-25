@@ -21,7 +21,7 @@ describe('Mintlify root styles', () => {
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     const href = result.docsConfig.stylesheets?.[0]
     expect(href).toMatch(/^\/migrated\/[a-f0-9]{12}\/style\.css$/)
-    expect(result.assets.find((asset) => `/${asset.path}` === href)?.content.toString()).toBe('.card { padding: 1rem; }')
+    expect(result.assets.find((asset) => `/${asset.path}` === href)?.content.toString()).toBe(':where(.thally-docs-prose) .card { padding: 1rem; }')
     expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
     expect(result.pages[0].body).toContain('<div className="card">')
     const equivalent = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/EXAMPLE/docs.git' })
@@ -56,9 +56,9 @@ describe('Mintlify root styles', () => {
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     const href = result.docsConfig.stylesheets?.[0]
     const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
-    expect(css).toContain('.widget { padding: 1rem; }')
-    expect(css).toContain('.widget-copy { margin: 0; }')
-    expect(css).toContain('.dark .widget { color: white; }')
+    expect(css).toContain(':where(.thally-docs-prose) .widget { padding: 1rem; }')
+    expect(css).toContain(':where(.thally-docs-prose) .widget-copy { margin: 0; }')
+    expect(css).toContain('.dark :where(.thally-docs-prose) .widget { color: white; }')
     expect(css).not.toContain('mintlify-layout')
     expect(css).not.toMatch(/navbar-link|#footer|max-w-36|w-full|mt-8|data-as/)
     expect(css).not.toMatch(/body:not|body:has/)
@@ -85,7 +85,7 @@ describe('Mintlify root styles', () => {
     const href = result.docsConfig.stylesheets?.[0]
     const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
     expect(css).toContain('@keyframes pulse')
-    expect(css).toContain('.widget { animation: pulse 1s; }')
+    expect(css).toContain(':where(.thally-docs-prose) .widget { animation: pulse 1s; }')
     expect(css).not.toContain('platform-shell')
   })
 })

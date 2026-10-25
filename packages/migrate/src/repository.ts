@@ -5548,24 +5548,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (rootStyleProjection.omittedSelectors > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',
-        message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
+        message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup, or the page itself (html, body) rather than its content. Recreate any intentional shell customization with Thally configuration.`,
       })
-      const runtimeClasses = rootStyleProjection.skippedRuntimeClasses
-      if (runtimeClasses.length > 0) warnings.push({
-        code: 'unsupported-config',
-        source: 'style.css',
-        message: `Skipped stylesheet rules that select ${runtimeClasses.map((name) => `.${name}`).join(', ')}: Thally's own pages use ${runtimeClasses.length === 1 ? 'that class' : 'those classes'} too, so the rules would restyle them. Rename the class in the component, or recreate the styling with Thally configuration.`,
-      })
-      const { runtime, unused } = rootStyleProjection.skippedVariables
-      const otherDeclarations = rootStyleProjection.skippedThemeDeclarations
-      if (runtime.length + unused.length + otherDeclarations > 0) warnings.push({
+      const { skippedVariables: unused, skippedThemeDeclarations: otherDeclarations } = rootStyleProjection
+      if (unused.length + otherDeclarations > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',
         message: `Left out of the theme blocks (:root, .dark) of style.css: ${[
-          runtime.length ? `${runtime.join(', ')} (Thally defines ${runtime.length === 1 ? 'it' : 'them'} itself, and the import would change Thally's own colours or layout)` : '',
           unused.length ? `${unused.join(', ')} (no imported rule uses ${unused.length === 1 ? 'it' : 'them'})` : '',
           otherDeclarations ? `${otherDeclarations} other declaration${otherDeclarations === 1 ? '' : 's'} that would restyle the page itself` : '',
         ].filter(Boolean).join('; ')}. Recreate an intentional change with Thally configuration.`,
+      })
+      // Thally renders a custom-mode page without the container every kept rule is confined to.
+      const customPages = pages.filter((page) => page.mode === 'custom' && !restrictedPages.has(page)).length
+      if (customPages > 0 && rootStyleProjection.css.trim()) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `${customPages} page${customPages === 1 ? ' uses' : 's use'} \`mode: custom\`, which Thally renders without the page content container that every rule kept from style.css is confined to, so those rules do not apply there. Give the page another mode, or style it inline.`,
       })
       if (rootStyleProjection.css.trim()) {
         const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)

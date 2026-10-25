@@ -1,4 +1,7 @@
-/** A stylesheet's rules for the classes a copied component builds, and the theme variables those rules read, come across with it. */
+/**
+ * A stylesheet's rules for the classes a copied component builds, and the theme variables those rules read, come across with it, every
+ * one confined to the page content container.
+ */
 
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -107,14 +110,14 @@ describe('stylesheet rules for the classes a copied component builds', () => {
     expect(text).toContain('.ifx-catalog {')
     expect(text).toContain('.ifx-card {')
     expect(text).toContain('.ifx-card--secrets {')
-    expect(text).toContain('.dark .ifx-card--pam {')
+    expect(text).toContain('.dark :where(.thally-docs-prose) .ifx-card--pam {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).toContain('.ifx-tag--new {')
     // A name a value follows (`ifx-tile${...}`), and a modifier added to a name held in a variable (`${base}--dim`).
     expect(text).toContain('.ifx-tile {')
     expect(text).toContain('.ifx-tile--wide {')
     expect(text).toContain('.ifx-tile:hover .ifx-tile__icon {')
-    expect(text).toContain('.ifx-lane--dim, .ifx-lane--focus {')
+    expect(text).toContain(':where(.thally-docs-prose) .ifx-lane--dim, :where(.thally-docs-prose) .ifx-lane--focus {')
     expect(text).not.toContain('.ifx-lane--hidden')
     expect(text).not.toContain('.ifx-never-built')
   })
@@ -135,13 +138,13 @@ describe('stylesheet rules for the classes a copied component builds', () => {
 describe('theme custom properties on :root and .dark', () => {
   it('keeps those some kept rule reads, directly or through another variable, in both themes', () => {
     const text = rules(migrate({}).css)
-    const root = /:root \{([^}]*)\}/.exec(text)?.[1] ?? ''
-    const dark = /\.dark \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    const root = /:root :where\(\.thally-docs-prose\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    const dark = /\.dark :where\(\.thally-docs-prose\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
     for (const name of ['--ifx-surface', '--ifx-line', '--ifx-card-bg', '--ifx-card-line', '--ifx-green', '--ifx-cat-secrets', '--ifx-cat-pam']) expect(root, name).toContain(`${name}:`)
     for (const name of ['--ifx-surface', '--ifx-line', '--ifx-green', '--ifx-cat-pam']) expect(dark, name).toContain(`${name}:`)
   })
 
-  it('drops a variable no kept rule reads, a name the Thally runtime defines, and what else the block sets', () => {
+  it('drops a variable no kept rule reads, and what else the block sets', () => {
     const text = rules(migrate({}).css)
     expect(text).not.toContain('--ifx-unused')
     expect(text).not.toContain('--docs-bg')
@@ -153,8 +156,7 @@ describe('theme custom properties on :root and .dark', () => {
   it('says plainly what it skipped', () => {
     const { warnings } = migrate({})
     const text = warnings.join('\n')
-    expect(text).toMatch(/--docs-bg, --thally-background, --ds-accent.*Thally defines/)
-    expect(text).toMatch(/--ifx-unused.*no imported rule uses/)
+    expect(text).toMatch(/--ifx-unused, --docs-bg, --thally-background, --ds-accent \(no imported rule uses them\)/)
     expect(text).toMatch(/1 other declaration/)
   })
 
@@ -168,8 +170,8 @@ describe('theme custom properties on :root and .dark', () => {
 describe('a paragraph selector written for Mintlify\'s [data-as] marker', () => {
   it('names the element the marker stands for, so no combinator is left dangling', () => {
     const text = rules(migrate({}).css)
-    expect(text).toContain('.ifx-card__title p {')
-    expect(text).toContain('.ifx-card__title ul + p, .ifx-card__title ol + p {')
+    expect(text).toContain(':where(.thally-docs-prose) .ifx-card__title p {')
+    expect(text).toContain(':where(.thally-docs-prose) .ifx-card__title ul + p, :where(.thally-docs-prose) .ifx-card__title ol + p {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).not.toMatch(/data-as|[+>~] ?[,{]|\s,/)
     // `[data-as]` with no element named has nothing to stand for: the rule is skipped, not applied to the whole ancestor.
@@ -203,40 +205,21 @@ describe('a class a template builds from a value', () => {
   })
 })
 
-describe('a rule on a class the Thally runtime itself uses', () => {
-  const component = 'export const Box = () => (\n  <div className="ifx-box">\n    <i className="sticky" /><b className="ifx-box__tag hidden" /><p className="ifx-box__body prose" />\n  </div>\n)\n'
-  const css = [
-    '.ifx-box { color: blue; }',
-    '.ifx-box__tag { color: teal; }',
-    '.dark .ifx-box { color: white; }',
-    '.ifx-box__body.prose { max-width: none; }',
-    '.ifx-box:not(.hidden) { margin: 0; }',
-    '.sticky { display: none !important; }',
-    '.ifx-box .sticky { top: 0; }',
-    '.sticky .ifx-box { top: 1px; }',
-    '.ifx-box__tag, .hidden { display: block; }',
-  ].join('\n')
-  const result = migrate({ 'snippets/catalog.jsx': component, 'style.css': css })
-
-  it('is never kept, unless the same element is one of the site\'s own', () => {
-    const text = rules(result.css)
-    expect(text).toContain('.ifx-box {')
-    expect(text).toContain('.ifx-box__tag {')
-    expect(text).toContain('.dark .ifx-box {')
-    // The element a rule styles must carry a class the site built, or `.prose` and `:not(.hidden)` would make no difference to it.
-    expect(text).toContain('.ifx-box__body.prose { max-width: none; }')
-    expect(text).toContain('.ifx-box:not(.hidden) { margin: 0; }')
-    // On its own, below an ancestor or above a descendant, it can style an element the Thally pages render themselves.
-    expect(text).not.toMatch(/\.sticky|\.hidden \{|display: none|top: /)
-    expect(text).toContain('.ifx-box__tag { display: block; }')
+describe('a variable the Thally runtime uses too', () => {
+  it('is declared on the page content container only, so it cannot change the shell', () => {
+    const { css } = migrate({ 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />', 'style.css': ':root { --thally-background: 0 0% 0%; --docs-line: red; }\n.dark { --docs-line: blue; }\n.ifx-catalog { background: hsl(var(--thally-background)); border-color: var(--docs-line); }' })
+    const text = rules(css)
+    expect(text).toContain(':root :where(.thally-docs-prose) { --thally-background: 0 0% 0%; --docs-line: red; }')
+    expect(text).toContain('.dark :where(.thally-docs-prose) { --docs-line: blue; }')
   })
+})
 
-  it('is said plainly when it is skipped', () => {
-    expect(result.warnings.join('\n')).toMatch(/\.hidden, \.sticky: Thally's own pages use those classes/)
-  })
-
-  it('does not warn about a rule nothing in the site builds', () => {
-    const quiet = migrate({ 'style.css': '.ifx-catalog { gap: 1px; }\n.sticky { display: none; }\n.flex { display: block; }' })
-    expect(quiet.warnings.join('\n')).not.toMatch(/sticky|flex/)
+describe('a page in custom mode', () => {
+  it('is said plainly not to get the rules, since Thally renders it without the content container', () => {
+    const custom = '---\ntitle: Landing\nmode: custom\n---\n\n<div className="ifx-catalog" />\n'
+    const { warnings, css } = migrate({ 'index.mdx': custom, 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />' })
+    expect(css).toContain('.ifx-catalog')
+    expect(warnings.join('\n')).toMatch(/1 page uses `mode: custom`.*do not apply there/)
+    expect(migrate({}).warnings.join('\n')).not.toContain('mode: custom')
   })
 })

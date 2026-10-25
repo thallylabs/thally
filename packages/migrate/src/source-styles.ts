@@ -1,15 +1,14 @@
 /**
  * Keep source-authored component styling without importing selectors that
  * reach into a documentation platform's private DOM. The Thally shell owns
- * navigation, footer and card layout; imported CSS may style authored markup.
+ * navigation, footer and card layout; imported CSS may style authored markup,
+ * and only inside the page content: every rule it keeps is confined to the
+ * container the runtime renders a page's content in.
  */
 
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
 import ts from 'typescript'
-
-import { RUNTIME_CLASS_NAMES } from './runtime-class-names.js'
-import { RUNTIME_CSS_VARIABLES } from './runtime-css-variables.js'
 
 const PLATFORM_CLASSES = new Set(['navbar-link'])
 const PLATFORM_IDS = new Set(['footer', 'navbar', 'sidebar'])
@@ -17,7 +16,7 @@ const PLATFORM_CLASS_PREFIX = /^(?:mintlify[-_]|fern[-_]|docusaurus[-_]|theme-do
 const SHARED_THEME_CLASSES = new Set(['dark', 'light'])
 // Framework utility selectors are unsafe global targets even when the same
 // utility happens to occur in an authored example elsewhere in the site.
-export const UTILITY_CLASS = /^(?:[mp][trblxy]?|w|h|min-w|max-w|min-h|max-h|text|bg|border|rounded|flex|grid|gap|space-[xy]|items|justify|overflow|truncate|hidden|block|inline|relative|absolute|sticky|z|opacity)-/
+const UTILITY_CLASS = /^(?:[mp][trblxy]?|w|h|min-w|max-w|min-h|max-h|text|bg|border|rounded|flex|grid|gap|space-[xy]|items|justify|overflow|truncate|hidden|block|inline|relative|absolute|sticky|z|opacity)-/
 
 function withoutFencedCode(content: string): string {
   let fence: { marker: string; length: number } | undefined
@@ -121,26 +120,61 @@ export function authoredStyleNames(contents: ReadonlyArray<string>, modules: Rea
   return { ...names, ids }
 }
 
+/**
+ * The element that wraps a page's rendered content in the Thally runtime (`Prose`, src/components/mdx/prose.tsx), as the released runtime
+ * does too. The navbar, sidebar, table of contents, breadcrumbs, pagination, search and footer are never inside it, so a rule that can
+ * only match inside it cannot restyle them, whatever classes, ids or variables the site shares with the runtime.
+ */
+export const CONTENT_CONTAINER = '.thally-docs-prose'
+const SCOPE = `:where(${CONTENT_CONTAINER})`
+
+/** A compound that can only be the page root or an ancestor of everything on the page: `html`, `body`, `:root`, `.dark`, `.light`, or `:is()` of those. */
+function isPageRoot(compound: ReadonlyArray<selectorParser.Node>): boolean {
+  if (compound.some((node) => (node.type === 'tag' && /^(?:html|body)$/i.test(node.value)) || (node.type === 'pseudo' && node.value === ':root'))) return true
+  const [only] = compound
+  if (compound.length === 1 && only.type === 'pseudo' && /^:(?:is|where)$/i.test(only.value)) {
+    return only.nodes.length > 0 && only.nodes.every((inner) => !inner.nodes.some((node) => node.type === 'combinator') && isPageRoot(inner.nodes))
+  }
+  return compound.length > 0 && compound.every((node) => node.type === 'class' && SHARED_THEME_CLASSES.has(node.value))
+}
+
+/**
+ * `selector` as a selector that matches only inside the page content, or undefined when it styles the page (`html.x`, `body > .x`)
+ * instead of anything inside it. A leading `html`, `body`, `:root` or theme class stays where it is, above the container.
+ */
+function confine(selector: selectorParser.Selector): string | undefined {
+  const nodes = selector.nodes as Array<selectorParser.Node>
+  let at = 0
+  for (;;) {
+    let end = at
+    while (end < nodes.length && nodes[end].type !== 'combinator') end += 1
+    if (!isPageRoot(nodes.slice(at, end))) break
+    // The content is a descendant of the root: what follows must be too, or the rule is about the page, not the content.
+    if (end === nodes.length || nodes[end].toString().trim() !== '') return undefined
+    at = end + 1
+  }
+  return `${nodes.slice(0, at).join('')}${SCOPE} ${nodes.slice(at).join('').trimStart()}`.trim()
+}
+
 /** The selector of a block that holds a theme's design tokens: `:root` and `html` for light, and `.dark` (or `html.dark`) for dark. */
 const THEME_SELECTOR = /^(?::root|html)(?:\.(?:dark|light))?$|^\.(?:dark|light)$/
 
 export interface StyleProjection {
   css: string
+  /** Selectors left out: platform or unreferenced markup, and the page itself (`html.x`), which no content container holds. */
   omittedSelectors: number
-  /** Custom properties left out of a theme block: names the Thally runtime defines itself, and names no imported rule reads. */
-  skippedVariables: { runtime: Array<string>; unused: Array<string> }
+  /** Custom properties left out of a theme block because no imported rule reads them. */
+  skippedVariables: Array<string>
   /** Declarations left out of a theme block that are not custom properties (`:root { background: ... }`): they would restyle the page. */
   skippedThemeDeclarations: number
-  /** Classes the Thally runtime uses itself, which a rule the site would otherwise keep selects: the rule is left out. */
-  skippedRuntimeClasses: Array<string>
 }
 
 /**
  * Remove platform DOM selectors while preserving CSS for authored widgets. `modules` are the component modules and scripts, whose
- * strings count as class names. A theme block (`:root`, `.dark`) keeps only the custom properties that an imported rule reads, directly
- * or through another kept property, and that the Thally runtime does not define itself: nothing else in it is taken. A rule that
- * selects a class the Thally runtime uses itself is never kept, however the site comes to use that class too, unless that class sits on
- * the same element as a class the site built: the rule then styles only the site's own element.
+ * strings count as class names. Every rule kept is confined to the page content container (`CONTENT_CONTAINER`): the site's own
+ * classes, ids and variables can match nothing in the Thally shell, however they are spelled. A theme block (`:root`, `.dark`) keeps
+ * only the custom properties that an imported rule reads, directly or through another kept property, and declares them on that
+ * container, under `.dark` for the dark theme; nothing else in it is taken.
  */
 export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): StyleProjection {
   const names = authoredStyleNames(contents, modules)
@@ -148,27 +182,19 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     || [...names.prefixes].some((prefix) => name.startsWith(prefix)) || [...names.suffixes].some((suffix) => name.endsWith(suffix))
   const root = postcss.parse(css)
   let omittedSelectors = 0
-  let rewrittenSelectors = 0
-  const skippedRuntimeClasses = new Set<string>()
   const themeRules: Array<postcss.Rule> = []
   root.walkRules((rule) => {
     if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
     if (rule.selectors.every((part) => THEME_SELECTOR.test(part.trim()))) { themeRules.push(rule); return }
+    // A rule nested in another rule is read relative to it, so the rule it is in already confines it.
+    let nested = false
+    for (let ancestor: postcss.Node | undefined = rule.parent; ancestor; ancestor = ancestor.parent) if (ancestor.type === 'rule') nested = true
     const retained: Array<string> = []
     try {
       selectorParser((selectors) => {
         selectors.each((selector) => {
           let hasAuthoredAnchor = false
           let hasPlatformAnchor = false
-          // The runtime classes in the selector, and which compounds (runs between combinators) hold a class the site built itself.
-          const runtimeClasses: Array<{ name: string; compound: number }> = []
-          const anchored = new Set<number>()
-          const compoundOf = (node: selectorParser.Node): number => {
-            let outer = node
-            while (outer.parent && outer.parent !== selector) outer = outer.parent as selectorParser.Node
-            return (selector.nodes as Array<selectorParser.Node>).slice(0, (selector.nodes as Array<selectorParser.Node>).indexOf(outer))
-              .filter((sibling) => sibling.type === 'combinator').length
-          }
           selector.walk((node) => {
             // A class inside :not() or :has() does not constrain the element
             // being styled. Treating it as the only authored anchor could
@@ -182,11 +208,7 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
             if (node.type === 'class') {
               if (SHARED_THEME_CLASSES.has(node.value)) return
               if (PLATFORM_CLASSES.has(node.value) || PLATFORM_CLASS_PREFIX.test(node.value) || UTILITY_CLASS.test(node.value) || !isAuthoredClass(node.value)) hasPlatformAnchor = true
-              else {
-                if (RUNTIME_CLASS_NAMES.has(node.value)) runtimeClasses.push({ name: node.value, compound: compoundOf(node) })
-                else if (!isNestedInPseudo) anchored.add(compoundOf(node))
-                if (!isNestedInPseudo) hasAuthoredAnchor = true
-              }
+              else if (!isNestedInPseudo) hasAuthoredAnchor = true
             } else if (node.type === 'id') {
               if (PLATFORM_IDS.has(node.value) || !names.ids.has(node.value)) hasPlatformAnchor = true
               else if (!isNestedInPseudo) hasAuthoredAnchor = true
@@ -202,17 +224,11 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
               if (!alone) node.remove()
               else if (element && /^[a-z][a-z0-9]*$/.test(element)) node.replaceWith(selectorParser.tag({ value: element }))
               else hasPlatformAnchor = true
-              rewrittenSelectors += 1
             }
           })
-          // A runtime class beside one of the site's own on the same element picks out the site's element, as `.ifx-body.prose` does.
-          const unanchored = runtimeClasses.filter(({ compound }) => !anchored.has(compound))
-          if (hasAuthoredAnchor && !hasPlatformAnchor && unanchored.length === 0) retained.push(selector.toString())
-          else {
-            omittedSelectors += 1
-            // A rule the site would have kept, but that would restyle the Thally interface as well: said, not dropped quietly.
-            if (hasAuthoredAnchor && !hasPlatformAnchor) unanchored.forEach(({ name }) => skippedRuntimeClasses.add(name))
-          }
+          const confined = hasAuthoredAnchor && !hasPlatformAnchor ? (nested ? selector.toString() : confine(selector)) : undefined
+          if (confined === undefined) omittedSelectors += 1
+          else retained.push(confined)
         })
       }).processSync(rule.selector)
     } catch {
@@ -226,39 +242,33 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   const read = new Set<string>()
   const readIn = (value: string): void => { for (const match of value.matchAll(/var\(\s*(--[\w-]+)/g)) read.add(match[1]) }
   root.walkDecls((decl) => { if (!decl.parent || !themes.has(decl.parent as postcss.Rule)) readIn(decl.value) })
-  const isKept = (decl: postcss.Declaration): boolean => decl.prop.startsWith('--') && !RUNTIME_CSS_VARIABLES.has(decl.prop) && read.has(decl.prop)
+  const isKept = (decl: postcss.Declaration): boolean => decl.prop.startsWith('--') && read.has(decl.prop)
   for (let grew = true; grew;) {
     const before = read.size
     for (const rule of themeRules) rule.each((node) => { if (node.type === 'decl' && isKept(node)) readIn(node.value) })
     grew = read.size > before
   }
-  const skippedVariables = { runtime: new Set<string>(), unused: new Set<string>() }
+  const skippedVariables = new Set<string>()
   let skippedThemeDeclarations = 0
   for (const rule of themeRules) {
     const dropped = rule.nodes.filter((node): node is postcss.Declaration => node.type === 'decl' && !isKept(node))
     for (const decl of dropped) {
-      if (!decl.prop.startsWith('--')) skippedThemeDeclarations += 1
-      else skippedVariables[RUNTIME_CSS_VARIABLES.has(decl.prop) ? 'runtime' : 'unused'].add(decl.prop)
+      if (decl.prop.startsWith('--')) skippedVariables.add(decl.prop)
+      else skippedThemeDeclarations += 1
       decl.remove()
     }
-    if (!rule.nodes.some((node) => node.type === 'decl')) {
+    if (rule.nodes.some((node) => node.type === 'decl')) rule.selectors = rule.selectors.map((part) => `${part.trim()} ${SCOPE}`)
+    else {
       omittedSelectors += rule.selectors.length
       rule.remove()
     }
   }
-  const changedTheme = skippedThemeDeclarations > 0 || skippedVariables.runtime.size > 0 || skippedVariables.unused.size > 0
   const hasStyleRule = (nodes: postcss.ChildNode[] | undefined): boolean => Boolean(nodes?.some((node) =>
     node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node.nodes))))
   root.walkAtRules((rule) => {
     if (rule.name === 'font-face' || rule.name === 'property') return
     if (!hasStyleRule(rule.nodes)) rule.remove()
   })
-  const skipped = {
-    skippedVariables: { runtime: [...skippedVariables.runtime], unused: [...skippedVariables.unused] },
-    skippedThemeDeclarations,
-    skippedRuntimeClasses: [...skippedRuntimeClasses].sort(),
-  }
-  if (omittedSelectors === 0 && rewrittenSelectors === 0 && !changedTheme) return { css, omittedSelectors, ...skipped }
   root.walkComments((comment) => { comment.remove() })
-  return { css: root.toString(), omittedSelectors, ...skipped }
+  return { css: root.toString(), omittedSelectors, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
 }
