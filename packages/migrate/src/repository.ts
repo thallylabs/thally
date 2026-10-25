@@ -5549,10 +5549,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           },
         }
       }
-      if (rootStyleProjection.omittedSelectors > 0) warnings.push({
+      const { omittedSelectors, omittedAtRules } = rootStyleProjection
+      if (omittedSelectors + omittedAtRules.length > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',
-        message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup, or the page itself (html, body) rather than its content. Recreate any intentional shell customization with Thally configuration.`,
+        message: `Skipped ${[
+          omittedSelectors ? `${omittedSelectors} stylesheet selector${omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup, or the page itself (html, body) rather than its content` : '',
+          omittedAtRules.length ? `${omittedAtRules.length} at-rule${omittedAtRules.length === 1 ? '' : 's'} (${omittedAtRules.slice(0, 5).join(', ')}${omittedAtRules.length > 5 ? `, and ${omittedAtRules.length - 5} more` : ''}) that no kept rule uses or that apply to the whole page` : '',
+        ].filter(Boolean).join(' and ')}. Recreate any intentional shell customization with Thally configuration.`,
       })
       if (rootStyleProjection.omittedNestedRules > 0) warnings.push({
         code: 'unsupported-config',

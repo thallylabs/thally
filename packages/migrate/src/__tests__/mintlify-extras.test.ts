@@ -1017,6 +1017,17 @@ describe('custom stylesheet migration', () => {
     expect(String(sheet?.content)).toContain(`animation: src-${prefix}-spin 1s`)
   })
 
+  it('counts the at-rules it left out in the same warning as the selectors', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
+      'a.mdx': '---\ntitle: A\n---\n\n<div className="widget">Hi</div>\n',
+      'style.css': '@page { margin: 0 }\n@counter-style unused { system: cyclic; symbols: "a" }\n#navbar { color: red }\n.widget { color: red }\n',
+    })
+    const warnings = cssWarnings(bundle)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/Skipped 1 stylesheet selector .* and 2 at-rules \(@page, @counter-style unused\)/)
+  })
+
   it('does not warn when there is no stylesheet', () => {
     expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })

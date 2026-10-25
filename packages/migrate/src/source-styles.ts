@@ -183,6 +183,8 @@ export interface StyleProjection {
   css: string
   /** Selectors left out: platform or unreferenced markup, and the page itself (`html.x`), which no content container holds. */
   omittedSelectors: number
+  /** At-rules left out that hold no style rule (`@page`, an unreferenced `@counter-style`): they apply to the whole page, or are used by nothing kept. */
+  omittedAtRules: Array<string>
   /** Rules written inside another rule (CSS nesting) that were left out: read relative to what they are in, they can match outside the content. */
   omittedNestedRules: number
   /** Custom properties whose `@property` registration was left out: it applies to the whole page, so it could change a property the shell uses. */
@@ -211,6 +213,9 @@ function renameWords(value: string, names: ReadonlyMap<string, string>): string 
     return token
   })
 }
+
+/** At-rules that hold other rules, so one left empty is what its rules' removal made it, and ones whose removal is not worth a mention. */
+const UNCOUNTED_AT_RULES = /^(?:media|supports|container|scope|starting-style|charset|(?:-[a-z]+-)?keyframes)$/i
 
 /** Whether `node` is written inside a rule, directly or through a condition (`.a { @media (...) { .b {} } }`). */
 function isInRule(node: postcss.Node): boolean {
@@ -329,10 +334,30 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   // or a bare statement (`@layer a, b;`), sets the order its rules and the shell's compete in, so it stays whatever it holds.
   const hasStyleRule = (atRule: postcss.AtRule): boolean => atRule.name.toLowerCase() === 'layer' || Boolean(atRule.nodes?.some((node) =>
     node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node)) || (node.type === 'decl' && isInRule(atRule))))
+  // A counter style or font palette is used by name, so a kept rule that names one needs its definition, and a definition may name another
+  // (`fallback`, `system: extends`). Any word in a kept declaration counts as a name: keeping one too many does no harm.
+  const definitions = new Set<postcss.AtRule>()
+  root.walkAtRules(/^(?:counter-style|font-palette-values)$/i, (rule) => { definitions.add(rule) })
+  const named = new Set<string>()
+  const nameWords = (decl: postcss.Declaration): void => { for (const [word] of decl.value.matchAll(/[^\s,()"']+/g)) named.add(word.toLowerCase()) }
+  root.walkDecls((decl) => { if (!definitions.has(decl.parent as postcss.AtRule)) nameWords(decl) })
+  for (let grew = true; grew;) {
+    const before = named.size
+    for (const rule of definitions) if (named.has(rule.params.trim().toLowerCase())) rule.walkDecls(nameWords)
+    grew = named.size > before
+  }
+  const omittedAtRules: Array<string> = []
+  const describe = (rule: postcss.AtRule): string => `@${rule.name}${rule.params ? ` ${rule.params}` : ''}`
   const skippedProperties: Array<string> = []
   root.walkAtRules((rule) => {
     const name = rule.name.toLowerCase()
     if (name === 'font-face') return
+    if (definitions.has(rule)) {
+      if (named.has(rule.params.trim().toLowerCase())) return
+      omittedAtRules.push(describe(rule))
+      rule.remove()
+      return
+    }
     if (name === 'property') {
       // A registration applies to the whole page, so it must be for a name the shell cannot be using: one a kept rule reads, and whose
       // first word (`--ifx-` in `--ifx-glow`) is one the site's own theme blocks use for its properties too.
@@ -343,7 +368,9 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
       rule.remove()
       return
     }
-    if (!hasStyleRule(rule)) rule.remove()
+    if (hasStyleRule(rule)) return
+    if (!UNCOUNTED_AT_RULES.test(rule.name)) omittedAtRules.push(describe(rule))
+    rule.remove()
   })
   const keyframes = new Map<string, string>()
   root.walkAtRules(/^(?:-[a-z]+-)?keyframes$/i, (rule) => {
@@ -358,5 +385,5 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     if (/^(?:-[a-z]+-)?animation(?:-name)?$/i.test(decl.prop) || decl.prop.startsWith('--')) decl.value = renameWords(decl.value, keyframes)
   })
   root.walkComments((comment) => { comment.remove() })
-  return { css: root.toString(), omittedSelectors, omittedNestedRules, skippedProperties, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
+  return { css: root.toString(), omittedSelectors, omittedAtRules, omittedNestedRules, skippedProperties, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
 }

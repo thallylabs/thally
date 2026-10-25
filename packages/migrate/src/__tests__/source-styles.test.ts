@@ -313,3 +313,39 @@ describe('keyframes names', () => {
     expect([...projected.matchAll(/@keyframes\s+([^\s{]+)/g)].map((match) => match[1])).not.toContain('spin')
   })
 })
+
+describe('the definitions a kept rule names (@counter-style, @font-palette-values)', () => {
+  const counter = (name: string, body = 'system: cyclic; symbols: "a" "b"; suffix: " ";') => `@counter-style ${name} { ${body} }`
+  const palette = (name: string) => `@font-palette-values ${name} { font-family: Site; base-palette: 1; }`
+
+  it('are kept when a kept rule names them, so the reference does not point at nothing', () => {
+    const css = `${counter('ifx-roman')}\n${palette('--ifx-pal')}\n.ifx-a li { list-style: ifx-roman inside; }\n.ifx-a b { font-palette: --ifx-pal; }`
+    const result = project(css)
+    expect(text(result.css)).toContain('@counter-style ifx-roman { system: cyclic; symbols: "a" "b"; suffix: " "; }')
+    expect(text(result.css)).toContain('@font-palette-values --ifx-pal { font-family: Site; base-palette: 1; }')
+    expect(result.omittedAtRules).toEqual([])
+  })
+
+  it('are kept when a kept rule names them through counter(), and when another kept definition does', () => {
+    const css = `${counter('ifx-a-style', 'system: extends ifx-b-style; suffix: ") ";')}\n${counter('ifx-b-style')}\n${counter('ifx-c-style')}\n.ifx-a li::marker { content: counter(item, ifx-a-style); }`
+    const result = project(css)
+    expect(text(result.css)).toContain('@counter-style ifx-a-style {')
+    expect(text(result.css)).toContain('@counter-style ifx-b-style {')
+    expect(text(result.css)).not.toContain('ifx-c-style')
+    expect(result.omittedAtRules).toEqual(['@counter-style ifx-c-style'])
+  })
+
+  it('are left out and counted when no kept rule names them', () => {
+    const css = `${counter('ifx-roman')}\n${palette('--ifx-pal')}\n.ifx-a { color: red; }\n#navbar { list-style: ifx-roman; font-palette: --ifx-pal; }`
+    const result = project(css)
+    expect(text(result.css)).toBe(`${SCOPE} .ifx-a { color: red; }`)
+    expect(result.omittedAtRules).toEqual(['@counter-style ifx-roman', '@font-palette-values --ifx-pal'])
+  })
+
+  it('are not the only at-rules left out: any other that holds no style rule is counted, apart from @charset', () => {
+    const css = '@charset "utf-8";\n@page { margin: 1cm; }\n@view-transition { navigation: auto; }\n@namespace svg url(http://www.w3.org/2000/svg);\n@media print { #navbar { color: red; } }\n.ifx-a { color: red; }'
+    const result = project(css)
+    expect(text(result.css)).toBe(`${SCOPE} .ifx-a { color: red; }`)
+    expect(result.omittedAtRules).toEqual(['@page', '@view-transition', '@namespace svg url(http://www.w3.org/2000/svg)'])
+  })
+})
