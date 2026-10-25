@@ -55,14 +55,20 @@ export function navbarLinkButtons(css: string): Array<{ href: string; exact: boo
   return buttons
 }
 
+/** The least a family's name (`ifx-card` in `ifx-card--`) may be to speak for every class that starts with it. */
+const MIN_FAMILY_NAME = 3
+
 /** What a string says about the classes it names: whole names, the starts of names a template or a sum finishes, and the modifiers it adds. */
 interface ClassNames { classes: Set<string>; prefixes: Set<string>; suffixes: Set<string> }
 
 /**
- * Read class names off a string's text, where `\0` stands for a value the code fills in. A name that ends in `-` or `_`, or that a value
- * follows (`ifx-card--${kind}`, `ifx-card${wide ? " wide" : ""}`), is the start of names as well as a name. A `--` or `__` suffix after a
- * value (`${base}--dim`) is a modifier added to any name. Outside a `className`, a bare word is as likely text as a class, so only a name
- * with a dash or an underscore in it counts (`anyWord` is true for a `className` value, where every word does).
+ * Read class names off a string's text, where `\0` stands for a value the code fills in. A name that ends in `-` or `_` is the start of
+ * a family (`ifx-card--${kind}`); it names the whole family only when it is long enough to be specific, since a short or bare start
+ * (`s${size}`) would admit the rules of any class that begins the same way. A name a value follows (`ifx-card${wide ? " wide" : ""}`)
+ * is that name when the value is empty, so it is taken as the name itself, and only when it reads as a name (it has a `-` or `_`).
+ * A `--` or `__` suffix after a value (`${base}--dim`) is a modifier added to any name. Outside a `className`, a bare word is as likely
+ * text as a class, so only a name with a dash or an underscore in it counts (`anyWord` is true for a `className` value, where every
+ * word does).
  */
 function addClassNames(text: string, into: ClassNames, anyWord: boolean): void {
   for (const token of text.split(/\s+/)) {
@@ -71,8 +77,9 @@ function addClassNames(text: string, into: ClassNames, anyWord: boolean): void {
     const tail = hole < 0 ? '' : token.slice(token.lastIndexOf('\0') + 1)
     if (/^(?:--|__)[\w-]+$/.test(tail)) into.suffixes.add(tail)
     if (!/^[A-Za-z_][\w-]*$/.test(head) || (!anyWord && !/[-_]/.test(head))) continue
-    if (!/[-_]$/.test(head)) into.classes.add(head)
-    if (hole >= 0 || /[-_]$/.test(head)) into.prefixes.add(head)
+    if (/[-_]$/.test(head)) {
+      if (head.replace(/[-_]+$/, '').length >= MIN_FAMILY_NAME) into.prefixes.add(head)
+    } else if (hole < 0 || /[-_]/.test(head)) into.classes.add(head)
   }
 }
 

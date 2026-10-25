@@ -176,3 +176,29 @@ describe('a paragraph selector written for Mintlify\'s [data-as] marker', () => 
     expect(text).not.toContain('color: red')
   })
 })
+
+describe('a class a template builds from a value', () => {
+  const component = (...classNames: Array<string>) => `export const Box = ({ x, size, kind }) => (\n  <div>\n${classNames.map((name) => `    <i className={${name}} />`).join('\n')}\n  </div>\n)\n`
+  const run = (names: Array<string>, css: string) => rules(migrate({ 'snippets/catalog.jsx': component(...names), 'style.css': css }).css)
+
+  it('admits no rule for a bare prefix with no family boundary, however short', () => {
+    // `s${size}` builds `s1`, `s2`: it says nothing about `.sticky`, which the Thally sidebar uses.
+    const text = run(['`s${size}`', '`btn${x}`'], '.sticky { display: none !important; }\n.s1 { color: red; }\n.btn-primary { color: blue; }\n.btnLarge { color: teal; }\n.btn { color: pink; }')
+    expect(text).toBe('')
+  })
+
+  it('admits the rules of a family only at a boundary long enough to name one', () => {
+    const css = '.btn-primary { color: blue; }\n.btnLarge { color: teal; }\n.a-b { color: red; }\n.ifx_row_cells { color: green; }\n.ifx-grid--wide { color: gold; }'
+    const text = run(['`btn-${x}`', '`a-${x}`', '`ifx_row_${x}`', '`ifx-grid--${kind}`'], css)
+    expect(text).toContain('.btn-primary {')
+    expect(text).toContain('.ifx_row_cells {')
+    expect(text).toContain('.ifx-grid--wide {')
+    expect(text).not.toMatch(/btnLarge|\.a-b/)
+  })
+
+  it('counts a name a value follows as that name only, when it reads as a name', () => {
+    const text = run(['`ifx-card${x}`'], '.ifx-card { color: blue; }\n.ifx-card-title { color: teal; }\n.ifx-cardinal { color: red; }\n.ifx-card--wide { color: gold; }')
+    expect(text).toContain('.ifx-card {')
+    expect(text).not.toMatch(/ifx-card-title|ifx-cardinal|ifx-card--wide/)
+  })
+})
