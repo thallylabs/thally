@@ -675,17 +675,28 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     }
   }
   /**
-   * `text` where the block expression `[start, end]` stood. That expression was a block of its own, so the lines it now touches are
-   * set off from `text` by a blank line, as it set them off: left as it is, a text or a JSX element would join the paragraph above
-   * or below it. A blank line stays as it is, and what leaves nothing leaves a blank line already.
+   * The edit that puts `text` where the block expression `[start, end]` stood. That expression was a block of its own, so the lines it now
+   * touches are set off from `text` by a blank line, as it set them off: left as it is, a text or a JSX element would join the paragraph
+   * above or below it. A blank line stays as it is, and what leaves nothing leaves a blank line already. A blank line the edit makes or
+   * leaves is empty, or is a quote's `>` alone: the indent of the container it is in is not needed on it, and would only trail.
    */
-  const asBlock = (text: string, start: number, end: number): string => {
+  const asBlock = (text: string, start: number, end: number): SourceEdit => {
     const above = body.slice(0, start).split('\n')
     const prefix = above.pop() ?? ''
     const touches = (line: string | undefined): boolean => line !== undefined && /[^\s>]/.test(line)
-    // The break is the blank line of the container the expression is in: a quote's `>`, a list item's indent, in the page's own line ending.
-    const gap = `${body.includes('\r\n') ? '\r\n' : '\n'}${prefix.replace(/[^ \t>]/g, ' ')}`
-    return text && `${touches(above.pop()) && /^[ \t>]*$/.test(prefix) ? gap : ''}${text}${touches(body.slice(end).split('\n', 2)[1]) ? gap : ''}`
+    const eol = body.includes('\r\n') ? '\r\n' : '\n'
+    // The blank line of the container the expression is in: a quote's `>`, a list item's indent, in the page's own line ending.
+    const blank = `${eol}${prefix.replace(/[^ \t>]/g, ' ').trimEnd()}`
+    const alone = /^[ \t>]*$/.test(prefix)
+    const before = text !== '' && alone && touches(above.pop())
+    // The line the expression stood on is a blank line when it leaves nothing, and the blank line above the text when `before`: its indent
+    // is part of the edit, so that it can go, and `before` puts it back on the line that takes the text.
+    const indent = alone && (before || text === '') ? prefix.length - prefix.trimEnd().length : 0
+    return {
+      start: start - indent,
+      end,
+      value: text && `${before ? `${eol}${prefix}` : ''}${text}${touches(body.slice(end).split('\n', 2)[1]) ? blank : ''}`,
+    }
   }
   /**
    * `jsx` as MDX content, bound. An expression in it that the binding made static (a child or an attribute, as in the page itself)
@@ -718,7 +729,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     const folded = foldStatic(expression, literals)
     if (!folded) return undefined
     const { value } = folded
-    const place = (text: string): SourceEdit => ({ start, end, value: flow ? asBlock(text, start, end) : text })
+    const place = (text: string): SourceEdit => flow ? asBlock(text, start, end) : { start, end, value: text }
     if (typeof value === 'object' && value !== null) return inAttribute ? undefined : place(keepJsx(value.jsx, bound, literals))
     if (inAttribute) return { start, end, value: `{${JSON.stringify(value)}}` }
     if (typeof value === 'boolean' || value === null || value === '') return place('')
@@ -746,7 +757,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         if (bound === undefined) {
           // Not a prop of this call, or the snippet's own name: it stays an expression.
         } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
-        else if (start !== undefined && end !== undefined) edits.push({ start, end, value: node.type === 'mdxFlowExpression' ? asBlock(bound, start, end) : bound })
+        else if (start !== undefined && end !== undefined) edits.push(node.type === 'mdxFlowExpression' ? asBlock(bound, start, end) : { start, end, value: bound })
       } else {
         const first = edits.length
         const literals = new Map<string, string>()

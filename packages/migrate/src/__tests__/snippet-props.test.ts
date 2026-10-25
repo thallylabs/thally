@@ -509,7 +509,7 @@ describe('a condition inside the JSX a folded condition keeps is decided too', (
       '  </MDX>',
       ')}',
     ].join('\n'))
-    expect(folded).toBe('<MDX>\n    Intro\n    \n    <b>yes</b>\n    \n    More\n  </MDX>')
+    expect(folded).toBe('<MDX>\n    Intro\n\n    <b>yes</b>\n\n    More\n  </MDX>')
   })
 })
 
@@ -549,5 +549,48 @@ describe('a nested fold keeps its block boundaries with CRLF line endings and in
     const lines = ['```js', 'const a = {mode}', '```', '', 'Mode {mode}']
     expect(bind(lines.join('\n'))).toBe('```js\nconst a = {mode}\n```\n\nMode x')
     expect(bind(lines.join('\r\n'))).toBe('```js\r\nconst a = {mode}\r\n```\r\n\r\nMode x')
+  })
+})
+
+describe('the blank lines set around a folded block carry no trailing whitespace', () => {
+  const props = new Map([['mode', 'x'], ['children', 'Inner text']])
+  const bind = (snippet: string) => bindSnippetProps(snippet, props)
+  const trailing = (text: string) => text.split(/\r?\n/).filter((line) => /[ \t]$/.test(line))
+  // Each form is the lines of a page with the block (`{children}` or a condition that folds to JSX) between a line of text above and below.
+  const forms: Array<[string, (block: string) => Array<string>, string]> = [
+    ['a JSX element', (block) => ['<Expandable title="Event">', '  <Note>', '    Before', `    ${block}`, '    After', '  </Note>', '</Expandable>'], 'root(mdxJsxFlowElement(mdxJsxFlowElement(paragraph paragraph paragraph)))'],
+    ['a JSX element, deep', (block) => ['<Expandable title="Event">', '  <Tab>', '    <Note>', '      <Step>', '        Before', `        ${block}`, '        After', '      </Step>', '    </Note>', '  </Tab>', '</Expandable>'], 'root(mdxJsxFlowElement(mdxJsxFlowElement(mdxJsxFlowElement(mdxJsxFlowElement(paragraph paragraph paragraph)))))'],
+    ['a JSX element indented with a tab', (block) => ['<Step>', '\tBefore', `\t${block}`, '\tAfter', '</Step>'], 'root(mdxJsxFlowElement(paragraph paragraph paragraph))'],
+    ['a list item', (block) => ['- Before', `  ${block}`, '  After'], 'root(list(listItem(paragraph paragraph paragraph)))'],
+    ['a list item that starts with it', (block) => [`- ${block}`, '  After'], 'root(list(listItem(paragraph paragraph)))'],
+    ['a quote', (block) => ['> Before', `> ${block}`, '> After'], 'root(blockquote(paragraph paragraph paragraph))'],
+    ['a quote in a quote', (block) => ['> > Before', `> > ${block}`, '> > After'], 'root(blockquote(blockquote(paragraph paragraph paragraph)))'],
+    ['a quote in a list item', (block) => ['- > Before', `  > ${block}`, '  > After'], 'root(list(listItem(blockquote(paragraph paragraph paragraph))))'],
+    ['a list item in a quote', (block) => ['> - Before', `>   ${block}`, '>   After'], 'root(blockquote(list(listItem(paragraph paragraph paragraph))))'],
+    ['no container', (block) => ['Before', block, 'After'], 'root(paragraph paragraph paragraph)'],
+  ]
+
+  for (const [name, lines, outline] of forms) {
+    for (const [block, label] of [['{children}', 'a lone {children}'], ['{mode === "x" && <span>yes</span>}', 'a condition folded to JSX']] as const) {
+      for (const [ending, eol] of [['LF', '\n'], ['CRLF', '\r\n']] as const) {
+        it(`${label} in ${name} (${ending})`, () => {
+          const folded = bind(lines(block).join(eol))
+          expect(trailing(folded), JSON.stringify(folded)).toEqual([])
+          expect(blocks(folded.replaceAll('\r\n', '\n'))).toBe(outline)
+          if (ending === 'CRLF') expect(folded).not.toMatch(/(?<!\r)\n/)
+        })
+      }
+    }
+  }
+
+  it.each([
+    ['a JSX element', ['<Note>', '  Before', '  {mode === "y" && <span>no</span>}', '  After', '</Note>'], 'root(mdxJsxFlowElement(paragraph paragraph))'],
+    ['a list item', ['- Before', '  {mode === "y" && <span>no</span>}', '  After'], 'root(list(listItem(paragraph paragraph)))'],
+    ['a quote', ['> Before', '> {mode === "y" && <span>no</span>}', '> After'], 'root(blockquote(paragraph paragraph))'],
+  ])('a branch that leaves nothing leaves an empty line in %s', (_name, lines, outline) => {
+    const folded = bind(lines.join('\n'))
+    expect(trailing(folded), JSON.stringify(folded)).toEqual([])
+    expect(folded).not.toContain('span')
+    expect(blocks(folded)).toBe(outline)
   })
 })
