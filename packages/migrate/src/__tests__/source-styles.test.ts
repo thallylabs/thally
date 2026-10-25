@@ -356,14 +356,38 @@ describe('the definitions a kept rule names (@counter-style, @font-palette-value
   })
 })
 
-describe('a stylesheet with thousands of references to follow', () => {
-  const MANY = 8000
+describe('a stylesheet with thousands of references to follow', { timeout: 60_000 }, () => {
   // A site's stylesheet can be large and every name in it may lead to the next, so the work has to grow with its size, not with its square.
-  const GENEROUS_MS = 2000
-  const timed = <T,>(run: () => T): { result: T; ms: number } => {
-    const start = performance.now()
-    const result = run()
-    return { result, ms: performance.now() - start }
+  // How long a run takes depends on the machine, so each test compares two sizes of the same input instead: four times the input takes about
+  // four times as long when the work is linear and about sixteen times as long when it is quadratic. That is counted in the processor time
+  // the run uses, which a busy machine does not stretch the way it stretches the time on the clock.
+  const SMALL = 1000
+  const LARGER_BY = 4
+  const LARGE = SMALL * LARGER_BY
+  const REPEATS = 9
+  const MOST_LINEAR_GROWTH = 9
+  const processorMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000 }
+  /**
+   * How many times longer the work `prepare` returns takes for `LARGER_BY` times `size` than for `size`. The input is built outside the
+   * timing, each size is taken at its fastest of several runs after one to warm up, and the runs alternate so a slow patch meets both sizes.
+   */
+  const growth = <T,>(prepare: (size: number) => () => T, size: number): { result: T; ratio: number } => {
+    const [small, large] = [prepare(size), prepare(size * LARGER_BY)]
+    const time = (work: () => T): { result: T; ms: number } => {
+      const start = processorMs()
+      const result = work()
+      return { result, ms: processorMs() - start }
+    }
+    time(small)
+    let [fastestSmall, fastestLarge] = [Infinity, Infinity]
+    let result!: T
+    for (let repeat = 0; repeat < REPEATS; repeat++) {
+      fastestSmall = Math.min(fastestSmall, time(small).ms)
+      const run = time(large)
+      fastestLarge = Math.min(fastestLarge, run.ms)
+      result = run.result
+    }
+    return { result, ratio: fastestLarge / fastestSmall }
   }
 
   it('follows a chain of custom properties declared in the opposite order to the one they are read in', () => {
@@ -373,10 +397,10 @@ describe('a stylesheet with thousands of references to follow', () => {
     expect(text(small.css)).toBe(`:root ${SCOPE} { --ifx-2: red; --ifx-1: var(--ifx-2); --ifx-0: var(--ifx-1); } ${SCOPE} .ifx-a { color: var(--ifx-0); }`)
     expect(small.skippedVariables).toEqual(['--ifx-unread'])
 
-    const { result, ms } = timed(() => project(css(MANY)))
-    expect(result.css.match(/--ifx-\d+:/g)).toHaveLength(MANY)
+    const { result, ratio } = growth((count) => { const input = css(count); return () => project(input) }, SMALL)
+    expect(result.css.match(/--ifx-\d+:/g)).toHaveLength(LARGE)
     expect(result.skippedVariables).toEqual(['--ifx-unread'])
-    expect(ms).toBeLessThan(GENEROUS_MS)
+    expect(ratio).toBeLessThan(MOST_LINEAR_GROWTH)
   })
 
   it('reads a custom property that names itself, or one that names another that names it, once', () => {
@@ -391,34 +415,38 @@ describe('a stylesheet with thousands of references to follow', () => {
     const small = project(css(3))
     expect(text(small.css)).toBe(`@counter-style ifx-c2 { system: extends ifx-c3; } @counter-style ifx-c1 { system: extends ifx-c2; } @counter-style ifx-c0 { system: extends ifx-c1; } ${SCOPE} .ifx-a li { list-style: ifx-c0; }`)
 
-    const { result, ms } = timed(() => project(css(MANY)))
-    expect(result.css.match(/@counter-style/g)).toHaveLength(MANY)
+    const { result, ratio } = growth((count) => { const input = css(count); return () => project(input) }, SMALL)
+    expect(result.css.match(/@counter-style/g)).toHaveLength(LARGE)
     expect(result.omittedAtRules).toEqual([])
-    expect(ms).toBeLessThan(GENEROUS_MS)
+    expect(ratio).toBeLessThan(MOST_LINEAR_GROWTH)
   })
 
   it('checks thousands of registered custom properties against thousands the theme blocks declare', () => {
-    const count = 12000
-    const own = Array.from({ length: count }, (_, i) => `--ifx-v${i}`)
-    const registered = Array.from({ length: count }, (_, i) => `--zz-v${i}`)
-    const css = `:root { ${own.map((name) => `${name}: red;`).join(' ')} }\n.ifx-a { --ifx-all: ${[...own, ...registered].map((name) => `var(${name})`).join(' ')}; }\n${[...own, ...registered].map((name) => `@property ${name} { syntax: "*"; inherits: false; }`).join('\n')}`
-    const { result, ms } = timed(() => project(css))
-    // The ones that share their first word with a property the site's theme declares stay, and the others are left out.
-    expect(result.css.match(/@property --ifx-/g)).toHaveLength(count)
-    expect(result.skippedProperties).toEqual(registered)
-    expect(ms).toBeLessThan(GENEROUS_MS)
+    const names = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => `${prefix}${i}`)
+    const foreign = names('--zz-p', 20)
+    // Eight theme properties to each registered one, and the one that shares its first word with the registered ones comes last: found only by passing every other.
+    const css = (count: number) => {
+      const [theme, own] = [names('--aaa-v', count * 8), names('--ifx-p', count)]
+      return `:root { ${theme.map((name) => `${name}: red;`).join(' ')} --ifx-x: red; }\n.ifx-a { --ifx-all: ${[...theme, '--ifx-x', ...own, ...foreign].map((name) => `var(${name})`).join(' ')}; }\n${[...own, ...foreign].map((name) => `@property ${name} { syntax: "*"; inherits: false; }`).join('\n')}`
+    }
+    const { result, ratio } = growth((count) => { const input = css(count); return () => project(input) }, SMALL)
+    // The registered properties that share their first word with one the site's theme declares stay, and the others are left out.
+    expect(result.css.match(/@property --ifx-p/g)).toHaveLength(LARGE)
+    expect(result.skippedProperties).toEqual(foreign)
+    expect(ratio).toBeLessThan(MOST_LINEAR_GROWTH)
   })
 
   it('matches thousands of class names against thousands of families and modifiers', () => {
-    const families = 25000
-    const selectors = 5000
-    // One template: each `ifx-cardN-${kind}` names a family of classes, and each `${base}--mN` a modifier.
-    const modules = [`export const classes = \`${Array.from({ length: families }, (_, i) => `ifx-card${i}-\${kind} \${base}--m${i}`).join(' ')}\``]
-    const css = Array.from({ length: selectors }, (_, i) => `.ifx-card${i}-wide { color: red; } .zzz${i}--m${i} { color: red; }`).join('\n') + '\n.zzz { color: red; }'
-    const { result, ms } = timed(() => projectAuthoredStyles(css, [], modules, 'src-test'))
-    expect(result.css.match(/\.ifx-card\d+-wide/g)).toHaveLength(selectors)
-    expect(result.css.match(/\.zzz\d+--m\d+/g)).toHaveLength(selectors)
+    // One template: each `ifx-cardN-${kind}` names a family of classes, and each `${base}--mN` a modifier. There are five of each to a selector.
+    const prepare = (selectors: number) => {
+      const modules = [`export const classes = \`${Array.from({ length: selectors * 5 }, (_, i) => `ifx-card${i}-\${kind} \${base}--m${i}`).join(' ')}\``]
+      const css = Array.from({ length: selectors }, (_, i) => `.ifx-card${i}-wide { color: red; } .zzz${i}--m${i} { color: red; }`).join('\n') + '\n.zzz { color: red; }'
+      return () => projectAuthoredStyles(css, [], modules, 'src-test')
+    }
+    const { result, ratio } = growth(prepare, SMALL)
+    expect(result.css.match(/\.ifx-card\d+-wide/g)).toHaveLength(LARGE)
+    expect(result.css.match(/\.zzz\d+--m\d+/g)).toHaveLength(LARGE)
     expect(result.omittedSelectors).toBe(1)
-    expect(ms).toBeLessThan(GENEROUS_MS)
+    expect(ratio).toBeLessThan(MOST_LINEAR_GROWTH)
   })
 })
