@@ -209,6 +209,18 @@ describe('migrateRepository with sourceRefs', () => {
     ]))
   })
 
+  it('names an asset over the Cloudflare limit by the mounted path it lands at, once', () => {
+    const repo = sdkRepo({ 'docs/overview.mdx': '---\ntitle: Overview\n---\n![demo](/images/demo.gif)\n' })
+    writeFileSync(join(repo, 'docs/images/demo.gif'), Buffer.alloc(26 * 1024 * 1024))
+    const imported = importSourceRef(MAPPING, repo)
+    const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+
+    expect(bundle.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/demo.gif')
+    const oversized = bundle.warnings.filter((warning) => warning.message.includes('Cloudflare'))
+    expect(oversized.map((warning) => warning.message)).toEqual([expect.stringMatching(/^1 asset file is larger than 25 MiB: public\/client-sdks\/typescript\/images\/demo\.gif\. /)])
+    expect(imported.warnings.some((warning) => warning.message.includes('Cloudflare'))).toBe(false)
+  })
+
   it('redirects a mounted page whose frontmatter url is another address, from its mounted path', () => {
     const imported = importSourceRef(MAPPING, sdkRepo({
       'docs/docs.json': JSON.stringify({ navigation: { pages: ['overview', 'github', { group: 'Community', pages: ['community/index', 'community/roadmap'] }] } }),

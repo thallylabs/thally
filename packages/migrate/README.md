@@ -387,13 +387,17 @@ asset files. Past that, files are kept in navigation order with the default
 version first, then pages not listed in navigation, and one warning counts and
 names (the first three of) the pages left out and suggests `--docs-dir` to
 migrate a smaller part of the repository. Scanning itself stops after 100,000
-files with its own warning. Individual assets over 25 MB, or beyond 500 MB in
-total, are not copied; one warning per reason gives the count, the first five
-paths, and the next step (copy them into `public/` manually). The budget is
-spent in order: the root stylesheet, the site's own scripts and fonts, and the
-files `docs.json` names (logo, favicon, background; a bare `logo.svg` counts
-like `/logo.svg`) first, then the assets pages
-use, then the rest, so a full budget never costs the site its branding.
+files with its own warning. An asset is not copied when it is over 25 MB and no
+page uses it, over 100 MB when a page does, or when the copied assets would pass
+500 MB in total; one warning per reason gives the count, the first five paths,
+and the next step (copy them into `public/` manually). The budget is spent in
+order: the root stylesheet, the site's own scripts and fonts, and the files
+`docs.json` names (logo, favicon, background; a bare `logo.svg` counts like
+`/logo.svg`) first, then the assets pages use, then the rest, so a full budget
+never costs the site its branding. Cloudflare, including Thally Cloud, serves a
+static file only up to 25 MiB (26,214,400 bytes), so a copied asset over that
+size gets its own warning: a Cloudflare deploy fails until it is made smaller
+(for example, an animated GIF converted to a video) or hosted elsewhere.
 
 Headings written with an explicit `{#custom-id}` become a preceding
 `<a id="custom-id"></a>` anchor and keep their text, so links to that id still

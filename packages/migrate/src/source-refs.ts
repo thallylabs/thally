@@ -11,7 +11,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync 
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { replaceOutsideCodeAndComments } from './mdx.js'
-import { migrateRepository } from './repository.js'
+import { isCloudflareAssetWarning, migrateRepository } from './repository.js'
 import type { MigrationAsset, MigrationDocsConfig, MigrationFetcher, MigrationNavigationGroup, MigrationPage, MigrationWarning, RenderedMigrationFile } from './types.js'
 import { defaultMigrationFetcher } from './url.js'
 
@@ -266,7 +266,8 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
     componentNamespace: mapping.mountPath,
   })
   const prefix = (message: string): string => `[${mapping.repo}] ${message}`
-  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(stripControlCharacters(withheldNotSaved(warning.message))), ...(warning.source ? { source: stripControlCharacters(warning.source) } : {}) }))
+  // The main migration lists oversized assets itself, once they are mounted and their paths are final.
+  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message) && !isCloudflareAssetWarning(warning)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(stripControlCharacters(withheldNotSaved(warning.message))), ...(warning.source ? { source: stripControlCharacters(warning.source) } : {}) }))
   if (bundle.warnings.length > MAX_FORWARDED_WARNINGS) {
     warnings.push({ code: 'unsupported-config', message: prefix(`${bundle.warnings.length - MAX_FORWARDED_WARNINGS} more migration warnings were omitted.`) })
   }

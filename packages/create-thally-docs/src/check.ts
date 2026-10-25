@@ -4,12 +4,16 @@
  * read-only unless the caller explicitly enables orphan-navigation fixes.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { compile, pathToRegexp, regexpToFunction, type Key } from 'path-to-regexp'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
+import remarkGfm from 'remark-gfm'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { readDocsJson, writeDocsJson, type DocsJsonConfig } from './docs-json.js'
 import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
@@ -124,6 +128,26 @@ function scanMdx(dir: string, results: string[]): void {
   }
 }
 
+/**
+ * The `.mdx` files the build compiles (scripts/lib/runtime-content-files.ts
+ * walks src/content and snippets): found without following a symbolic link,
+ * and only with the extension spelled `.mdx`. `scanMdx` is wider, so a file the
+ * build ignores (`page.MDX`, a link) must not fail the syntax check.
+ */
+function compiledMdx(directory: string, results: Set<string>): void {
+  let entries: Array<Dirent>
+  try {
+    entries = readdirSync(directory, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const fullPath = join(directory, entry.name)
+    if (entry.isDirectory()) compiledMdx(fullPath, results)
+    else if (entry.isFile() && entry.name.endsWith('.mdx')) results.add(fullPath)
+  }
+}
+
 function addOrphanToNav(projectDir: string, pageId: string): void {
   const config = readDocsJson(projectDir)
   const tab = config.tabs.find((candidate) => !candidate.href && !candidate.api
@@ -163,6 +187,24 @@ function forEachNonFencedLine(content: string, visit: (line: string, lineNumber:
   }
 }
 
+/**
+ * The parser the renderer reads a page with (src/lib/mdx-interpret.tsx and
+ * scripts/build-runtime-sources.mts): remark-parse and remark-mdx, then the
+ * site's remark plugin, remark-gfm. GFM is part of what parses: a URL such as
+ * `https://host/{id?}` is a link there, not an expression, and a `|` inside a
+ * table row splits the row's cells.
+ */
+const mdxParser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm)
+
+/**
+ * The snippet imports the renderer removes before it parses a page
+ * (scripts/build-runtime-sources.mts; src/data/get-doc.ts does the same when it
+ * renders). They matter to parsing: MDX reads an `import` line and the lines
+ * right after it as one block of JavaScript, so `import {A} from '/snippets/a'`
+ * directly above a heading only parses once it is removed.
+ */
+const SNIPPET_IMPORT = /^\s*import\s+\{([^}]+)\}\s+from\s+['"]\/snippets\/[^'"]+['"];?\s*$/gm
+
 /** A node of the MDX syntax tree, the one the renderer and the content parser read; JSX elements carry their tag name and attributes. */
 interface MdxNode {
   type: string
@@ -172,6 +214,78 @@ interface MdxNode {
   identifier?: string
   attributes?: Array<{ type: string; name?: string; value?: unknown }>
   children?: Array<MdxNode>
+  position?: { start: { offset?: number } }
+}
+
+/** What reading a page's body as MDX found: its syntax tree, or why it could not be read. */
+interface MdxPage {
+  tree?: MdxNode
+  /** The first line of the parser's reason, and the body line it stopped on. */
+  error?: { reason: string; line: number }
+  /** The body line of an offset in the parsed text, which has the snippet imports removed. */
+  lineAt: (offset: number) => number
+}
+
+/** One line break, as the MDX parser counts lines. */
+const LINE_BREAK = /\r\n|\r|\n/g
+
+/** How many entries of an ascending list are at most `value`. */
+function countAtMost(ascending: ReadonlyArray<number>, value: number): number {
+  let low = 0
+  let high = ascending.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (ascending[middle] <= value) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
+/**
+ * Parse a page body once, exactly as the renderer does: with the snippet
+ * imports removed first. Every reported line is a line of `content`, found in
+ * logarithmic time, since a page may ask for the line of thousands of steps.
+ */
+export function parseMdxPage(content: string): MdxPage {
+  // Where each removal sat in the parsed text, and the total removed once it was gone.
+  const removedAt: Array<number> = []
+  const removedTotal: Array<number> = []
+  let removed = 0
+  const source = content.replace(SNIPPET_IMPORT, (match: string, _names: string, start: number) => {
+    removedAt.push(start - removed)
+    removed += match.length
+    removedTotal.push(removed)
+    return ''
+  })
+  let newlines: Array<number> | undefined
+  const lineAt = (offset: number): number => {
+    const before = countAtMost(removedAt, offset)
+    const original = before === 0 ? offset : offset + removedTotal[before - 1]
+    if (!newlines) {
+      newlines = []
+      // Where each line break ends: `\r\n`, `\r` and `\n` are one break each, as the parser counts lines.
+      for (const lineBreak of content.matchAll(LINE_BREAK)) newlines.push(lineBreak.index + lineBreak[0].length - 1)
+    }
+    return 1 + countAtMost(newlines, original - 1)
+  }
+  try {
+    return { tree: mdxParser.parse(source) as unknown as MdxNode, lineAt }
+  } catch (error) {
+    const { reason, message, line, place } = error as {
+      reason?: string
+      message?: string
+      line?: number
+      place?: { offset?: number; start?: { offset?: number } }
+    }
+    const offset = place?.offset ?? place?.start?.offset
+    return {
+      error: {
+        reason: (reason ?? message ?? 'The page could not be parsed').split('\n')[0].replace(/\.$/, ''),
+        line: offset === undefined ? line ?? 1 : lineAt(offset),
+      },
+      lineAt,
+    }
+  }
 }
 
 /** A literal string attribute, as MDX decodes it; `null` for an expression, `undefined` when the attribute is absent. */
@@ -190,6 +304,22 @@ function constantAttribute(node: MdxNode, name: string): string | null | undefin
 
 /** A heading may hold a JSX comment with `#id` to keep an id its text would not slugify to; the same pattern as the renderer's heading pass. */
 const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
+
+/** The error to report for a page the parser could not read, with its line in the file; `consequence` says what the author loses. */
+function mdxSyntaxIssue(page: MdxPage, file: string, bodyLineOffset: number, consequence: string): LintIssue | null {
+  if (!page.error) return null
+  return {
+    severity: 'error',
+    message: `MDX syntax error: ${page.error.reason}. ${consequence}`,
+    file,
+    line: page.error.line + bodyLineOffset,
+  }
+}
+
+/** The lines of `raw` that come before `content`, which `parseFrontmatter` returns as the end of `raw`: the byte order mark and the frontmatter block. */
+function bodyLineOffset(raw: string, content: string): number {
+  return raw.slice(0, raw.length - content.length).split(LINE_BREAK).length - 1
+}
 
 /**
  * What the renderer's heading pass reads as a heading's text: plain text, inline
@@ -236,8 +366,9 @@ interface PageIds {
  * `@thallylabs/core`), since GFM turns a tight `a~b~c` in a heading into a
  * strikethrough and a footnote reference into a number, and so into another id.
  */
-function readPageIds(content: string): PageIds {
-  const tree = parseMdxTree(content) as unknown as MdxNode
+function readPageIds(content: string, parsed: MdxPage): PageIds {
+  // `parsed` is the page read once for the syntax check; a page MDX cannot read falls back to Markdown with GFM, as the content parser does.
+  const tree = parsed.tree ?? (parseMdxTree(content) as unknown as MdxNode)
   // A footnote reference renders as its number: the order the notes are first referenced in the page, outside the notes themselves.
   const footnotes = new Map<string, number>()
   const footnoteNumber = (identifier: string): number => {
@@ -294,7 +425,7 @@ function readPageIds(content: string): PageIds {
  * with a literal `id` attribute or legacy `<a name>`. Read from the syntax tree
  * like the renderer, so a heading's level, form and place agree with the page.
  */
-export function extractHeadingAnchors(content: string): Set<string> {
+export function extractHeadingAnchors(content: string, parsed: MdxPage = parseMdxPage(content)): Set<string> {
   const anchors = new Set<string>()
   forEachNonFencedLine(content, (line) => {
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
@@ -308,7 +439,7 @@ export function extractHeadingAnchors(content: string): Set<string> {
       if (name) anchors.add(name)
     }
   })
-  const page = readPageIds(content)
+  const page = readPageIds(content, parsed)
   const { ids, used } = numberHeadingIds(page.headings)
   for (const id of ids) if (id) anchors.add(id)
   for (const id of numberFieldIds(page.fieldBases, used, page.reserved)) anchors.add(id)
@@ -731,6 +862,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   const allFiles: string[] = []
   if (existsSync(contentDir)) scanMdx(contentDir, allFiles)
+  const compiledPages = new Set<string>()
+  compiledMdx(contentDir, compiledPages)
+  const compiledSnippets = new Set<string>()
+  compiledMdx(join(projectDir, 'snippets'), compiledSnippets)
 
   const fixedOrphans: string[] = []
   const operationPages: Array<{ file: string; reference: DocReference; hasDescription: boolean }> = []
@@ -754,7 +889,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       content = parsed.content
       // Links/anchors are found in `content` (frontmatter stripped); offset the
       // reported line numbers back to the raw file so CI annotations land right.
-      lineOffset = raw.slice(0, raw.indexOf(content)).split('\n').length - 1
+      lineOffset = bodyLineOffset(raw, content)
     } catch {
       issues.push({ severity: 'error', message: `Could not parse frontmatter`, file: relative(projectDir, filePath) })
       continue
@@ -793,13 +928,32 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
-    const anchors = extractHeadingAnchors(content)
+    const page = parseMdxPage(content)
+    // The renderer fails on a page its parser cannot read, and nothing else
+    // here would say so: the site would publish it and answer 500. Only a file
+    // the build compiles can fail it, whatever else this check reads.
+    const syntaxIssue = compiledPages.has(filePath) ? mdxSyntaxIssue(page, rel2, lineOffset, 'The page cannot render until this is fixed.') : null
+    if (syntaxIssue) issues.push(syntaxIssue)
+    const anchors = extractHeadingAnchors(content, page)
     validPaths.add(path)
     // The runtime accepts the explicit introduction slug as well as `/`.
     validPaths.add(`/${pageId}`)
     anchorsByPath.set(path, anchors)
     anchorsByPath.set(`/${pageId}`, anchors)
     linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), images: extractImageRefs(content), offset: lineOffset })
+  }
+
+  // The build compiles snippets as it does pages, and a page that uses a snippet
+  // MDX cannot read cannot render either.
+  for (const filePath of compiledSnippets) {
+    try {
+      const raw = readFileSync(filePath, 'utf8')
+      const { content } = parseFrontmatter(raw)
+      const issue = mdxSyntaxIssue(parseMdxPage(content), relative(projectDir, filePath), bodyLineOffset(raw, content), 'Pages that use this snippet cannot render until this is fixed.')
+      if (issue) issues.push(issue)
+    } catch {
+      // Unreadable, or frontmatter the build rejects for its own reason: nothing to say about its syntax.
+    }
   }
 
   // Reader routes fall back to the primary document when no translated file

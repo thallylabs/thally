@@ -3589,6 +3589,65 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.filter((warning) => warning.message.includes('asset file'))).toEqual([])
   })
 
+  it('warns once when a referenced asset copied to public/ is over the 25 MiB Cloudflare limit', () => {
+    const root = fixture()
+    for (const name of ['one', 'two']) {
+      writeFileSync(join(root, 'images', `${name}.gif`), Buffer.alloc(26 * 1024 * 1024))
+      writeFileSync(join(root, 'en', `${name}.mdx`), `---\ntitle: ${name}\n---\n\n![Demo](/images/${name}.gif)`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining(['images/one.gif', 'images/two.gif']))
+    const oversized = bundle.warnings.filter((warning) => warning.message.includes('Cloudflare'))
+    expect(oversized).toEqual([{
+      code: 'limit-reached',
+      message: '2 asset files are larger than 25 MiB: public/images/one.gif, public/images/two.gif. '
+        + 'Pages use them, so they were copied, but Cloudflare (including Thally Cloud) serves static files only up to 25 MiB, '
+        + 'so a Cloudflare deploy fails until each is made smaller (for example, convert an animated GIF to a video) or hosted elsewhere.',
+    }])
+    expect(bundle.warnings.filter((warning) => warning.message.includes('not copied'))).toEqual([])
+  }, 30_000)
+
+  it('does not warn about a referenced asset of exactly 25 MiB', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'limit.gif'), Buffer.alloc(26_214_400))
+    writeFileSync(join(root, 'en', 'limit.mdx'), '---\ntitle: Limit\n---\n\n![Demo](/images/limit.gif)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/limit.gif')
+    expect(bundle.warnings.filter((warning) => warning.message.includes('Cloudflare'))).toEqual([])
+  })
+
+  it('skips an unreferenced asset over the budget without also giving the Cloudflare warning', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'unused.gif'), Buffer.alloc(26 * 1024 * 1024))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/unused.gif')
+    expect(bundle.warnings.filter((warning) => warning.message.includes('asset file'))).toHaveLength(1)
+    expect(bundle.warnings.filter((warning) => warning.message.includes('Cloudflare'))).toEqual([])
+  })
+
+  it('warns about a Fern asset over the 25 MiB Cloudflare limit that a page references', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-cloudflare-limit-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'pages'), { recursive: true })
+    mkdirSync(join(fernRoot, 'assets'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Welcome\n    path: pages/welcome.mdx\n')
+    writeFileSync(join(fernRoot, 'pages', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\n![Demo](../assets/demo.gif)')
+    writeFileSync(join(fernRoot, 'assets', 'demo.gif'), Buffer.alloc(26 * 1024 * 1024))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).toContain('assets/demo.gif')
+    expect(bundle.warnings.filter((warning) => warning.message.includes('Cloudflare')).map((warning) => warning.message))
+      .toEqual([expect.stringMatching(/^1 asset file is larger than 25 MiB: public\/assets\/demo\.gif\. /)])
+  })
+
   it('reports many oversized assets in one warning with the count and the first five paths', () => {
     const root = fixture()
     for (let index = 0; index < 8; index++) writeFileSync(join(root, 'images', `big-${index}.png`), Buffer.alloc(26_000_000))
