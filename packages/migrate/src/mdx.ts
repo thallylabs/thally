@@ -515,11 +515,18 @@ interface EstreeNode {
   right?: EstreeNode
   argument?: EstreeNode
   test?: EstreeNode
+  expression?: EstreeNode
   consequent?: EstreeNode
   alternate?: EstreeNode
   value?: unknown
   regex?: unknown
   bigint?: unknown
+}
+
+/** The ESTree nodes directly under `node`. */
+function estreeChildren(node: EstreeNode): Array<EstreeNode> {
+  return Object.values(node).flatMap((child) => Array.isArray(child) ? child : [child])
+    .filter((entry): entry is EstreeNode => Boolean(entry) && typeof entry === 'object' && typeof entry.type === 'string')
 }
 
 /** What a fully static expression comes to: a primitive, or the JSX element or fragment it selects. */
@@ -632,11 +639,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   const bindFreeReferences = (program: acorn.Program, variables: boolean, literals: Map<string, string>): void => {
     const parents = new Map<unknown, EstreeNode>()
     const link = (node: EstreeNode): void => {
-      for (const child of Object.values(node)) {
-        for (const entry of Array.isArray(child) ? child : [child]) {
-          if (entry && typeof entry === 'object' && typeof entry.type === 'string') { parents.set(entry, node); link(entry) }
-        }
-      }
+      for (const child of estreeChildren(node)) { parents.set(child, node); link(child) }
     }
     link(program as unknown as EstreeNode)
     // The references that resolve to no declaration anywhere in the program. `ecmaVersion` is a number: anything else is read as ES5, which has no block scope.
@@ -684,24 +687,45 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     return text && `${touches(above.pop()) && /^[ \t>]*$/.test(prefix) ? gap : ''}${text}${touches(body.slice(end).split('\n', 2)[1]) ? gap : ''}`
   }
   /**
-   * The edit that puts the value of an expression whose props are bound where the expression stood, or undefined when anything
-   * in it is still left to run. A text expression becomes the JSX it selects as MDX content, plain text, or nothing; an
+   * `jsx` as MDX content, bound. An expression in it that the binding made static (a child or an attribute, as in the page itself)
+   * is decided in turn, and one that still has something to run, or that the page wrote static itself, stays as bound.
+   */
+  const keepJsx = (jsx: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>): string => {
+    const folds: Array<SourceEdit> = []
+    const within = (edit: SourceEdit, [from, to]: [number, number]): boolean => edit.start >= from && edit.end <= to
+    const walk = (node: EstreeNode, inAttribute: boolean): void => {
+      if (node.type !== 'JSXExpressionContainer') {
+        for (const child of estreeChildren(node)) walk(child, node.type === 'JSXAttribute')
+        return
+      }
+      const alone = /(?:^|\n)[ \t]*$/.test(body.slice(0, node.start)) && /^[ \t]*(?:\n|$)/.test(body.slice(node.end))
+      // A lone `{name}` is bound where it stands, as it is outside this JSX: it is not a condition.
+      const fold = node.expression && node.expression.type !== 'Identifier' && bound.some((edit) => within(edit, [node.start, node.end]))
+        ? foldExpression(node.expression, bound, literals, [node.start, node.end], inAttribute, alone && !inAttribute) : undefined
+      if (fold) folds.push(fold)
+    }
+    walk(jsx, false)
+    return applyEdits(body.slice(jsx.start, jsx.end), [...bound.filter((edit) => within(edit, [jsx.start, jsx.end]) && !folds.some((fold) => within(edit, [fold.start, fold.end]))), ...folds], jsx.start)
+  }
+  /**
+   * The edit that puts the value of `expression`, whose props are bound, where it stood at `[start, end]`, or undefined when
+   * anything in it is still left to run. A text expression becomes the JSX it selects as MDX content, plain text, or nothing; an
    * attribute's expression becomes a literal and is left alone when it selects JSX. A `flow` expression stays a block.
    */
-  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
-    const [statement] = program.body
-    const folded = program.body.length === 1 && statement.type === 'ExpressionStatement'
-      ? foldStatic(statement.expression as unknown as EstreeNode, literals) : undefined
+  const foldExpression = (expression: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+    const folded = foldStatic(expression, literals)
     if (!folded) return undefined
     const { value } = folded
     const place = (text: string): SourceEdit => ({ start, end, value: flow ? asBlock(text, start, end) : text })
-    if (typeof value === 'object' && value !== null) {
-      const { jsx } = value
-      return inAttribute ? undefined : place(applyEdits(body.slice(jsx.start, jsx.end), bound.filter((edit) => edit.start >= jsx.start && edit.end <= jsx.end), jsx.start))
-    }
+    if (typeof value === 'object' && value !== null) return inAttribute ? undefined : place(keepJsx(value.jsx, bound, literals))
     if (inAttribute) return { start, end, value: `{${JSON.stringify(value)}}` }
     if (typeof value === 'boolean' || value === null || value === '') return place('')
     return place(typeof value === 'string' && PLAIN_TEXT.test(value) ? value : `{${JSON.stringify(value)}}`)
+  }
+  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, span: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+    const [statement] = program.body
+    return program.body.length === 1 && statement.type === 'ExpressionStatement'
+      ? foldExpression(statement.expression as unknown as EstreeNode, bound, literals, span, inAttribute, flow) : undefined
   }
   /** `span` is where an attribute's value expression sits, which the value node itself does not say. */
   const visit = (value: unknown, span?: [number, number]): void => {

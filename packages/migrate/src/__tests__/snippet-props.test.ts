@@ -473,3 +473,41 @@ describe('a condition folded to content stays in the block it was in', () => {
     expect(blocks(folded)).toBe('root(paragraph paragraph paragraph)')
   })
 })
+
+describe('a condition inside the JSX a folded condition keeps is decided too', () => {
+  const bind = (snippet: string, props: Record<string, string> = { mode: 'x' }) => bindSnippetProps(snippet, new Map(Object.entries(props)))
+
+  it('decides a text expression in the children and one in an attribute', () => {
+    expect(bind('{mode === "x" && <span>{mode === "x" ? "yes" : "no"}</span>}')).toBe('<span>yes</span>')
+    expect(bind('{mode === "x" && <span title={mode === "x" ? "a" : "b"}>hi</span>}')).toBe('<span title={"a"}>hi</span>')
+    expect(bind('{mode === "x" && <span>{mode === "y" && <b>no</b>}</span>}')).toBe('<span></span>')
+  })
+
+  it('decides it again in the JSX a nested condition selects, and keeps a text expression inline', () => {
+    expect(bind('{mode === "x" && <p>Hi {mode === "x" && <b>there</b>}, {mode === "x" ? "friend" : "you"}.</p>}'))
+      .toBe('<p>Hi <b>there</b>, friend.</p>')
+    expect(bind('{mode === "x" && (<ul>{mode === "y" ? <li>a</li> : <li title={mode}>b</li>}</ul>)}')).toBe('<ul><li title={"x"}>b</li></ul>')
+  })
+
+  it('leaves what is not static, and what the page wrote static itself, as it is', () => {
+    expect(bind('export const later = "l"\n\n{mode === "x" && <span>{mode === "x" && later}</span>}'))
+      .toBe('export const later = "l"\n\n<span>{"x" === "x" && later}</span>')
+    expect(bind('{mode === "x" && <span>{true ? "kept" : "no"}</span>}')).toBe('<span>{true ? "kept" : "no"}</span>')
+    expect(bind('{mode === "x" && <Card icon={mode === "x" && <Icon />} />}')).toBe('<Card icon={"x" === "x" && <Icon />} />')
+    expect(bind('{mode === "x" && <span>{["a"].map((m) => <b key={m}>{mode === "x" ? "y" : "n"}</b>)}</span>}'))
+      .toBe('<span>{["a"].map((m) => <b key={m}>{"x" === "x" ? "y" : "n"}</b>)}</span>')
+  })
+
+  it('keeps a nested fold that is on a line of its own a block of its own', () => {
+    const folded = bind([
+      '{mode === "x" && (',
+      '  <MDX>',
+      '    Intro',
+      '    {mode === "x" && <b>yes</b>}',
+      '    More',
+      '  </MDX>',
+      ')}',
+    ].join('\n'))
+    expect(folded).toBe('<MDX>\n    Intro\n    \n    <b>yes</b>\n    \n    More\n  </MDX>')
+  })
+})
