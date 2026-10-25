@@ -126,7 +126,12 @@ export function authoredStyleNames(contents: ReadonlyArray<string>, modules: Rea
  * only match inside it cannot restyle them, whatever classes, ids or variables the site shares with the runtime.
  */
 export const CONTENT_CONTAINER = '.thally-docs-prose'
-const SCOPE = `:where(${CONTENT_CONTAINER})`
+/**
+ * A page in `mode: custom` is rendered with no such element, so the migration wraps its content in one that carries this attribute: it
+ * is part of the page, wherever the runtime puts the page, and holds nothing of the shell either.
+ */
+export const SOURCE_PAGE_ATTRIBUTE = 'data-thally-source-page'
+const SCOPE = `:where(${CONTENT_CONTAINER}, [${SOURCE_PAGE_ATTRIBUTE}])`
 
 /** A compound that can only be the page root or an ancestor of everything on the page: `html`, `body`, `:root`, `.dark`, `.light`, or `:is()` of those. */
 function isPageRoot(compound: ReadonlyArray<selectorParser.Node>): boolean {

@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
@@ -110,14 +111,14 @@ describe('stylesheet rules for the classes a copied component builds', () => {
     expect(text).toContain('.ifx-catalog {')
     expect(text).toContain('.ifx-card {')
     expect(text).toContain('.ifx-card--secrets {')
-    expect(text).toContain('.dark :where(.thally-docs-prose) .ifx-card--pam {')
+    expect(text).toContain('.dark :where(.thally-docs-prose, [data-thally-source-page]) .ifx-card--pam {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).toContain('.ifx-tag--new {')
     // A name a value follows (`ifx-tile${...}`), and a modifier added to a name held in a variable (`${base}--dim`).
     expect(text).toContain('.ifx-tile {')
     expect(text).toContain('.ifx-tile--wide {')
     expect(text).toContain('.ifx-tile:hover .ifx-tile__icon {')
-    expect(text).toContain(':where(.thally-docs-prose) .ifx-lane--dim, :where(.thally-docs-prose) .ifx-lane--focus {')
+    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-lane--dim, :where(.thally-docs-prose, [data-thally-source-page]) .ifx-lane--focus {')
     expect(text).not.toContain('.ifx-lane--hidden')
     expect(text).not.toContain('.ifx-never-built')
   })
@@ -138,8 +139,8 @@ describe('stylesheet rules for the classes a copied component builds', () => {
 describe('theme custom properties on :root and .dark', () => {
   it('keeps those some kept rule reads, directly or through another variable, in both themes', () => {
     const text = rules(migrate({}).css)
-    const root = /:root :where\(\.thally-docs-prose\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
-    const dark = /\.dark :where\(\.thally-docs-prose\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    const root = /:root :where\(\.thally-docs-prose, \[data-thally-source-page\]\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
+    const dark = /\.dark :where\(\.thally-docs-prose, \[data-thally-source-page\]\) \{([^}]*)\}/.exec(text)?.[1] ?? ''
     for (const name of ['--ifx-surface', '--ifx-line', '--ifx-card-bg', '--ifx-card-line', '--ifx-green', '--ifx-cat-secrets', '--ifx-cat-pam']) expect(root, name).toContain(`${name}:`)
     for (const name of ['--ifx-surface', '--ifx-line', '--ifx-green', '--ifx-cat-pam']) expect(dark, name).toContain(`${name}:`)
   })
@@ -170,8 +171,8 @@ describe('theme custom properties on :root and .dark', () => {
 describe('a paragraph selector written for Mintlify\'s [data-as] marker', () => {
   it('names the element the marker stands for, so no combinator is left dangling', () => {
     const text = rules(migrate({}).css)
-    expect(text).toContain(':where(.thally-docs-prose) .ifx-card__title p {')
-    expect(text).toContain(':where(.thally-docs-prose) .ifx-card__title ul + p, :where(.thally-docs-prose) .ifx-card__title ol + p {')
+    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title p {')
+    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ul + p, :where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ol + p {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).not.toMatch(/data-as|[+>~] ?[,{]|\s,/)
     // `[data-as]` with no element named has nothing to stand for: the rule is skipped, not applied to the whole ancestor.
@@ -209,17 +210,37 @@ describe('a variable the Thally runtime uses too', () => {
   it('is declared on the page content container only, so it cannot change the shell', () => {
     const { css } = migrate({ 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />', 'style.css': ':root { --thally-background: 0 0% 0%; --docs-line: red; }\n.dark { --docs-line: blue; }\n.ifx-catalog { background: hsl(var(--thally-background)); border-color: var(--docs-line); }' })
     const text = rules(css)
-    expect(text).toContain(':root :where(.thally-docs-prose) { --thally-background: 0 0% 0%; --docs-line: red; }')
-    expect(text).toContain('.dark :where(.thally-docs-prose) { --docs-line: blue; }')
+    expect(text).toContain(':root :where(.thally-docs-prose, [data-thally-source-page]) { --thally-background: 0 0% 0%; --docs-line: red; }')
+    expect(text).toContain('.dark :where(.thally-docs-prose, [data-thally-source-page]) { --docs-line: blue; }')
   })
 })
 
 describe('a page in custom mode', () => {
-  it('is said plainly not to get the rules, since Thally renders it without the content container', () => {
-    const custom = '---\ntitle: Landing\nmode: custom\n---\n\n<div className="ifx-catalog" />\n'
-    const { warnings, css } = migrate({ 'index.mdx': custom, 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />' })
-    expect(css).toContain('.ifx-catalog')
-    expect(warnings.join('\n')).toMatch(/1 page uses `mode: custom`.*do not apply there/)
-    expect(migrate({}).warnings.join('\n')).not.toContain('mode: custom')
+  const custom = (body: string) => `---\ntitle: Landing\nmode: custom\n---\n\n${body}\n`
+  const files = { 'snippets/catalog.jsx': 'export const Catalog = () => <div className="ifx-catalog" />' }
+  const indexBody = (bundle: ReturnType<typeof migrate>['bundle']) => bundle.pages[0].body
+
+  it('has its content wrapped in the element the kept rules are also confined to, since Thally renders it with no container', () => {
+    const { css, bundle, warnings } = migrate({
+      'index.mdx': custom('import { PROMPT } from "/snippets/prompt.js"\n\n<div className="ifx-catalog">{PROMPT}</div>\n\nSome text.'),
+      'snippets/prompt.js': 'export const PROMPT = "Hello"\n',
+    })
+    expect(rules(css)).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-catalog {')
+    // The imports stay where they were, above the wrapper.
+    expect(indexBody(bundle)).toMatch(/^import \{ PROMPT [^\n]*\n+<div data-thally-source-page>\n\n<div className="ifx-catalog">\{PROMPT\}<\/div>\n\nSome text\.\n\n<\/div>\n$/)
+    expect(warnings.join('\n')).not.toContain('mode: custom')
+    expect(() => compileSync(indexBody(bundle), { format: 'mdx' })).not.toThrow()
+  })
+
+  it('is left as it was, with a warning, when an export follows its content', () => {
+    const { bundle, warnings } = migrate({ ...files, 'index.mdx': custom('<div className="ifx-catalog" />\n\nexport const later = 1\n\n<b>{later}</b>') })
+    expect(indexBody(bundle)).not.toContain('data-thally-source-page')
+    expect(warnings.join('\n')).toMatch(/1 page uses `mode: custom`.*could not be given.*do not apply there/)
+  })
+
+  it('leaves a page in any other mode, and a site with no kept rule, as they were', () => {
+    expect(indexBody(migrate({}).bundle)).not.toContain('data-thally-source-page')
+    const none = migrate({ ...files, 'index.mdx': custom('<div className="plain" />'), 'style.css': '.mintlify-x { color: red; }' })
+    expect(indexBody(none.bundle)).not.toContain('data-thally-source-page')
   })
 })

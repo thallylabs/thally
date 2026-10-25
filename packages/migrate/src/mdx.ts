@@ -15,6 +15,7 @@ import { isThallyBuiltinComponent } from './builtin-components.js'
 import { pageScopeNames, unresolvedExpressionNames } from './inline-extraction.js'
 import { playgroundDisplay } from './mintlify-extras.js'
 import { parseFrontmatter } from './frontmatter.js'
+import { SOURCE_PAGE_ATTRIBUTE } from './source-styles.js'
 import { normalizeMintlifyCodeFences } from './fence-meta.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
 
@@ -2806,4 +2807,17 @@ function apiFrontmatter(
     else warn?.('The page\'s "authMethod" frontmatter is not one of bearer, basic, key, none and was dropped.')
   }
   return result
+}
+
+/**
+ * `body` with everything after its imports and exports wrapped in an element that carries `SOURCE_PAGE_ATTRIBUTE`, or undefined when
+ * there is nothing to wrap or the page cannot take a wrapper: an export that follows the content cannot sit inside an element.
+ */
+export function wrapPageContent(body: string): string | undefined {
+  let nodes: Array<MdxOffsetNode>
+  try { nodes = (descriptionParser.parse(body) as MdxOffsetNode).children ?? [] } catch { return undefined }
+  const first = nodes.findIndex((node) => node.type !== 'mdxjsEsm')
+  const start = first < 0 ? undefined : nodes[first].position?.start.offset
+  if (start === undefined || nodes.slice(first).some((node) => node.type === 'mdxjsEsm')) return undefined
+  return `${body.slice(0, start)}<div ${SOURCE_PAGE_ATTRIBUTE}>\n\n${body.slice(start).trimEnd()}\n\n</div>\n`
 }

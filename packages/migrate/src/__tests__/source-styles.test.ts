@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { projectAuthoredStyles } from '../source-styles.js'
 
-const SCOPE = ':where(.thally-docs-prose)'
+const SCOPE = ':where(.thally-docs-prose, [data-thally-source-page])'
 
 // A page as the runtime renders it: the shell (top bar, sidebar, breadcrumbs, pagination, table of contents, footer) around one content
 // container. Shell and content both carry classes and ids a site may reuse.
@@ -20,6 +20,7 @@ const page = `<html class="dark"><body>
   </div></article>
   <div class="not-prose"><nav class="pagination"></nav></div>
   <aside id="table-of-contents-content" class="thally-docs-toc"><nav></nav></aside>
+  <div lang="en"><div data-thally-source-page><div class="ifx-box"><svg class="lucide"></svg></div></div></div>
 </main>
 <footer class="thally-docs-footer"><nav></nav></footer>
 </body></html>`
@@ -32,7 +33,7 @@ function reach(css: string): { inside: number; outside: number } {
     if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
     for (const selector of rule.selectors) for (const element of $(selector.replace(/::?[\w-]+$/, '')).toArray()) reached.add(element)
   })
-  const outside = [...reached].filter((element) => $(element as never).closest('.thally-docs-prose').length === 0).length
+  const outside = [...reached].filter((element) => $(element as never).closest('.thally-docs-prose, [data-thally-source-page]').length === 0).length
   return { inside: reached.size - outside, outside }
 }
 
@@ -55,10 +56,11 @@ describe('a rule a site wrote for a name Thally uses too', () => {
     expect(reach(css).outside).toBe(0)
   })
 
-  it('still reaches the same markup inside the page content', () => {
-    expect(reach(project(rules[0], authored).css).inside).toBe(1)
+  it('still reaches the same markup inside the page content, and inside a custom-mode page', () => {
+    // One in the content container, one in the element a custom-mode page's content is wrapped in.
+    expect(reach(project(rules[0], authored).css).inside).toBe(2)
     expect(reach(project(rules[1], authored).css).inside).toBe(1)
-    expect(reach(project(rules[5], authored).css).inside).toBe(1)
+    expect(reach(project(rules[5], authored).css).inside).toBe(2)
   })
 })
 
@@ -132,9 +134,9 @@ describe('the theme blocks of a stylesheet', () => {
   })
 
   it('give the container its dark values under a dark page only', () => {
-    const dark = project(css).css.match(/\.dark :where\(\.thally-docs-prose\)/)![0]
+    const dark = project(css).css.match(/\.dark :where\([^)]*\)/)![0]
     const $ = cheerio.load(page)
-    expect($(dark).toArray().map((element) => $(element).attr('class'))).toEqual(['thally-docs-prose prose'])
+    expect($(dark).toArray().map((element) => $(element).attr('class') ?? 'data-thally-source-page')).toEqual(['thally-docs-prose prose', 'data-thally-source-page'])
     expect(cheerio.load(page.replace('<html class="dark">', '<html>'))(dark).length).toBe(0)
   })
 })

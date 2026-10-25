@@ -72,7 +72,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -5559,14 +5559,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           otherDeclarations ? `${otherDeclarations} other declaration${otherDeclarations === 1 ? '' : 's'} that would restyle the page itself` : '',
         ].filter(Boolean).join('; ')}. Recreate an intentional change with Thally configuration.`,
       })
-      // Thally renders a custom-mode page without the container every kept rule is confined to.
-      const customPages = pages.filter((page) => page.mode === 'custom' && !restrictedPages.has(page)).length
-      if (customPages > 0 && rootStyleProjection.css.trim()) warnings.push({
-        code: 'unsupported-config',
-        source: 'style.css',
-        message: `${customPages} page${customPages === 1 ? ' uses' : 's use'} \`mode: custom\`, which Thally renders without the page content container that every rule kept from style.css is confined to, so those rules do not apply there. Give the page another mode, or style it inline.`,
-      })
       if (rootStyleProjection.css.trim()) {
+        // Thally renders a custom-mode page with no content container, so the page brings its own for the kept rules to apply to.
+        let bare = 0
+        for (const page of pages.filter((candidate) => candidate.mode === 'custom')) {
+          const body = wrapPageContent(page.body)
+          if (body === undefined) bare += 1
+          else page.body = body
+        }
+        if (bare > 0) warnings.push({
+          code: 'unsupported-config',
+          source: 'style.css',
+          message: `${bare} page${bare === 1 ? ' uses' : 's use'} \`mode: custom\`, which Thally renders without a page content container, and could not be given one (it has no content, or an export follows its content), so the rules kept from style.css do not apply there. Move the export above the content, or style the page inline.`,
+        })
         const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
         const assetPath = `migrated/${identity}/style.css`
         const content = Buffer.from(rootStyleProjection.css)

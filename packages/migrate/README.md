@@ -746,24 +746,28 @@ by family only, so a warning says the file is not applied. Remote font URLs
 are not downloaded, and unsafe or missing paths are warned about.
 
 The root `style.css` is the exception to that: it is projected, and the
-projection is listed under `stylesheets`. It keeps the rules for markup the migrated site
-authors (a class or id in a page, a script, or a copied component, including a
-class a component builds from a template or a family name of at least three
-characters) and skips those for Mintlify's own markup, the global reset and
-utility classes. Every rule it keeps is confined to the element the Thally
-runtime renders a page's content in (`.thally-docs-prose`), so an imported
-stylesheet can never restyle the navbar, sidebar, table of contents,
-breadcrumbs, pagination, search or footer, whatever its classes, ids and
-variables are named: `.x p` becomes `:where(.thally-docs-prose) .x p`, and a
-leading `html`, `body`, `:root`, `.dark` or `.light` stays above the container
-(`.dark :where(.thally-docs-prose) .x p`). A selector for the page itself
-(`html.x`, `body > .x`) is skipped. `:root` and `.dark` blocks keep only the
-custom properties a kept rule reads, directly or through another kept property,
-and declare them on that container, so they reach the content and nothing
-around it; any other declaration in those blocks is left out. Keyframes and
-`@font-face` are kept as written. A warning counts what was skipped. A page in
-`mode: custom` is rendered without the container, so the kept rules do not
-reach it, and a warning says how many such pages there are.
+projection is listed under `stylesheets`. It keeps the rules for markup the
+migrated site authors (a class or id in a page, a script, or a copied component,
+including a class a component builds from a template or a family name of at
+least three characters) and skips those for Mintlify's own markup, the global
+reset and utility classes. Every rule it keeps is confined to the page content,
+so an imported stylesheet can never restyle the navbar, sidebar, table of
+contents, breadcrumbs, pagination, search or footer, whatever its classes, ids and
+variables are named. The content is the element the Thally runtime renders a
+page's content in (`.thally-docs-prose`), and `.x p` becomes
+`:where(.thally-docs-prose) .x p`; a leading `html`, `body`, `:root`, `.dark` or
+`.light` stays above it (`.dark :where(.thally-docs-prose) .x p`). A selector
+for the page itself (`html.x`, `body > .x`) is skipped. `:root` and `.dark`
+blocks keep only the custom properties a kept rule reads, directly or through
+another kept property, and declare them on that element, so they reach the
+content and nothing around it; any other declaration in those blocks is left
+out. Keyframes and `@font-face` are kept as written. A warning counts what was
+skipped. Thally renders a page in `mode: custom` with no such element, so the
+migration wraps that page's content (everything after its imports and exports)
+in `<div data-thally-source-page>`, and every rule is confined to that as well
+(`:where(.thally-docs-prose, [data-thally-source-page])`). A custom page that
+cannot take the wrapper (an export follows its content) is left as it was, and a
+warning says how many there are.
 
 Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 `type: github`) map to `navbar.links` and `navbar.primary`; `docs.json`
