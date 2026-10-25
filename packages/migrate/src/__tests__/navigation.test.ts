@@ -3,9 +3,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes'
-import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
-import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination'
+import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes.js'
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match.js'
+import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination.js'
 import { describe, expect, it } from 'vitest'
 import {
   addMintlifyDirectoryRedirects,
