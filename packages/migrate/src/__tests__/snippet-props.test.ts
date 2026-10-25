@@ -422,13 +422,14 @@ describe('a condition the binding has made fully static is decided at migration 
   })
 })
 
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
+type Node = { type: string; children?: Array<Node> }
+/** The block structure MDX reads out of `text`: containers by name with their blocks, a paragraph as one block. */
+const outline = (node: Node): string => ['root', 'blockquote', 'list', 'listItem', 'mdxJsxFlowElement'].includes(node.type)
+  ? `${node.type}(${(node.children ?? []).map(outline).join(' ')})` : node.type
+const blocks = (text: string) => outline(parser.parse(text) as Node)
+
 describe('a condition folded to content stays in the block it was in', () => {
-  const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
-  type Node = { type: string; children?: Array<Node> }
-  /** The block structure MDX reads out of `text`: containers by name with their blocks, a paragraph as one block. */
-  const outline = (node: Node): string => ['root', 'blockquote', 'list', 'listItem', 'mdxJsxFlowElement'].includes(node.type)
-    ? `${node.type}(${(node.children ?? []).map(outline).join(' ')})` : node.type
-  const blocks = (text: string) => outline(parser.parse(text) as Node)
   const bind = (snippet: string, props: Record<string, string> = { mode: 'x' }) => bindSnippetProps(snippet, new Map(Object.entries(props)))
 
   it('keeps a flow expression a block of its own when it folds to JSX', () => {
@@ -509,5 +510,44 @@ describe('a condition inside the JSX a folded condition keeps is decided too', (
       ')}',
     ].join('\n'))
     expect(folded).toBe('<MDX>\n    Intro\n    \n    <b>yes</b>\n    \n    More\n  </MDX>')
+  })
+})
+
+describe('a nested fold keeps its block boundaries with CRLF line endings and inside a quote', () => {
+  const bind = (snippet: string) => bindSnippetProps(snippet, new Map([['mode', 'x']]))
+  const one = ['{mode === "x" && <MDX>', '  Intro', '  {mode === "x" && <b>yes</b>}', '  More', '</MDX>}']
+  const two = [
+    '{mode === "x" && <MDX>', '  Outer', '  {mode === "x" && <MDX>', '    Inner', '    {mode === "x" && <b>deep</b>}', '    Tail', '  </MDX>}', '  End', '</MDX>}',
+  ]
+  const forms = (lines: Array<string>): Array<[string, string]> => [
+    ['LF', lines.join('\n')],
+    ['CRLF', lines.join('\r\n')],
+    ['a quote', lines.map((line) => `> ${line}`).join('\n')],
+    ['a quote with CRLF', lines.map((line) => `> ${line}`).join('\r\n')],
+  ]
+
+  for (const [name, lines] of [['one level', one], ['two levels', two]] as const) {
+    it(`reads ${name} as the same blocks as the LF page, with CRLF and in a quote`, () => {
+      const expected = blocks(bind(lines.join('\n')))
+      // The fold leaves the paragraphs of the element apart: three blocks around the nested JSX, not one paragraph.
+      expect(expected).toBe(name === 'one level'
+        ? 'root(mdxJsxFlowElement(paragraph paragraph paragraph))'
+        : 'root(mdxJsxFlowElement(paragraph mdxJsxFlowElement(paragraph paragraph paragraph) paragraph))')
+      for (const [form, source] of forms(lines)) {
+        const folded = bind(source)
+        expect(blocks(folded), form).toBe(form.includes('quote') ? `root(blockquote(${expected.slice('root('.length, -1)}))` : expected)
+        expect(folded, form).not.toMatch(/===|&&/)
+      }
+    })
+  }
+
+  it('keeps the page\'s own line ending in the break it adds', () => {
+    expect(bind(one.join('\r\n'))).not.toMatch(/(?<!\r)\n/)
+  })
+
+  it('still sees a fenced example as code, so its {name} is left alone', () => {
+    const lines = ['```js', 'const a = {mode}', '```', '', 'Mode {mode}']
+    expect(bind(lines.join('\n'))).toBe('```js\nconst a = {mode}\n```\n\nMode x')
+    expect(bind(lines.join('\r\n'))).toBe('```js\r\nconst a = {mode}\r\n```\r\n\r\nMode x')
   })
 })

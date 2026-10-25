@@ -682,8 +682,8 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     const above = body.slice(0, start).split('\n')
     const prefix = above.pop() ?? ''
     const touches = (line: string | undefined): boolean => line !== undefined && /[^\s>]/.test(line)
-    // The break is the blank line of the container the expression is in: a quote's `>`, a list item's indent.
-    const gap = `\n${prefix.replace(/[^ \t>]/g, ' ')}`
+    // The break is the blank line of the container the expression is in: a quote's `>`, a list item's indent, in the page's own line ending.
+    const gap = `${body.includes('\r\n') ? '\r\n' : '\n'}${prefix.replace(/[^ \t>]/g, ' ')}`
     return text && `${touches(above.pop()) && /^[ \t>]*$/.test(prefix) ? gap : ''}${text}${touches(body.slice(end).split('\n', 2)[1]) ? gap : ''}`
   }
   /**
@@ -698,7 +698,8 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         for (const child of estreeChildren(node)) walk(child, node.type === 'JSXAttribute')
         return
       }
-      const alone = /(?:^|\n)[ \t]*$/.test(body.slice(0, node.start)) && /^[ \t]*(?:\n|$)/.test(body.slice(node.end))
+      // On a line of its own, as `asBlock` reads it: after a quote's `>` or an indent, and before a line ending of either kind.
+      const alone = /(?:^|\n)[ \t>]*$/.test(body.slice(0, node.start)) && /^[ \t]*\r?(?:\n|$)/.test(body.slice(node.end))
       // A lone `{name}` is bound where it stands, as it is outside this JSX: it is not a condition.
       const fold = node.expression && node.expression.type !== 'Identifier' && bound.some((edit) => within(edit, [node.start, node.end]))
         ? foldExpression(node.expression, bound, literals, [node.start, node.end], inAttribute, alone && !inAttribute) : undefined
@@ -769,7 +770,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   for (const line of body.split('\n')) {
     const start = lineStart
     lineStart += line.length + 1
-    const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/)
+    const marker = line.match(/^\s*(`{3,}|~{3,})(.*?)\r?$/)
     if (marker) {
       // A fence closes on the same character, at least as long, with nothing after it: a shorter one or one with an info string is code.
       if (!fence) fence = marker[1]
