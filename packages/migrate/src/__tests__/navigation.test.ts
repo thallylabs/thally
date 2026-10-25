@@ -313,6 +313,58 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.navigation?.shortcuts).toEqual([{ label: 'Playground', href: 'https://example.com/play', icon: 'play' }])
   })
 
+  describe('global anchors shown once', () => {
+    const website = { anchor: 'Official Website', href: 'https://example.com' }
+    const blog = { anchor: 'Blog', href: 'https://blog.example.com' }
+    const docsTab = { tab: 'Docs', pages: ['introduction'] }
+
+    it('keeps a global anchor in the sidebar only, not the navbar', () => {
+      const result = projectMintlifyNavigation({ navigation: { global: { anchors: [website, blog] }, tabs: [docsTab] } })
+      expect(result.docsConfig.navigation?.shortcuts).toEqual([
+        { label: 'Official Website', href: 'https://example.com' },
+        { label: 'Blog', href: 'https://blog.example.com' },
+      ])
+      expect(result.docsConfig.navbar).toBeUndefined()
+    })
+
+    it('keeps an authored navbar link that matches a shortcut', () => {
+      const result = projectMintlifyNavigation({
+        navbar: { links: [{ label: 'Blog', href: 'https://blog.example.com' }] },
+        navigation: { global: { anchors: [website, blog] }, tabs: [docsTab] },
+      })
+      expect(result.docsConfig.navigation?.shortcuts).toHaveLength(2)
+      expect(result.docsConfig.navbar?.links).toEqual([{ label: 'Blog', href: 'https://blog.example.com' }])
+    })
+
+    it('still projects a global tab with an href as a navbar link', () => {
+      const result = projectMintlifyNavigation({
+        navigation: {
+          global: { anchors: [blog], tabs: [{ tab: 'Community', href: 'https://community.example.com' }] },
+          tabs: [docsTab],
+        },
+      })
+      expect(result.docsConfig.navigation?.shortcuts).toEqual([{ label: 'Blog', href: 'https://blog.example.com' }])
+      expect(result.docsConfig.navbar?.links).toEqual([{ label: 'Community', href: 'https://community.example.com' }])
+    })
+
+    it('shows language-level global anchors only as shortcuts', () => {
+      const result = projectMintlifyNavigation({ navigation: { languages: [{
+        language: 'en', default: true, global: { anchors: [website, blog] }, tabs: [docsTab],
+      }] } })
+      expect(result.docsConfig.navigation?.shortcuts).toHaveLength(2)
+      expect(result.docsConfig.navbar).toBeUndefined()
+    })
+
+    it('leaves root-level global anchors in the navbar when a language owns the shortcuts', () => {
+      const result = projectMintlifyNavigation({ navigation: {
+        global: { anchors: [{ anchor: 'Status', href: 'https://status.example.com' }] },
+        languages: [{ language: 'en', default: true, global: { anchors: [blog] }, tabs: [docsTab] }],
+      } })
+      expect(result.docsConfig.navigation?.shortcuts).toEqual([{ label: 'Blog', href: 'https://blog.example.com' }])
+      expect(result.docsConfig.navbar?.links).toEqual([{ label: 'Status', href: 'https://status.example.com' }])
+    })
+  })
+
   it('translates a trailing Mintlify wildcard redirect into a Next.js named catch-all', () => {
     const result = projectMintlifyNavigation({
       navigation: { pages: ['introduction'] },
