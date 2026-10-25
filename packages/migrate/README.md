@@ -757,7 +757,9 @@ variables are named. The content is the element the Thally runtime renders a
 page's content in (`.thally-docs-prose`), and `.x p` becomes
 `:where(.thally-docs-prose) .x p`; a leading `html`, `body`, `:root`, `.dark` or
 `.light` stays above it (`.dark :where(.thally-docs-prose) .x p`). A selector
-for the page itself (`html.x`, `body > .x`) is skipped. `:root` and `.dark`
+for the page itself (`html.x`, `body > .x`) is skipped, and so is one that starts
+with an `:is()` or `:where()` of which only some alternatives are the page
+(`:is(.dark, .x) .y`). `:root` and `.dark`
 blocks keep only the custom properties a kept rule reads, directly or through
 another kept property, and declare them on that element, so they reach the
 content and nothing around it; any other declaration in those blocks is left

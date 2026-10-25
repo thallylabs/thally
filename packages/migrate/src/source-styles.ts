@@ -133,19 +133,30 @@ export const CONTENT_CONTAINER = '.thally-docs-prose'
 export const SOURCE_PAGE_ATTRIBUTE = 'data-thally-source-page'
 const SCOPE = `:where(${CONTENT_CONTAINER}, [${SOURCE_PAGE_ATTRIBUTE}])`
 
+/** The alternatives of a compound that is a lone `:is()` or `:where()`, or none. */
+function alternativesOf(compound: ReadonlyArray<selectorParser.Node>): ReadonlyArray<selectorParser.Selector> {
+  const [only] = compound
+  return compound.length === 1 && only.type === 'pseudo' && /^:(?:is|where)$/i.test(only.value) ? only.nodes : []
+}
+
+/** An alternative of `:is()` that is a single page-root compound (`.dark`, `:root`), not a longer selector that merely starts at one. */
+function isPageRootAlternative(alternative: selectorParser.Selector): boolean {
+  return !alternative.nodes.some((node) => node.type === 'combinator') && isPageRoot(alternative.nodes)
+}
+
 /** A compound that can only be the page root or an ancestor of everything on the page: `html`, `body`, `:root`, `.dark`, `.light`, or `:is()` of those. */
 function isPageRoot(compound: ReadonlyArray<selectorParser.Node>): boolean {
-  if (compound.some((node) => (node.type === 'tag' && /^(?:html|body)$/i.test(node.value)) || (node.type === 'pseudo' && node.value === ':root'))) return true
-  const [only] = compound
-  if (compound.length === 1 && only.type === 'pseudo' && /^:(?:is|where)$/i.test(only.value)) {
-    return only.nodes.length > 0 && only.nodes.every((inner) => !inner.nodes.some((node) => node.type === 'combinator') && isPageRoot(inner.nodes))
-  }
+  if (compound.some((node) => (node.type === 'tag' && /^(?:html|body)$/i.test(node.value)) || (node.type === 'pseudo' && node.value.toLowerCase() === ':root'))) return true
+  const alternatives = alternativesOf(compound)
+  if (alternatives.length > 0) return alternatives.every(isPageRootAlternative)
   return compound.length > 0 && compound.every((node) => node.type === 'class' && SHARED_THEME_CLASSES.has(node.value))
 }
 
 /**
  * `selector` as a selector that matches only inside the page content, or undefined when it styles the page (`html.x`, `body > .x`)
- * instead of anything inside it. A leading `html`, `body`, `:root` or theme class stays where it is, above the container.
+ * instead of anything inside it. A leading `html`, `body`, `:root` or theme class stays where it is, above the container. What follows
+ * the container is read from inside it, so its alternatives (`:is(.x, :root)`) can only match there; a leading `:is()` is the exception,
+ * since the container goes before the alternatives that are the page and after the rest, and it cannot be both: such a selector is left out.
  */
 function confine(selector: selectorParser.Selector): string | undefined {
   const nodes = selector.nodes as Array<selectorParser.Node>
@@ -153,7 +164,11 @@ function confine(selector: selectorParser.Selector): string | undefined {
   for (;;) {
     let end = at
     while (end < nodes.length && nodes[end].type !== 'combinator') end += 1
-    if (!isPageRoot(nodes.slice(at, end))) break
+    const compound = nodes.slice(at, end)
+    if (!isPageRoot(compound)) {
+      if (alternativesOf(compound).some(isPageRootAlternative)) return undefined
+      break
+    }
     // The content is a descendant of the root: what follows must be too, or the rule is about the page, not the content.
     if (end === nodes.length || nodes[end].toString().trim() !== '') return undefined
     at = end + 1

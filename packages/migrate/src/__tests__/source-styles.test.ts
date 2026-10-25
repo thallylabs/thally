@@ -127,6 +127,40 @@ describe('the way a selector is confined', () => {
 
 })
 
+describe('a selector with alternatives', () => {
+  const authored = '<div className="ifx-box lucide not-prose" />'
+  const outside = [
+    ':is(.ifx-box, :root) .lucide',
+    ':where(:root, .ifx-box) > .lucide',
+    ':is(.ifx-box, html, body) ~ .not-prose',
+    '.ifx-box:is(:root, html) .lucide',
+    '.ifx-box:has(~ .not-prose, :root) .lucide',
+    '.ifx-box :is(:root, html, body, .ifx-box) .lucide',
+    '.ifx-box ~ :is(.not-prose, :root)',
+    ':is(.dark, .ifx-box) .lucide',
+    ':is(.light, .ifx-box) ~ .not-prose',
+    ':is(html, .ifx-box) + .not-prose',
+    ':not(:root) .ifx-box .lucide',
+  ]
+
+  it.each(outside)('%s cannot reach anything outside the page content', (selector) => {
+    expect(reach(project(`${selector} { display: none; }`, authored).css).outside).toBe(0)
+  })
+
+  it('skips a leading :is() or :where() that is the page for some alternatives and the content for others', () => {
+    for (const selector of [':is(.dark, .ifx-box) .lucide', ':where(html, .ifx-box) > .lucide', ':is(.light, :root, .ifx-box) ~ .lucide']) {
+      const result = project(`${selector} { display: none; }`, authored)
+      expect(result.css, selector).toBe('')
+      expect(result.omittedSelectors, selector).toBe(1)
+    }
+  })
+
+  it('keeps a leading :is() that is the page for every alternative, in any case', () => {
+    expect(text(project(':is(.dark, :ROOT, HTML) .ifx-box { color: red; }', authored).css)).toBe(`:is(.dark, :ROOT, HTML) ${SCOPE} .ifx-box { color: red; }`)
+    expect(text(project(':ROOT .ifx-box { color: red; }', authored).css)).toBe(`:ROOT ${SCOPE} .ifx-box { color: red; }`)
+  })
+})
+
 describe('CSS nesting', () => {
   const authored = '<div className="ifx-a ifx-b lucide not-prose" />'
   const bypasses = [
