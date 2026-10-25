@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { compileSync } from '@mdx-js/mdx'
+import { Window } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
@@ -171,12 +172,29 @@ describe('theme custom properties on :root and .dark', () => {
 describe('a paragraph selector written for Mintlify\'s [data-as] marker', () => {
   it('names the element the marker stands for, so no combinator is left dangling', () => {
     const text = rules(migrate({}).css)
-    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title p {')
-    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ul + p, :where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ol + p {')
+    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title p:not([class]) {')
+    expect(text).toContain(':where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ul + p:not([class]), :where(.thally-docs-prose, [data-thally-source-page]) .ifx-card__title ol + p:not([class]) {')
     expect(text).toContain('.ifx-card__title {')
     expect(text).not.toMatch(/data-as|[+>~] ?[,{]|\s,/)
     // `[data-as]` with no element named has nothing to stand for: the rule is skipped, not applied to the whole ancestor.
     expect(text).not.toContain('color: red')
+  })
+
+  it('stands for a Markdown paragraph, not for a paragraph a component renders with a class', () => {
+    // Mintlify marks the paragraphs MDX makes. Thally renders those as a plain `<p>`; a paragraph a site component draws carries its
+    // own class, and the rule written for Markdown text must not reach it.
+    const component = 'export const Picker = () => (\n  <div className="ifx-avsp__body">\n    <p className="ifx-avsp__step-desc">A step</p>\n  </div>\n)\n'
+    const { css } = migrate({
+      'snippets/catalog.jsx': component,
+      'index.mdx': '---\ntitle: Home\n---\n\nimport { Picker } from "/snippets/catalog.jsx"\n\n<Picker />\n',
+      'style.css': '.ifx-avsp__body [data-as="p"] { margin: 0 }\n.ifx-avsp__step-desc { margin: 4px 0 }',
+    })
+    const rule = /(:where\([^)]*\) \.ifx-avsp__body [^{]*)\{/.exec(rules(css))?.[1]?.trim()
+    expect(rule).toBeDefined()
+    const { document } = new Window()
+    document.body.innerHTML = '<div data-thally-source-page><div class="ifx-avsp__body"><p class="ifx-avsp__step-desc">A step</p><p>Markdown text</p></div></div>'
+    const matched = [...document.querySelectorAll(rule as string)].map((element) => element.textContent)
+    expect(matched).toEqual(['Markdown text'])
   })
 })
 

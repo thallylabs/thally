@@ -312,9 +312,15 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
               // element, which is named instead; beside a class or tag it is
               // simply dropped. One that names no element has no stand-in, and
               // dropping it would style the whole ancestor, so the selector goes.
+              // The marker is on the paragraphs MDX makes, which Thally renders
+              // as a plain `<p>`; a paragraph a site component draws has a class
+              // of its own, so `p` is named as `p:not([class])`. Headings and the
+              // other elements have no such stand-in: Thally's own headings carry
+              // a class, so a heading is named as it is.
               const alone = (!node.prev() || node.prev()?.type === 'combinator') && (!node.next() || node.next()?.type === 'combinator')
               const element = node.operator === '=' ? node.value : undefined
               if (!alone) node.remove()
+              else if (element === 'p') node.replaceWith(...(selectorParser().astSync('p:not([class])').first.nodes))
               else if (element && /^[a-z][a-z0-9]*$/.test(element)) node.replaceWith(selectorParser.tag({ value: element }))
               else hasPlatformAnchor = true
             }
