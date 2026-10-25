@@ -5,9 +5,14 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { compileSync } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
+import { bindSnippetProps } from '../mdx.js'
 
 function migrate(files: Record<string, string>, docsRoot = '') {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-props-'))
@@ -414,5 +419,57 @@ describe('a condition the binding has made fully static is decided at migration 
     expect(body).toContain('```jsx\n{mode === "cloud" && <b>example</b>}\n```')
     expect(body).toContain('<b>decided</b>')
     expect(body).not.toContain('{"cloud" === "cloud"')
+  })
+})
+
+describe('a condition folded to content stays in the block it was in', () => {
+  const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
+  type Node = { type: string; children?: Array<Node> }
+  /** The block structure MDX reads out of `text`: containers by name with their blocks, a paragraph as one block. */
+  const outline = (node: Node): string => ['root', 'blockquote', 'list', 'listItem', 'mdxJsxFlowElement'].includes(node.type)
+    ? `${node.type}(${(node.children ?? []).map(outline).join(' ')})` : node.type
+  const blocks = (text: string) => outline(parser.parse(text) as Node)
+  const bind = (snippet: string, props: Record<string, string> = { mode: 'x' }) => bindSnippetProps(snippet, new Map(Object.entries(props)))
+
+  it('keeps a flow expression a block of its own when it folds to JSX', () => {
+    const source = 'Before\n{mode === "x" && <span>yes</span>}\nAfter'
+    expect(blocks(source)).toBe('root(paragraph mdxFlowExpression paragraph)')
+    const folded = bind(source)
+    expect(folded).toContain('<span>yes</span>')
+    expect(blocks(folded)).toBe('root(paragraph paragraph paragraph)')
+  })
+
+  it('keeps it a block of its own when it folds to plain text or a string', () => {
+    expect(blocks(bind('Before\n{mode === "x" ? "text" : "no"}\nAfter'))).toBe('root(paragraph paragraph paragraph)')
+    // A string that is not plain text stays an expression of its own, which is a block as well.
+    expect(blocks(bind('Before\n{mode === "x" ? "A & B" : "no"}\nAfter'))).toBe('root(paragraph mdxFlowExpression paragraph)')
+  })
+
+  it('does not join the paragraphs around a branch that leaves nothing', () => {
+    const folded = bind('Before\n{mode === "y" && <span>yes</span>}\nAfter')
+    expect(blocks(folded)).toBe('root(paragraph paragraph)')
+    expect(folded).not.toContain('span')
+    expect(blocks(bind('Before\n{mode === "y" && <span>yes</span>}\n\nAfter'))).toBe('root(paragraph paragraph)')
+  })
+
+  it('leaves the blank lines a block already had, and an inline expression inline', () => {
+    expect(bind('Before\n\n{mode === "x" && <span>yes</span>}\n\nAfter')).toBe('Before\n\n<span>yes</span>\n\nAfter')
+    const inline = bind('Text {mode === "x" && <b>inline</b>} more\nand {mode === "x" ? "this" : "that"} too')
+    expect(inline).toBe('Text <b>inline</b> more\nand this too')
+    expect(blocks(inline)).toBe('root(paragraph)')
+  })
+
+  it('keeps the block inside a quote, a list item and a JSX element', () => {
+    const condition = '{mode === "x" && <span>yes</span>}'
+    expect(blocks(bind(`> Before\n> ${condition}\n> After`))).toBe('root(blockquote(paragraph paragraph paragraph))')
+    expect(blocks(bind(`- Before\n  ${condition}\n  After`))).toBe('root(list(listItem(paragraph paragraph paragraph)))')
+    expect(blocks(bind(`- ${condition}\n  After`))).toBe('root(list(listItem(paragraph paragraph)))')
+    expect(blocks(bind(`<Step>\n  Before\n  ${condition}\n  After\n</Step>`))).toBe('root(mdxJsxFlowElement(paragraph paragraph paragraph))')
+  })
+
+  it('keeps a lone {children} on its own line a block in a Markdown snippet', () => {
+    const folded = bind('Before\n{children}\nAfter', { children: 'Inner text' })
+    expect(folded).toContain('Inner text')
+    expect(blocks(folded)).toBe('root(paragraph paragraph paragraph)')
   })
 })

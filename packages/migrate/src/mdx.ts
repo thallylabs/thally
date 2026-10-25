@@ -671,23 +671,37 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
     }
   }
   /**
+   * `text` where the block expression `[start, end]` stood. That expression was a block of its own, so the lines it now touches are
+   * set off from `text` by a blank line, as it set them off: left as it is, a text or a JSX element would join the paragraph above
+   * or below it. A blank line stays as it is, and what leaves nothing leaves a blank line already.
+   */
+  const asBlock = (text: string, start: number, end: number): string => {
+    const above = body.slice(0, start).split('\n')
+    const prefix = above.pop() ?? ''
+    const touches = (line: string | undefined): boolean => line !== undefined && /[^\s>]/.test(line)
+    // The break is the blank line of the container the expression is in: a quote's `>`, a list item's indent.
+    const gap = `\n${prefix.replace(/[^ \t>]/g, ' ')}`
+    return text && `${touches(above.pop()) && /^[ \t>]*$/.test(prefix) ? gap : ''}${text}${touches(body.slice(end).split('\n', 2)[1]) ? gap : ''}`
+  }
+  /**
    * The edit that puts the value of an expression whose props are bound where the expression stood, or undefined when anything
    * in it is still left to run. A text expression becomes the JSX it selects as MDX content, plain text, or nothing; an
-   * attribute's expression becomes a literal and is left alone when it selects JSX.
+   * attribute's expression becomes a literal and is left alone when it selects JSX. A `flow` expression stays a block.
    */
-  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean): SourceEdit | undefined => {
+  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
     const [statement] = program.body
     const folded = program.body.length === 1 && statement.type === 'ExpressionStatement'
       ? foldStatic(statement.expression as unknown as EstreeNode, literals) : undefined
     if (!folded) return undefined
     const { value } = folded
+    const place = (text: string): SourceEdit => ({ start, end, value: flow ? asBlock(text, start, end) : text })
     if (typeof value === 'object' && value !== null) {
       const { jsx } = value
-      return inAttribute ? undefined : { start, end, value: applyEdits(body.slice(jsx.start, jsx.end), bound.filter((edit) => edit.start >= jsx.start && edit.end <= jsx.end), jsx.start) }
+      return inAttribute ? undefined : place(applyEdits(body.slice(jsx.start, jsx.end), bound.filter((edit) => edit.start >= jsx.start && edit.end <= jsx.end), jsx.start))
     }
     if (inAttribute) return { start, end, value: `{${JSON.stringify(value)}}` }
-    if (typeof value === 'boolean' || value === null || value === '') return { start, end, value: '' }
-    return { start, end, value: typeof value === 'string' && PLAIN_TEXT.test(value) ? value : `{${JSON.stringify(value)}}` }
+    if (typeof value === 'boolean' || value === null || value === '') return place('')
+    return place(typeof value === 'string' && PLAIN_TEXT.test(value) ? value : `{${JSON.stringify(value)}}`)
   }
   /** `span` is where an attribute's value expression sits, which the value node itself does not say. */
   const visit = (value: unknown, span?: [number, number]): void => {
@@ -706,14 +720,14 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         if (bound === undefined) {
           // Not a prop of this call, or the snippet's own name: it stays an expression.
         } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
-        else if (start !== undefined && end !== undefined) edits.push({ start, end, value: bound })
+        else if (start !== undefined && end !== undefined) edits.push({ start, end, value: node.type === 'mdxFlowExpression' ? asBlock(bound, start, end) : bound })
       } else {
         const first = edits.length
         const literals = new Map<string, string>()
         bindFreeReferences(program, node.type !== 'mdxjsEsm', literals)
         // An expression the binding has made static is its value; one that still has something to run stays as bound.
         const folded = node.type !== 'mdxjsEsm' && edits.length > first && start !== undefined && end !== undefined
-          ? foldBound(program, edits.slice(first), literals, span ?? [start, end], Boolean(span)) : undefined
+          ? foldBound(program, edits.slice(first), literals, span ?? [start, end], Boolean(span), node.type === 'mdxFlowExpression') : undefined
         if (folded) edits.splice(first, edits.length - first, folded)
       }
     }
