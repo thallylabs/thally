@@ -192,6 +192,12 @@ describe('CSS nesting', () => {
     expect(result.skippedVariables).toEqual(['--ifx-x'])
   })
 
+  it('leaves out a condition nested in a theme block, which may only declare custom properties a kept rule reads', () => {
+    const result = project('.dark { --site-color: red; @media (min-width: 1px) { background: red; --ifx-x: blue; } }\n.ifx-a { color: var(--site-color); }')
+    expect(text(result.css)).toBe(`.dark ${SCOPE} { --site-color: red } ${SCOPE} .ifx-a { color: var(--site-color); }`)
+    expect(result.omittedNestedRules).toBe(1)
+  })
+
   it('keeps a media or supports condition written inside a kept rule, which only changes that rule', () => {
     const css = '.ifx-a { color: red; @media (min-width: 600px) { color: blue; } @supports (display: grid) { @media print { display: grid; } } }'
     expect(text(project(css).css)).toBe(`${SCOPE} .ifx-a { color: red; @media (min-width: 600px) { color: blue; } @supports (display: grid) { @media print { display: grid; } } }`)

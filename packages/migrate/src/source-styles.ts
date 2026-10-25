@@ -301,6 +301,12 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     omittedNestedRules += 1
     rule.remove()
   })
+  // A theme block takes custom properties and nothing else, and a condition inside it can hold anything.
+  for (const rule of themeRules) rule.each((node) => {
+    if (node.type !== 'atrule') return
+    omittedNestedRules += 1
+    node.remove()
+  })
   // The variables a kept rule reads, and those they read in turn through the properties kept for them.
   const themes = new Set(themeRules)
   const read = new Set<string>()

@@ -765,7 +765,8 @@ another kept property, and declare them on that element, so they reach the
 content and nothing around it; any other declaration in those blocks is left
 out. A rule nested inside another rule (CSS nesting) is skipped, since a nested
 selector is read relative to the rule around it; write it as a separate rule to
-keep it. A `@media` or `@supports` written inside a rule is kept. A
+keep it. A `@media` or `@supports` written inside a rule is kept, except inside a
+`:root` or `.dark` block, which takes custom properties and nothing else. A
 `@property` registration applies to the whole page, so it is kept only when a
 kept rule reads the property and the site's own `:root` or `.dark` block declares
 properties with the same prefix (`--ifx-` in `--ifx-glow`), which shows the name
