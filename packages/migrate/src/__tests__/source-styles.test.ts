@@ -355,3 +355,70 @@ describe('the definitions a kept rule names (@counter-style, @font-palette-value
     expect(result.omittedAtRules).toEqual(['@page', '@view-transition', '@namespace svg url(http://www.w3.org/2000/svg)'])
   })
 })
+
+describe('a stylesheet with thousands of references to follow', () => {
+  const MANY = 8000
+  // A site's stylesheet can be large and every name in it may lead to the next, so the work has to grow with its size, not with its square.
+  const GENEROUS_MS = 2000
+  const timed = <T,>(run: () => T): { result: T; ms: number } => {
+    const start = performance.now()
+    const result = run()
+    return { result, ms: performance.now() - start }
+  }
+
+  it('follows a chain of custom properties declared in the opposite order to the one they are read in', () => {
+    const chain = (count: number) => Array.from({ length: count }, (_, i) => `--ifx-${count - 1 - i}: ${i === 0 ? 'red' : `var(--ifx-${count - i})`};`).join(' ')
+    const css = (count: number) => `:root { ${chain(count)} --ifx-unread: blue; }\n.ifx-a { color: var(--ifx-0); }`
+    const small = project(css(3))
+    expect(text(small.css)).toBe(`:root ${SCOPE} { --ifx-2: red; --ifx-1: var(--ifx-2); --ifx-0: var(--ifx-1); } ${SCOPE} .ifx-a { color: var(--ifx-0); }`)
+    expect(small.skippedVariables).toEqual(['--ifx-unread'])
+
+    const { result, ms } = timed(() => project(css(MANY)))
+    expect(result.css.match(/--ifx-\d+:/g)).toHaveLength(MANY)
+    expect(result.skippedVariables).toEqual(['--ifx-unread'])
+    expect(ms).toBeLessThan(GENEROUS_MS)
+  })
+
+  it('reads a custom property that names itself, or one that names another that names it, once', () => {
+    const result = project(':root { --ifx-a: var(--ifx-b); --ifx-b: var(--ifx-a); --ifx-c: var(--ifx-c); --ifx-d: var(--ifx-a); }\n.ifx-a { color: var(--ifx-a); border-color: var(--ifx-c); }')
+    expect(text(result.css)).toBe(`:root ${SCOPE} { --ifx-a: var(--ifx-b); --ifx-b: var(--ifx-a); --ifx-c: var(--ifx-c); } ${SCOPE} .ifx-a { color: var(--ifx-a); border-color: var(--ifx-c); }`)
+    expect(result.skippedVariables).toEqual(['--ifx-d'])
+  })
+
+  it('follows a chain of counter styles that each extend the next, declared in the opposite order', () => {
+    const chain = (count: number) => Array.from({ length: count }, (_, i) => `@counter-style ifx-c${count - 1 - i} { system: extends ifx-c${count - i}; }`).join('\n')
+    const css = (count: number) => `${chain(count)}\n.ifx-a li { list-style: ifx-c0; }`
+    const small = project(css(3))
+    expect(text(small.css)).toBe(`@counter-style ifx-c2 { system: extends ifx-c3; } @counter-style ifx-c1 { system: extends ifx-c2; } @counter-style ifx-c0 { system: extends ifx-c1; } ${SCOPE} .ifx-a li { list-style: ifx-c0; }`)
+
+    const { result, ms } = timed(() => project(css(MANY)))
+    expect(result.css.match(/@counter-style/g)).toHaveLength(MANY)
+    expect(result.omittedAtRules).toEqual([])
+    expect(ms).toBeLessThan(GENEROUS_MS)
+  })
+
+  it('checks thousands of registered custom properties against thousands the theme blocks declare', () => {
+    const count = 12000
+    const own = Array.from({ length: count }, (_, i) => `--ifx-v${i}`)
+    const registered = Array.from({ length: count }, (_, i) => `--zz-v${i}`)
+    const css = `:root { ${own.map((name) => `${name}: red;`).join(' ')} }\n.ifx-a { --ifx-all: ${[...own, ...registered].map((name) => `var(${name})`).join(' ')}; }\n${[...own, ...registered].map((name) => `@property ${name} { syntax: "*"; inherits: false; }`).join('\n')}`
+    const { result, ms } = timed(() => project(css))
+    // The ones that share their first word with a property the site's theme declares stay, and the others are left out.
+    expect(result.css.match(/@property --ifx-/g)).toHaveLength(count)
+    expect(result.skippedProperties).toEqual(registered)
+    expect(ms).toBeLessThan(GENEROUS_MS)
+  })
+
+  it('matches thousands of class names against thousands of families and modifiers', () => {
+    const families = 25000
+    const selectors = 5000
+    // One template: each `ifx-cardN-${kind}` names a family of classes, and each `${base}--mN` a modifier.
+    const modules = [`export const classes = \`${Array.from({ length: families }, (_, i) => `ifx-card${i}-\${kind} \${base}--m${i}`).join(' ')}\``]
+    const css = Array.from({ length: selectors }, (_, i) => `.ifx-card${i}-wide { color: red; } .zzz${i}--m${i} { color: red; }`).join('\n') + '\n.zzz { color: red; }'
+    const { result, ms } = timed(() => projectAuthoredStyles(css, [], modules, 'src-test'))
+    expect(result.css.match(/\.ifx-card\d+-wide/g)).toHaveLength(selectors)
+    expect(result.css.match(/\.zzz\d+--m\d+/g)).toHaveLength(selectors)
+    expect(result.omittedSelectors).toBe(1)
+    expect(ms).toBeLessThan(GENEROUS_MS)
+  })
+})

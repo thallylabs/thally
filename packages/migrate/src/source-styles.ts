@@ -223,6 +223,40 @@ function isInRule(node: postcss.Node): boolean {
   return false
 }
 
+/** A test for whether a string begins with any of `starts`, by one search instead of a pass over every one of them. */
+function startsWithAny(starts: Iterable<string>): (text: string) => boolean {
+  // With each start that another one begins left out, the only start that can begin a text is the last one in order that is not after it.
+  const sorted: Array<string> = []
+  for (const start of [...starts].sort()) if (sorted.length === 0 || !start.startsWith(sorted[sorted.length - 1])) sorted.push(start)
+  return (text) => {
+    let low = 0
+    let high = sorted.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (sorted[middle] <= text) low = middle + 1
+      else high = middle
+    }
+    return low > 0 && text.startsWith(sorted[low - 1])
+  }
+}
+
+/** A test for whether a string ends with any of `ends`: a string ends with one when its reverse begins with that one's reverse. */
+function endsWithAny(ends: Iterable<string>): (text: string) => boolean {
+  const reverse = (text: string): string => text.split('').reverse().join('')
+  const startsWith = startsWithAny([...ends].map(reverse))
+  return (text) => startsWith(reverse(text))
+}
+
+/** Add `value` to the list `map` keeps under `key`, starting the list if it is the first. */
+function pushTo<T>(map: Map<string, Array<T>>, key: string, value: T): void {
+  const list = map.get(key)
+  if (list) list.push(value)
+  else map.set(key, [value])
+}
+
+/** The first word of a custom property's name with its dashes (`--ifx-` of `--ifx-glow`), or nothing when the name is a single word. */
+const propertyFamily = (name: string): string => name.slice(0, name.indexOf('-', 2) + 1)
+
 /**
  * Remove platform DOM selectors while preserving CSS for authored widgets. `modules` are the component modules and scripts, whose
  * strings count as class names. Every rule kept is confined to the page content container (`CONTENT_CONTAINER`): the site's own
@@ -235,8 +269,9 @@ function isInRule(node: postcss.Node): boolean {
  */
 export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string>, namespace: string): StyleProjection {
   const names = authoredStyleNames(contents, modules)
-  const isAuthoredClass = (name: string): boolean => names.classes.has(name)
-    || [...names.prefixes].some((prefix) => name.startsWith(prefix)) || [...names.suffixes].some((suffix) => name.endsWith(suffix))
+  const startsAuthoredFamily = startsWithAny(names.prefixes)
+  const endsAuthoredModifier = endsWithAny(names.suffixes)
+  const isAuthoredClass = (name: string): boolean => names.classes.has(name) || startsAuthoredFamily(name) || endsAuthoredModifier(name)
   const root = postcss.parse(css)
   let omittedSelectors = 0
   const themeRules: Array<postcss.Rule> = []
@@ -307,22 +342,23 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     omittedNestedRules += 1
     node.remove()
   })
-  // The variables a kept rule reads, and those they read in turn through the properties kept for them.
+  // The variables a kept rule reads, and those they read in turn through the properties kept for them. The theme declarations are indexed
+  // by name and a name is looked up once, when it is first read, so each declaration is read once however long a chain of variables is.
   const themes = new Set(themeRules)
+  const themeValues = new Map<string, Array<string>>()
+  for (const rule of themeRules) rule.each((node) => { if (node.type === 'decl' && node.prop.startsWith('--')) pushTo(themeValues, node.prop, node.value) })
   const read = new Set<string>()
-  const readIn = (value: string): void => { for (const match of value.matchAll(/var\(\s*(--[\w-]+)/g)) read.add(match[1]) }
-  root.walkDecls((decl) => { if (!decl.parent || !themes.has(decl.parent as postcss.Rule)) readIn(decl.value) })
-  const isKept = (decl: postcss.Declaration): boolean => decl.prop.startsWith('--') && read.has(decl.prop)
-  for (let grew = true; grew;) {
-    const before = read.size
-    for (const rule of themeRules) rule.each((node) => { if (node.type === 'decl' && isKept(node)) readIn(node.value) })
-    grew = read.size > before
+  const unvisited: Array<string> = []
+  const readIn = (value: string): void => {
+    for (const [, name] of value.matchAll(/var\(\s*(--[\w-]+)/g)) if (!read.has(name)) { read.add(name); unvisited.push(name) }
   }
+  root.walkDecls((decl) => { if (!decl.parent || !themes.has(decl.parent as postcss.Rule)) readIn(decl.value) })
+  for (let name = unvisited.pop(); name !== undefined; name = unvisited.pop()) for (const value of themeValues.get(name) ?? []) readIn(value)
+  const isKept = (decl: postcss.Declaration): boolean => decl.prop.startsWith('--') && read.has(decl.prop)
   const skippedVariables = new Set<string>()
   let skippedThemeDeclarations = 0
-  // The names the site's own theme blocks declare, whether or not a rule reads them: where the site's own prefix shows.
-  const themeNames = new Set<string>()
-  for (const rule of themeRules) rule.walkDecls((decl) => { if (decl.prop.startsWith('--')) themeNames.add(decl.prop) })
+  // The first words of the names the site's own theme blocks declare, whether or not a rule reads them: where the site's own prefix shows.
+  const themeFamilies = new Set([...themeValues.keys()].map(propertyFamily))
   for (const rule of themeRules) {
     const dropped = rule.nodes.filter((node): node is postcss.Declaration => node.type === 'decl' && !isKept(node))
     for (const decl of dropped) {
@@ -344,14 +380,18 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   // (`fallback`, `system: extends`). Any word in a kept declaration counts as a name: keeping one too many does no harm.
   const definitions = new Set<postcss.AtRule>()
   root.walkAtRules(/^(?:counter-style|font-palette-values)$/i, (rule) => { definitions.add(rule) })
+  const definitionsNamed = new Map<string, Array<postcss.AtRule>>()
+  for (const rule of definitions) pushTo(definitionsNamed, rule.params.trim().toLowerCase(), rule)
   const named = new Set<string>()
-  const nameWords = (decl: postcss.Declaration): void => { for (const [word] of decl.value.matchAll(/[^\s,()"']+/g)) named.add(word.toLowerCase()) }
-  root.walkDecls((decl) => { if (!definitions.has(decl.parent as postcss.AtRule)) nameWords(decl) })
-  for (let grew = true; grew;) {
-    const before = named.size
-    for (const rule of definitions) if (named.has(rule.params.trim().toLowerCase())) rule.walkDecls(nameWords)
-    grew = named.size > before
+  const unread: Array<string> = []
+  const nameWords = (decl: postcss.Declaration): void => {
+    for (const [word] of decl.value.matchAll(/[^\s,()"']+/g)) {
+      const name = word.toLowerCase()
+      if (!named.has(name)) { named.add(name); unread.push(name) }
+    }
   }
+  root.walkDecls((decl) => { if (!definitions.has(decl.parent as postcss.AtRule)) nameWords(decl) })
+  for (let name = unread.pop(); name !== undefined; name = unread.pop()) for (const rule of definitionsNamed.get(name) ?? []) rule.walkDecls(nameWords)
   const omittedAtRules: Array<string> = []
   const describe = (rule: postcss.AtRule): string => `@${rule.name}${rule.params ? ` ${rule.params}` : ''}`
   const skippedProperties: Array<string> = []
@@ -368,8 +408,8 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
       // A registration applies to the whole page, so it must be for a name the shell cannot be using: one a kept rule reads, and whose
       // first word (`--ifx-` in `--ifx-glow`) is one the site's own theme blocks use for its properties too.
       const property = rule.params.trim()
-      const prefix = property.slice(0, property.indexOf('-', 2) + 1)
-      if (read.has(property) && prefix && [...themeNames].some((own) => own.startsWith(prefix))) return
+      const prefix = propertyFamily(property)
+      if (read.has(property) && prefix && themeFamilies.has(prefix)) return
       skippedProperties.push(property)
       rule.remove()
       return
