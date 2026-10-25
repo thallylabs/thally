@@ -932,6 +932,20 @@ describe('Mintlify heading ids the renderer cannot derive', () => {
     // A heading quoted from end to end keeps its opening quote (another live site).
     expect(normalizeMdx('### "Module not found: x"', 'mintlify')).toBe('### “Module not found: x” {/* #“module-not-found-x” */}')
   })
+
+  // A link's target is not part of a heading's text, whatever the link's text holds. The first pair is read from the live ScrapeGraphAI
+  // docs (`id="1-markdownify-→-scrape"`); the arrow is what makes the id differ from Thally's, so these headings are marked.
+  it.each([
+    ['### 1. Markdownify → [`Scrape`](/integrations/n8n)', '### 1. Markdownify → [`Scrape`](/integrations/n8n) {/* #1-markdownify-→-scrape */}'],
+    ['### A → [the `x` option](/p)', '### A → [the `x` option](/p) {/* #a-→-the-x-option */}'],
+  ])('leaves the target of a link whose text holds code out of the id of %s', (line, expected) => {
+    expect(normalizeMdx(line, 'mintlify')).toBe(expected)
+  })
+
+  it('reads link syntax inside a code span as text, not as a link', () => {
+    // Read as a link it would leave only `a`: the `b` is the code span's own text.
+    expect(normalizeMdx('### A → `[a](b)`', 'mintlify')).toBe('### A → `[a](b)` {/* #a-→-ab */}')
+  })
 })
 
 describe('Mintlify callouts', () => {

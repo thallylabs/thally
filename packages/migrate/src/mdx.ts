@@ -471,8 +471,12 @@ function typesetEllipses(text: string): string {
 
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
+  // A link's text can hold code (`[`Scrape`](/n8n)`), and the split below would cut the link in three and leave its target in the text,
+  // so a link that holds code spans goes first. A code span is skipped whole: link syntax inside it is text.
+  const unlinked = !source.includes('`') ? source
+    : source.replace(/(`[^`]*`)|!?\[((?:`[^`]*`|[^\]`])*)\]\([^)]*\)/g, (_match: string, code?: string, text = '') => code ?? text)
   // What a code span holds is text, whatever it looks like: no comment, link, tag or emphasis is read inside it (`Option<T>` keeps its `<T>`).
-  return source.split(/(`[^`]*`)/).map((part, index) => (index % 2 ? part.slice(1, -1) : part
+  return unlinked.split(/(`[^`]*`)/).map((part, index) => (index % 2 ? part.slice(1, -1) : part
     // An authored MDX comment is not rendered, so Mintlify's id never sees it.
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
