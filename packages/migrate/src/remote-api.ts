@@ -267,28 +267,32 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     redirects.push({ source, destination, permanent: false })
     existingSources.add(literalRoute(source) ?? source.toLowerCase())
   }
+  // A page whose frontmatter `url` links to another address is reached through redirects that hide it on purpose; the
+  // repository migration adds them after its own checks, so they skip these checks too and keep their place.
+  const linkRedirects = new Set(pages.flatMap((page) => page.externalUrl ? pageEntryRoutes(page).map((source) => `${source} ${page.externalUrl}`) : []))
+  const isLinkRedirect = (redirect: { source: string; destination: string }) => linkRedirects.has(`${redirect.source} ${redirect.destination}`)
   // A redirect that targets an endpoint URL goes straight to the endpoint page, not through a second redirect.
+  // A link keeps the address its page wrote, or it would no longer be recognised as one (a site path can be an endpoint URL).
   const direct = redirects.map((redirect) => {
-    const endpoint = endpointUrls.get(literalRoute(redirect.destination) ?? '')
+    const endpoint = isLinkRedirect(redirect) ? undefined : endpointUrls.get(literalRoute(redirect.destination) ?? '')
     return endpoint ? { ...redirect, destination: endpoint } : redirect
   })
   const boundConfig = { ...bundle.docsConfig, tabs, ...(direct.length > 0 ? { redirects: direct } : {}) }
   // As for any page the navigation lists, a directory the new pages sit in (a tag, a product's API folder) opens on its first page.
   const newPages = pages.slice(pagesBefore)
   const withDirectories = bundle.platform === 'mintlify' && newPages.length > 0 ? addMintlifyDirectoryRedirects(boundConfig, newPages) : boundConfig
-  // A page whose frontmatter `url` links to another address is reached through redirects that hide it on purpose; the
-  // repository migration adds them after its own checks, so they skip these checks too and keep their place.
-  const linkRedirects = new Set(pages.flatMap((page) => page.externalUrl ? pageEntryRoutes(page).map((source) => `${source} ${page.externalUrl}`) : []))
-  const isLinkRedirect = (redirect: { source: string; destination: string }) => linkRedirects.has(`${redirect.source} ${redirect.destination}`)
   const links = (withDirectories.redirects ?? []).filter(isLinkRedirect)
   const unchecked = links.length > 0 ? { ...withDirectories, redirects: withDirectories.redirects!.filter((redirect) => !isLinkRedirect(redirect)) } : withDirectories
   // Redirects added above meet the same checks as any other: none may fail the build, hide a page that exists, or loop.
   const checked = dropConflictingRedirects(dropUnroutableRedirects(unchecked, warnings), pages, warnings)
+  // The links come back after those checks, so the redirects the download added meet them again: a link that closes a loop with the
+  // redirects before it is dropped and reported. No pages are passed because a link hides its own page on purpose.
+  const checkedWithLinks = links.length > 0 ? dropConflictingRedirects({ ...checked, redirects: [...(checked.redirects ?? []), ...links] }, [], warnings) : checked
   return {
     ...bundle,
     pages,
     assets,
-    docsConfig: links.length > 0 ? { ...checked, redirects: [...(checked.redirects ?? []), ...links] } : checked,
+    docsConfig: checkedWithLinks,
     warnings,
   }
 }

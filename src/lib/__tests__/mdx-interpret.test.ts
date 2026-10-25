@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { interpretMDX } from '@/lib/mdx-interpret'
 import { Code, Pre } from '@/components/mdx/code-blocks'
+import { useMDXComponents } from '@/components/mdx/mdx-components'
 
 function render(node: ReactNode): string {
   return renderToStaticMarkup(createElement(function Wrapper() {
@@ -240,6 +241,479 @@ describe('interpretMDX', () => {
     })
     expect(render(content)).toContain('styled')
   })
+})
+
+describe('object-valued JSX attributes', () => {
+  it('keeps a style object on HTML and SVG elements', async () => {
+    const { content } = await interpretMDX({
+      source: '<div id="viz" style={{ padding: \'1rem 0.5rem\' }}>\n  <svg viewBox="0 0 10 10" style={{ width: \'100%\', maxWidth: \'620px\' }}>\n    <g id="s1" style={{ transition: \'opacity 0.3s\' }} />\n  </svg>\n</div>',
+      components: {},
+    })
+    const html = render(content)
+    expect(html).toContain('<div id="viz" style="padding:1rem 0.5rem">')
+    expect(html).toContain('<svg viewBox="0 0 10 10" style="width:100%;max-width:620px">')
+    expect(html).toContain('<g id="s1" style="transition:opacity 0.3s"></g>')
+  })
+
+  it('keeps a style object and plain data on a component prop', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('div', {
+        style: props.style as never,
+        'data-config': JSON.stringify(props.config ?? null),
+        'data-items': JSON.stringify(props.items ?? null),
+      })
+    const { content } = await interpretMDX({
+      source: "<Probe style={{ color: 'red' }} config={{ cols: 2 }} items={[1, 'two']} />",
+      components: { Probe },
+    })
+    expect(render(content)).toBe(
+      '<div style="color:red" data-config="{&quot;cols&quot;:2}" data-items="[1,&quot;two&quot;]"></div>',
+    )
+  })
+
+  it('spreads an object literal into the element props', async () => {
+    const { content } = await interpretMDX({
+      source: '<div {...{ id: \'spread\', style: { color: \'red\' } }}>x</div>',
+      components: {},
+    })
+    expect(render(content)).toContain('<div id="spread" style="color:red">x</div>')
+  })
+
+  it('never lets an authored object inject raw HTML', async () => {
+    const { content } = await interpretMDX({
+      source: '<div dangerouslySetInnerHTML={{ __html: \'<img src=x onerror=alert(1)>\' }} />',
+      components: {},
+    })
+    expect(render(content)).not.toContain('<img')
+  })
+})
+
+describe('JSX elements as attribute values', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ title, icon }) =>
+    createElement('div', { 'data-card': true }, createElement('span', { 'data-icon': true }, icon as ReactNode), title as string)
+
+  it('renders an inline svg passed as a prop, as the compiled page does', async () => {
+    const source = [
+      '<Card',
+      '  title="Android"',
+      '  icon={',
+      '    <svg enable-background="new 0 0 24 24" viewBox="0 0 24 24" fill="#1ebca1">',
+      '      <path d="m0 0v12" />',
+      '      <path d="m1 1" strokeWidth={2} style={{ color: \'red\' }}>',
+      '        label',
+      '      </path>',
+      '    </svg>',
+      '  }',
+      '/>',
+    ].join('\n')
+    const { content } = await interpretMDX({ source, components: { Card } })
+    expect(render(content)).toBe(
+      '<div data-card="true"><span data-icon="true"><svg enable-background="new 0 0 24 24" viewBox="0 0 24 24" fill="#1ebca1"><path d="m0 0v12"></path><path d="m1 1" stroke-width="2" style="color:red">label</path></svg></span>Android</div>',
+    )
+  })
+
+  it('resolves a capitalized element in the value through the components map', async () => {
+    const Badge: ComponentType<Record<string, unknown>> = ({ children }) =>
+      createElement('b', null, children as ReactNode)
+    const { content } = await interpretMDX({
+      source: '<Card title="T" icon={<Badge>new</Badge>} />',
+      components: { Card, Badge },
+    })
+    expect(render(content)).toContain('<span data-icon="true"><b>new</b></span>')
+  })
+
+  it('renders an unknown component in the value as its children', async () => {
+    const { content } = await interpretMDX({
+      source: '<Card title="T" icon={<Nope>inner</Nope>} />',
+      components: { Card },
+    })
+    expect(render(content)).toContain('<span data-icon="true">inner</span>')
+  })
+})
+
+describe('paragraphs that hold only JSX', () => {
+  it('does not wrap a lone inline element in a paragraph', async () => {
+    const Badge: ComponentType<Record<string, unknown>> = ({ children }) =>
+      createElement('span', { 'data-badge': true }, children as ReactNode)
+    const { content } = await interpretMDX({
+      source: '<Badge>New</Badge>\n\nText with <Badge>inline</Badge> stays in a paragraph.',
+      components: { Badge },
+    })
+    expect(render(content)).toBe(
+      '<span data-badge="true">New</span>\n<p>Text with <span data-badge="true">inline</span> stays in a paragraph.</p>',
+    )
+  })
+
+  it('keeps a block-level component out of a paragraph', async () => {
+    // `<p><aside>` is re-parented by the HTML parser before React hydrates,
+    // which fails hydration (React error 418) on every page with such a callout.
+    const { content } = await interpretMDX({
+      source: '<Note title="One">Careful now.</Note>\n\nBody text.\n\n<Note title="Two">Also careful.</Note>',
+      components: { Note },
+    })
+    const html = render(content)
+    expect(html).not.toContain('<p><aside')
+    expect(html).toBe(
+      '<aside data-note="true" data-title="One">Careful now.</aside>\n<p>Body text.</p>\n<aside data-note="true" data-title="Two">Also careful.</aside>',
+    )
+  })
+
+  it('keeps SVG children as direct children when lines mix elements, text and comments', async () => {
+    // A line such as `<text x="1">label</text>` carries text, so remark-mdx reads
+    // it as inline JSX inside a paragraph. Left wrapped, the `<p>` makes the
+    // browser close the surrounding <svg>, which then renders blank.
+    const source = [
+      '<svg viewBox="0 0 10 10">',
+      '  {/* State 1 */}',
+      '  <g id="s1">',
+      '    <text x="1" y="2">label</text>',
+      '    {/* Row 1 */}',
+      '    <g><rect x="1"/><text x="2">1</text></g>',
+      '',
+      '    <g><rect x="3"/><text x="4">2</text></g>',
+      '  </g>',
+      '',
+      '  {/* Arrow */}',
+      '  <g id="arrow"><line x1="1"/></g>',
+      '</svg>',
+    ].join('\n')
+    const { content } = await interpretMDX({ source, components: {} })
+    expect(render(content)).toBe(
+      '<svg viewBox="0 0 10 10"><g id="s1"><text x="1" y="2">label</text><g><rect x="1"></rect><text x="2">1</text></g><g><rect x="3"></rect><text x="4">2</text></g></g><g id="arrow"><line x1="1"></line></g></svg>',
+    )
+  })
+})
+
+describe('props that would crash React', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ title, icon }) =>
+    createElement('div', null, createElement('span', null, icon as ReactNode), title as string)
+
+  it('renders a card whose icon is an object literal', async () => {
+    const { content } = await interpretMDX({ source: '<Card title="T" icon={{ a: 1 }} />', components: { Card } })
+    expect(render(content)).toBe('<div><span></span>T</div>')
+  })
+
+  it('drops a spread children that is not a valid node and keeps one that is', async () => {
+    const { content } = await interpretMDX({
+      source: "<div {...{ children: { a: 1 } }} />\n\n<p {...{ children: ['A', 'B'] }} />\n\n<b {...{ children: 'ok' }} />",
+      components: {},
+    })
+    expect(render(content)).toBe('<div></div>\n<p>AB</p>\n<b>ok</b>')
+  })
+
+  it('renders an object that forges the React element marker as nothing', async () => {
+    const { content } = await interpretMDX({
+      source: 'Before {{ "$$typeof": 1 }} after <Card title="T" icon={{ "$$typeof": 1 }} />',
+      components: { Card },
+    })
+    expect(render(content)).toContain('Before')
+  })
+
+  it('renders an array of valid nodes in child position', async () => {
+    const { content } = await interpretMDX({ source: "<b>{['A', 'B', 3]}</b>", components: {} })
+    expect(render(content)).toBe('<b>AB3</b>')
+  })
+})
+
+describe('JSX elements inside attribute values keep spreads and arrays', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', { 'data-icon': true }, icon as ReactNode)
+
+  it('applies a spread attribute on a nested element', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<svg><path {...{ d: 'M0 0L10 10', stroke: 'red', style: { fill: 'none' } }} /></svg>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe(
+      '<span data-icon="true"><svg><path d="M0 0L10 10" stroke="red" style="fill:none"></path></svg></span>',
+    )
+  })
+
+  it('renders an array of strings and elements as the children of a nested element', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<span>{['A', 'B', <i key=\"c\">C</i>]}</span>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe('<span data-icon="true"><span>AB<i>C</i></span></span>')
+  })
+
+  it('drops an array that holds a plain object', async () => {
+    const { content } = await interpretMDX({
+      source: "<Card icon={<span>x{['A', { a: 1 }]}</span>} />",
+      components: { Card },
+    })
+    expect(render(content)).toBe('<span data-icon="true"><span>x</span></span>')
+  })
+})
+
+describe('markup that remote content must not be able to create', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', null, icon as ReactNode)
+  const run = async (source: string) =>
+    render((await interpretMDX({ source, components: { Card } })).content)
+
+  it.each([
+    ["<iframe srcDoc={'<script>alert(1)</script>'} />", '<iframe></iframe>'],
+    ['<iframe srcdoc="<b>x</b>" />', '<iframe></iframe>'],
+    ['<iframe SRCDOC="<b>x</b>" />', '<iframe></iframe>'],
+    ["<iframe {...{ srcDoc: '<b>x</b>' }} />", '<iframe></iframe>'],
+    ["<Card icon={<iframe srcDoc={'<b>x</b>'} />} />", '<span><iframe></iframe></span>'],
+  ])('strips srcDoc from %s', async (source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it('strips srcDoc from a component prop', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('div', { 'data-src-doc': String(props.srcDoc), 'data-srcdoc': String(props.srcdoc) })
+    const { content } = await interpretMDX({ source: '<Probe srcDoc="<b>x</b>" srcdoc="<b>y</b>" />', components: { Probe } })
+    expect(render(content)).toBe('<div data-src-doc="undefined" data-srcdoc="undefined"></div>')
+  })
+
+  it('strips raw HTML props from nested elements too', async () => {
+    expect(await run("<Card icon={<b dangerouslySetInnerHTML={{ __html: '<img src=x>' }} />} />")).toBe('<span><b></b></span>')
+  })
+
+  it('keeps an ordinary embedded iframe', async () => {
+    const html = await run('<iframe src="https://www.youtube.com/embed/abc" title="Video" frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen />')
+    expect(html).toBe('<iframe src="https://www.youtube.com/embed/abc" title="Video" frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen=""></iframe>')
+  })
+
+  it('drops string event handlers and javascript: URLs', async () => {
+    const html = await run(
+      [
+        '<div onClick="alert(1)" onclick="alert(2)" ONCLICK="alert(3)">x</div>',
+        '<img src="x" onError="alert(4)" />',
+        '<a href="javascript:alert(5)">a</a>',
+        '<a href={\' jav\\tascript:alert(6)\'}>b</a>',
+        '<iframe src="javascript:alert(7)" />',
+        '<form action="javascript:alert(8)"><button formAction="javascript:alert(9)">b</button></form>',
+        '<svg><a xlinkHref="javascript:alert(10)"><text>t</text></a></svg>',
+      ].join('\n\n'),
+    )
+    expect(html).not.toMatch(/\bon(click|error)=/i)
+    expect(html).not.toMatch(/javascript:/i)
+  })
+
+  it.each([
+    ['href', '<a href="vbscript:msgbox(1)">a</a>', '<a>a</a>'],
+    ['href', '<a href="data:text/html,<script>alert(1)</script>">a</a>', '<a>a</a>'],
+    ['href', '<a href=" DaTa:\ntext/html;base64,PHNjcmlwdD4=">a</a>', '<a>a</a>'],
+    ['src', '<iframe src="data:text/html,<b>x</b>" />', '<iframe></iframe>'],
+    ['data', '<object data="data:text/html,<b>x</b>" type="text/html" />', '<object type="text/html"></object>'],
+    ['xlinkHref', '<svg><a xlinkHref="vbscript:x"><text>t</text></a></svg>', '<svg><a><text>t</text></a></svg>'],
+    ['action', '<form action="VBScript:x"></form>', '<form></form>'],
+    ['formAction', '<button formAction="data:text/html,x">b</button>', '<button>b</button>'],
+  ])('drops an unsafe scheme from %s', async (_name, source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it('keeps data images and ordinary links', async () => {
+    const html = await run('<a href="https://example.com/a?b=c">a</a>\n\n<img src="data:image/png;base64,AAAA" alt="" />')
+    expect(html).toContain('<a href="https://example.com/a?b=c">a</a>')
+    expect(html).toContain('src="data:image/png;base64,AAAA"')
+  })
+
+  it.each([
+    '<script>alert(1)</script>',
+    '<script src="https://evil.test/x.js"></script>',
+    '<sCript>alert(1)</sCript>',
+    '<svg><script>alert(1)</script></svg>',
+    '<base href="https://evil.test/" />',
+    '<meta httpEquiv="refresh" content="0;url=https://evil.test" />',
+    '<meta http-equiv="refresh" content="0;url=https://evil.test" />',
+    '<Card icon={<script>alert(1)</script>} />',
+  ])('renders nothing for %s', async (source) => {
+    const html = await run(source)
+    expect(html).not.toMatch(/<(script|base|meta)/i)
+    expect(html).not.toContain('alert(1)')
+  })
+
+  it('keeps an ordinary meta element', async () => {
+    expect(await run('<meta name="description" content="ok" />')).toContain('name="description"')
+  })
+
+  it('stops an SVG animation from retargeting a link or an event attribute', async () => {
+    const html = await run(
+      '<svg><a><animate attributeName="href" values="javascript:alert(1)" /><text>t</text></a><set attributeName="onmouseover" to="alert(2)" /><animate attributeName="opacity" values="0;1" /></svg>',
+    )
+    expect(html).not.toMatch(/attributeName="(href|onmouseover)"/)
+    expect(html).toContain('attributeName="opacity"')
+  })
+})
+
+describe('the gate does not depend on attribute case, entities or element kind', () => {
+  const Card: ComponentType<Record<string, unknown>> = ({ icon }) =>
+    createElement('span', null, icon as ReactNode)
+  const Note: ComponentType<Record<string, unknown>> = () => createElement('aside')
+  const run = async (source: string) =>
+    render((await interpretMDX({ source, components: { Card, Note } })).content)
+
+  it.each([
+    ['<iframe SRC="javascript:alert(1)" />', '<iframe></iframe>'],
+    ['<iframe sRc="javascript:alert(1)" />', '<iframe></iframe>'],
+    ['<iframe src="  &#x09;JaVaScRiPt:alert(1)" />', '<iframe></iframe>'],
+    ["<iframe {...{ SRC: 'javascript:alert(1)' }} />", '<iframe></iframe>'],
+    ['<iframe src="vbscript:x" />', '<iframe></iframe>'],
+    ['<a HREF="javascript:alert(1)">x</a>', '<a>x</a>'],
+    ['<a Href="java&#x09;script:alert(1)">x</a>', '<a>x</a>'],
+    ['<a HREF="  &#x09;javascript:alert(1)" target="_self">x</a>', '<a target="_self">x</a>'],
+    ['<form ACTION="javascript:alert(1)"><button>x</button></form>', '<form><button>x</button></form>'],
+    ['<form><button formaction="javascript:alert(1)">x</button></form>', '<form><button>x</button></form>'],
+    ['<form><button FORMACTION="javascript:alert(1)">x</button></form>', '<form><button>x</button></form>'],
+    ['<form><input type="submit" formaction="javascript:alert(1)" /></form>', '<form><input type="submit"/></form>'],
+    ['<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a XLINK:HREF="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a xlink:href="java&#x09;script:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<svg><a HREF="javascript:alert(1)"><text>x</text></a></svg>', '<svg><a><text>x</text></a></svg>'],
+    ['<map><area HREF="javascript:alert(1)" /></map>', '<map><area/></map>'],
+    ['<math><mi HREF="javascript:alert(1)">x</mi></math>', '<math><mi>x</mi></math>'],
+    ['<object DATA="data:text/html,x" />', '<object></object>'],
+  ])('drops an unsafe URL under any key case: %s', async (source, expected) => {
+    expect(await run(source)).toBe(expected)
+  })
+
+  it.each([
+    '<x-a onfocus="alert(1)" tabindex="0" autofocus>x</x-a>',
+    '<x-a onclick="alert(1)">x</x-a>',
+    '<x-a ONCLICK="alert(1)">x</x-a>',
+    "<x-a {...{ onclick: 'alert(1)' }}>x</x-a>",
+    '<Card icon={<x-a onclick="alert(1)">i</x-a>} />',
+    '<Card icon={<iframe SRC="javascript:alert(1)" />} />',
+    '<Card onclick="alert(1)" HREF="javascript:alert(1)" />',
+  ])('keeps event handlers and unsafe URLs out of %s', async (source) => {
+    expect(await run(source)).not.toMatch(/\bon[a-z]+=|javascript:/i)
+  })
+
+  it('keeps the safe attributes of an element whose handler was dropped', async () => {
+    expect(await run('<x-a onfocus="alert(1)" tabindex="0">x</x-a>')).toBe('<x-a tabindex="0">x</x-a>')
+  })
+
+  it('hands a component an empty string where it expected a URL, so it renders as before', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('code', null, String((props.src as string).length))
+    const { content } = await interpretMDX({ source: '<Probe src="data:text/html,x" />', components: { Probe } })
+    expect(render(content)).toBe('<code>0</code>')
+  })
+
+  it.each([
+    ['<Embed src="data:text/html,x" />', ''],
+    ['<Embed src="vbscript:x" />', ''],
+    ['<Video src="data:text/html,x" />', '<code></code>'],
+    ['<Video src="vbscript:x" />', '<code></code>'],
+  ])('renders the builtin %s without failing the page', async (source, expected) => {
+    const { content } = await interpretMDX({ source, components: useMDXComponents({}) as never })
+    expect(render(content)).toBe(expected)
+  })
+
+  it('keeps display text that merely starts like a scheme', async () => {
+    const html = await run('<a href="/x" title="JavaScript: the language">x</a>\n\n<Card title="data:text/html in docs" />')
+    expect(html).toContain('title="JavaScript: the language"')
+  })
+
+  it('keeps only string and number values in a style object', async () => {
+    expect(await run("<div style={{ color: Note, width: 5, height: '1px', margin: { a: 1 } }}>x</div>")).toBe(
+      '<div style="width:5px;height:1px">x</div>',
+    )
+  })
+
+  it.each(['<plaintext>x</plaintext>', '<svg><svg:script>alert(1)</svg:script></svg>'])('renders nothing for %s', async (source) => {
+    expect(await run(source)).not.toMatch(/plaintext|script/i)
+  })
+})
+
+describe('data props of components', () => {
+  const builtin = useMDXComponents({}) as never
+  const html = async (source: string, components: Record<string, unknown> = builtin) =>
+    render((await interpretMDX({ source, components: components as never })).content)
+
+  it('keeps the tags of an Update', async () => {
+    const out = await html('<Update label="v1" description="d" tags={["Added", "Fixed"]}>x</Update>')
+    expect(out).toContain('Added')
+    expect(out).toContain('Fixed')
+  })
+
+  it('keeps the light and dark values of a Color.Item', async () => {
+    const out = await html('<Color.Item name="n" value={{ light: "#fff", dark: "#000" }} />')
+    expect(out).toContain('background-color:#fff')
+    expect(out).toContain('background-color:#000')
+  })
+
+  it('keeps the open state of an AccordionGroup', async () => {
+    const out = await html(
+      '<AccordionGroup defaultValue={["a"]}><Accordion title="a">A</Accordion><Accordion title="b">B</Accordion></AccordionGroup>',
+    )
+    expect(out).toMatch(/<details id="a"[^>]* open=""/)
+    expect(out).not.toMatch(/<details id="b"[^>]* open=""/)
+  })
+
+  const Probe: ComponentType<Record<string, unknown>> = (props) =>
+    createElement('div', { 'data-props': JSON.stringify(props) })
+
+  it('passes nested plain data to the props that carry data', async () => {
+    const out = await html(
+      "<Probe tags={['a', 'JavaScript: tips']} pre={['p']} post={['q']} defaultValue={['d']} value={{ light: '#fff', n: [1, true, null] }} actions={[{ label: 'go', href: '/x' }]} />",
+      { Probe },
+    )
+    expect(out).toContain(
+      '{&quot;tags&quot;:[&quot;a&quot;,&quot;JavaScript: tips&quot;],&quot;pre&quot;:[&quot;p&quot;],&quot;post&quot;:[&quot;q&quot;],&quot;defaultValue&quot;:[&quot;d&quot;],&quot;value&quot;:{&quot;light&quot;:&quot;#fff&quot;,&quot;n&quot;:[1,true,null]},&quot;actions&quot;:[{&quot;label&quot;:&quot;go&quot;,&quot;href&quot;:&quot;/x&quot;}]}',
+    )
+  })
+
+  it.each([
+    ['an element', "tags={[<b>x</b>]}"],
+    ['a function', 'tags={[Probe]}'],
+    ['a constructor key', 'value={{ constructor: 1 }}'],
+    ['an unsafe URL', "actions={[{ label: 'go', href: 'data:text/html,x' }]}"],
+    ['an unevaluated entry', 'tags={["a", unknown]}'],
+  ])('drops a data prop that holds %s', async (_name, attribute) => {
+    expect(await html(`<Probe ${attribute} />`, { Probe })).toBe('<div data-props="{}"></div>')
+  })
+
+  it('keeps data only on components, and not under a prop the builtins read as text', async () => {
+    expect(
+      await html(
+        "<Probe config={{ a: 1 }} items={['a']} href={{ a: 1 }} src={['a']} name={{ a: 1 }} /><div tags={['a']} value={{ a: 1 }} data-x={{ a: 1 }}>x</div>",
+        { Probe },
+      ),
+    ).toBe(
+      '<div data-props="{&quot;config&quot;:{&quot;a&quot;:1},&quot;items&quot;:[&quot;a&quot;]}"></div>\n<div>x</div>',
+    )
+  })
+
+  it('keeps the image list of a custom carousel component', async () => {
+    const Carousel: ComponentType<Record<string, unknown>> = ({ images }) =>
+      createElement(
+        'div',
+        null,
+        ((images ?? []) as Array<{ src: string; alt: string }>).map((image) =>
+          createElement('img', { key: image.src, src: image.src, alt: image.alt }),
+        ),
+      )
+    expect(
+      await html(
+        "<Carousel images={[{ src: '/a.png', alt: 'A' }, { src: 'https://assets.test/b.png', alt: 'B' }]} />",
+        { Carousel },
+      ),
+    ).toContain('<img src="/a.png" alt="A"/><img src="https://assets.test/b.png" alt="B"/>')
+  })
+
+  it('accepts only renderable values where a component draws the prop as a node', async () => {
+    const Card: ComponentType<Record<string, unknown>> = ({ icon, title }) =>
+      createElement('p', null, icon as ReactNode, title as ReactNode)
+    expect(await html("<Card icon={['a', 'b']} title={5} />", { Card })).toBe('<p>ab5</p>')
+    expect(await html('<Card icon={{ a: 1 }} title={{ b: 2 }} />', { Card })).toBe('<p></p>')
+  })
+})
+
+describe('void elements', () => {
+  it.each(['<br>text</br>', '<img src="/x.png">text</img>', '<input>text</input>', '<hr>text</hr>'])(
+    'render without their children instead of failing the page: %s',
+    async (source) => {
+      const html = render((await interpretMDX({ source, components: {} })).content)
+      expect(html).not.toContain('text')
+      expect(html).toMatch(/<(br|img|input|hr)\b/)
+    },
+  )
 })
 
 /** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */

@@ -182,7 +182,7 @@ export interface MigrationPage {
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
   hidden?: boolean
   noindex?: boolean
-  /** Mintlify frontmatter `url`: a web address the page's sidebar entry leaves for, which the page's own path redirects to. */
+  /** Mintlify frontmatter `url`: a web address, or a path of the site, that the page's sidebar entry leaves for and the page's own path redirects to. */
   externalUrl?: string
   /**
    * Reader access groups (frontmatter `groups`): trimmed, non-empty names the

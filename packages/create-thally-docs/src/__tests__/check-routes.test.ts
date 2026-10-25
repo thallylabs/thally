@@ -218,6 +218,8 @@ describe('thally check reader routes', () => {
     ['titleSize="p"', '<Steps titleSize="p">\n<Step title="One">x</Step>\n</Steps>'],
     ['a Step with titleSize="p"', '<Steps titleSize="h3">\n<Step title="One" titleSize="p">x</Step>\n</Steps>'],
     ['a step shown in a code fence', '```mdx\n<Steps titleSize="h3">\n<Step title="One">x</Step>\n</Steps>\n```'],
+    ['a Step with no title', '<Steps titleSize="h3">\n<Step>x</Step>\n</Steps>'],
+    ['a Step with a blank title', '<Steps titleSize="h3">\n<Step title="   ">x</Step>\n</Steps>'],
   ])('does not take a step title as an anchor: %s', async (_name, steps) => {
     const result = await checkLinks(`${steps}\n\n[Step](#one)`)
     expect(result.output).toContain('"#one"')

@@ -67,6 +67,52 @@ export function literalRoute(route: string): string | null {
   return exactRoute(route)?.toLowerCase() ?? null
 }
 
+/**
+ * Write each exact redirect source (a literal path: no `:param`, `*`, `+`, `?`, `(` or `{`) without its trailing slash; the root stays
+ * `/`. Next removes the slash from a request before it looks for a redirect (the site runs with `trailingSlash` off), so an exact source
+ * that keeps it, like Mintlify's `/libsql/client-access/`, never matches and its URL is a 404. Mintlify sends such a request to the
+ * slashless address first, then through the redirect. Two exact sources that differ only by the slash are one address: the first listed
+ * fires, so the later one is left out and named in a warning. A stripped source that is now a redirect to itself, in any letter case
+ * (Next matches a source without regard to case), is omitted as a self-redirect.
+ *
+ * A pattern source (`/docs/:path*\/`) is left exactly as written. It never matches either, but stripping its slash would start a redirect
+ * that can loop: `/docs/:path*\/ -> /docs/v2/:path*` would send `/docs/a` to `/docs/v2/a`, then `/docs/v2/v2/a` and on, and
+ * `/Docs/:path*\/ -> /docs/:path*` would send every visit to itself.
+ */
+function trimRedirectSources(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
+  if (!config.redirects?.length) return config
+  const firstWritten = new Map<string, string>()
+  const repeats: Array<string> = []
+  const redirects: NonNullable<MigrationDocsConfig['redirects']> = []
+  for (const redirect of config.redirects) {
+    const source = exactRoute(redirect.source)
+    if (source === null) {
+      redirects.push(redirect)
+      continue
+    }
+    // Only a source that lost its slash is judged here: the pass before this one read the others, and `dropConflictingRedirects` reads the rest.
+    // The omitted redirect does not take the address from one listed after it.
+    if (source !== redirect.source && source.toLowerCase() === literalRoute(redirect.destination)) {
+      warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
+      continue
+    }
+    const first = firstWritten.get(source)
+    if (first !== undefined && first !== redirect.source) {
+      repeats.push(redirect.source)
+      continue
+    }
+    firstWritten.set(source, first ?? redirect.source)
+    redirects.push(source === redirect.source ? redirect : { ...redirect, source })
+  }
+  if (repeats.length > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Skipped ${repeats.length} redirect${repeats.length === 1 ? '' : 's'} from ${list(repeats)}: ${repeats.length === 1 ? 'its source differs' : 'each source differs'} from an earlier redirect's source only by a trailing slash, which Thally ignores when matching, so the earlier redirect was kept. Check ${repeats.length === 1 ? 'it' : 'them'} in the source docs.`,
+    })
+  }
+  return redirects.length === config.redirects.length && redirects.every((redirect, index) => redirect === config.redirects![index]) ? config : { ...config, redirects }
+}
+
 /** A literal path with its `.` and `..` segments resolved, as a browser does; a segment is one whether it is written `..` or `%2e%2e` in either case. Nothing else is decoded. */
 function resolveDotSegments(route: string): string {
   const segments: Array<string> = []
@@ -214,7 +260,7 @@ function encodeDestinationPath(destination: string, source: string): string | { 
  * `dropConflictingRedirects`: sources match the request path alone, so it loops
  * all the same, and that check says so.
  */
-export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
+function omitUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
   if (!config.redirects?.length) return config
   const unmatchable: Array<string> = []
   const unreachable: Array<string> = []
@@ -258,6 +304,14 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
   const result: MigrationDocsConfig = { ...config, redirects }
   if (redirects.length === 0) delete result.redirects
   return result
+}
+
+/**
+ * `omitUnroutableRedirects`, then each source written without its trailing slash (`trimRedirectSources`). The slash comes last so a
+ * redirect that is omitted never takes the address from one that is kept.
+ */
+export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
+  return trimRedirectSources(omitUnroutableRedirects(config, warnings), warnings)
 }
 
 /**

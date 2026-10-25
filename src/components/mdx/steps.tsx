@@ -37,7 +37,7 @@ export function Steps({ children, className, titleSize }: StepsProps) {
 // ---------------------------------------------------------------------------
 
 interface StepProps {
-  title: string
+  title?: string
   titleSize?: StepTitleSize
   /**
    * Set by the page's heading pass for a title that is a heading, so the table of contents can list it and scroll to it.
@@ -47,7 +47,9 @@ interface StepProps {
   children?: ReactNode
 }
 
-function StepTitle({ as: Title, id, children }: { as: StepTitleSize; id?: string; children: string }) {
+function StepTitle({ as: Title, id, children }: { as: StepTitleSize; id?: string; children?: string }) {
+  // Mintlify allows a step without a title: it shows the number and the content only.
+  if (!children?.trim()) return null
   // A plain-text (`p`) title is never a heading, whatever id it was handed.
   const heading = id && Title !== 'p' ? { id, 'data-heading': plainInlineText(children), 'data-level': Number(Title[1]) } : undefined
   return <Title {...heading} className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground"><InlineCodeText>{children}</InlineCodeText></Title>
