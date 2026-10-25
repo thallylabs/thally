@@ -168,10 +168,18 @@ export interface StyleProjection {
   css: string
   /** Selectors left out: platform or unreferenced markup, and the page itself (`html.x`), which no content container holds. */
   omittedSelectors: number
+  /** Rules written inside another rule (CSS nesting) that were left out: read relative to what they are in, they can match outside the content. */
+  omittedNestedRules: number
   /** Custom properties left out of a theme block because no imported rule reads them. */
   skippedVariables: Array<string>
   /** Declarations left out of a theme block that are not custom properties (`:root { background: ... }`): they would restyle the page. */
   skippedThemeDeclarations: number
+}
+
+/** Whether `node` is written inside a rule, directly or through a condition (`.a { @media (...) { .b {} } }`). */
+function isInRule(node: postcss.Node): boolean {
+  for (let ancestor: postcss.Node | undefined = node.parent; ancestor; ancestor = ancestor.parent) if (ancestor.type === 'rule') return true
+  return false
 }
 
 /**
@@ -179,7 +187,9 @@ export interface StyleProjection {
  * strings count as class names. Every rule kept is confined to the page content container (`CONTENT_CONTAINER`): the site's own
  * classes, ids and variables can match nothing in the Thally shell, however they are spelled. A theme block (`:root`, `.dark`) keeps
  * only the custom properties that an imported rule reads, directly or through another kept property, and declares them on that
- * container, under `.dark` for the dark theme; nothing else in it is taken.
+ * container, under `.dark` for the dark theme; nothing else in it is taken. A rule nested in another rule is left out and counted: it is read
+ * relative to the rule around it, where `&` and the theme blocks' own selectors can reach past the container. A condition written inside a
+ * rule (`.a { @media (...) { color: red } }`) only changes that rule's declarations, so it stays.
  */
 export function projectAuthoredStyles(css: string, contents: ReadonlyArray<string>, modules: ReadonlyArray<string> = []): StyleProjection {
   const names = authoredStyleNames(contents, modules)
@@ -190,10 +200,8 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   const themeRules: Array<postcss.Rule> = []
   root.walkRules((rule) => {
     if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
+    if (isInRule(rule)) return
     if (rule.selectors.every((part) => THEME_SELECTOR.test(part.trim()))) { themeRules.push(rule); return }
-    // A rule nested in another rule is read relative to it, so the rule it is in already confines it.
-    let nested = false
-    for (let ancestor: postcss.Node | undefined = rule.parent; ancestor; ancestor = ancestor.parent) if (ancestor.type === 'rule') nested = true
     const retained: Array<string> = []
     try {
       selectorParser((selectors) => {
@@ -217,6 +225,9 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
             } else if (node.type === 'id') {
               if (PLATFORM_IDS.has(node.value) || !names.ids.has(node.value)) hasPlatformAnchor = true
               else if (!isNestedInPseudo) hasAuthoredAnchor = true
+            } else if (node.type === 'nesting') {
+              // `&` outside a rule stands for the page itself (`:scope`), not for anything in the content.
+              hasPlatformAnchor = true
             } else if (node.type === 'attribute' && node.attribute === 'data-as') {
               // Mintlify adds this implementation detail to transformed MDX
               // paragraphs. Thally renders the native element and class. On
@@ -231,7 +242,7 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
               else hasPlatformAnchor = true
             }
           })
-          const confined = hasAuthoredAnchor && !hasPlatformAnchor ? (nested ? selector.toString() : confine(selector)) : undefined
+          const confined = hasAuthoredAnchor && !hasPlatformAnchor ? confine(selector) : undefined
           if (confined === undefined) omittedSelectors += 1
           else retained.push(confined)
         })
@@ -241,6 +252,12 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
     }
     if (retained.length) rule.selector = retained.join(', ')
     else rule.remove()
+  })
+  let omittedNestedRules = 0
+  root.walkRules((rule) => {
+    if (!isInRule(rule)) return
+    omittedNestedRules += 1
+    rule.remove()
   })
   // The variables a kept rule reads, and those they read in turn through the properties kept for them.
   const themes = new Set(themeRules)
@@ -268,12 +285,13 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
       rule.remove()
     }
   }
-  const hasStyleRule = (nodes: postcss.ChildNode[] | undefined): boolean => Boolean(nodes?.some((node) =>
-    node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node.nodes))))
+  // A condition inside a rule (`@media`) holds declarations for that rule, which is what it is there to change.
+  const hasStyleRule = (atRule: postcss.AtRule): boolean => Boolean(atRule.nodes?.some((node) =>
+    node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node)) || (node.type === 'decl' && isInRule(atRule))))
   root.walkAtRules((rule) => {
     if (rule.name === 'font-face' || rule.name === 'property') return
-    if (!hasStyleRule(rule.nodes)) rule.remove()
+    if (!hasStyleRule(rule)) rule.remove()
   })
   root.walkComments((comment) => { comment.remove() })
-  return { css: root.toString(), omittedSelectors, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
+  return { css: root.toString(), omittedSelectors, omittedNestedRules, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
 }

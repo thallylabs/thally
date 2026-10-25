@@ -761,8 +761,10 @@ for the page itself (`html.x`, `body > .x`) is skipped. `:root` and `.dark`
 blocks keep only the custom properties a kept rule reads, directly or through
 another kept property, and declare them on that element, so they reach the
 content and nothing around it; any other declaration in those blocks is left
-out. Keyframes and `@font-face` are kept as written. A warning counts what was
-skipped. Thally renders a page in `mode: custom` with no such element, so the
+out. A rule nested inside another rule (CSS nesting) is skipped, since a nested
+selector is read relative to the rule around it; write it as a separate rule to
+keep it. A `@media` or `@supports` written inside a rule is kept. Keyframes and
+`@font-face` are kept as written. A warning counts what was skipped. Thally renders a page in `mode: custom` with no such element, so the
 migration wraps that page's content (everything after its imports and exports)
 in `<div data-thally-source-page>`, and every rule is confined to that as well
 (`:where(.thally-docs-prose, [data-thally-source-page])`). A custom page that

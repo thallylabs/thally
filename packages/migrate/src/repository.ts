@@ -5550,6 +5550,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: 'style.css',
         message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup, or the page itself (html, body) rather than its content. Recreate any intentional shell customization with Thally configuration.`,
       })
+      if (rootStyleProjection.omittedNestedRules > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Skipped ${rootStyleProjection.omittedNestedRules} rule${rootStyleProjection.omittedNestedRules === 1 ? '' : 's'} nested inside other rules (CSS nesting) in the style.css stylesheet: Thally confines each kept rule to the page content, and a nested selector is read relative to the rule around it. Write them as separate rules to keep them.`,
+      })
       const { skippedVariables: unused, skippedThemeDeclarations: otherDeclarations } = rootStyleProjection
       if (unused.length + otherDeclarations > 0) warnings.push({
         code: 'unsupported-config',

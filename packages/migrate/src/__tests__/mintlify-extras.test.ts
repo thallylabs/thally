@@ -983,6 +983,17 @@ describe('custom stylesheet migration', () => {
     expect(bundle.docsConfig.stylesheets).toBeUndefined()
   })
 
+  it('reports a rule nested inside another rule, which Thally cannot confine to the page content', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
+      'a.mdx': '---\ntitle: A\n---\n\n<div className="widget">Hi</div>\n',
+      'style.css': '.widget { color: red; &:hover { color: blue } :is(&, :root) .lucide { display: none } }\n',
+    })
+    const warnings = cssWarnings(bundle)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/Skipped 2 rules nested inside other rules/)
+  })
+
   it('does not warn when there is no stylesheet', () => {
     expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })

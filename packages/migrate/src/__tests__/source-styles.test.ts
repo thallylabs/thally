@@ -17,13 +17,21 @@ const page = `<html class="dark"><body>
   <div class="not-prose"><nav class="thally-docs-breadcrumbs"><svg class="lucide"></svg></nav></div>
   <article class="thally-docs-article"><div class="thally-docs-prose prose">
     <div class="ifx-box"><svg class="lucide"></svg><p>Text <a href="/">link</a></p><b class="not-prose"></b></div>
-  </div></article>
-  <div class="not-prose"><nav class="pagination"></nav></div>
+  </div><div class="not-prose"><nav class="pagination"></nav></div></article>
   <aside id="table-of-contents-content" class="thally-docs-toc"><nav></nav></aside>
   <div lang="en"><div data-thally-source-page><div class="ifx-box"><svg class="lucide"></svg></div></div></div>
 </main>
 <footer class="thally-docs-footer"><nav></nav></footer>
 </body></html>`
+
+/** The selectors a rule has, a rule nested in another one read as the browser reads it: `&` is the rule around it, and with no `&` it is a descendant. */
+function expand(rule: postcss.Rule): Array<string> {
+  let outer: postcss.Node | undefined = rule.parent
+  while (outer && outer.type !== 'rule') outer = outer.parent
+  if (!outer) return rule.selectors
+  const around = `:is(${expand(outer as postcss.Rule).join(', ')})`
+  return rule.selectors.map((selector) => selector.includes('&') ? selector.replaceAll('&', around) : `${around} ${selector}`)
+}
 
 /** How many elements of the page the rules of `css` reach inside the content container, and outside it. */
 function reach(css: string): { inside: number; outside: number } {
@@ -31,7 +39,7 @@ function reach(css: string): { inside: number; outside: number } {
   const reached = new Set<unknown>()
   postcss.parse(css).walkRules((rule) => {
     if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
-    for (const selector of rule.selectors) for (const element of $(selector.replace(/::?[\w-]+$/, '')).toArray()) reached.add(element)
+    for (const selector of expand(rule)) for (const element of $(selector.replace(/::?[\w-]+$/, '')).toArray()) reached.add(element)
   })
   const outside = [...reached].filter((element) => $(element as never).closest('.thally-docs-prose, [data-thally-source-page]').length === 0).length
   return { inside: reached.size - outside, outside }
@@ -117,8 +125,51 @@ describe('the way a selector is confined', () => {
     expect(projected).toContain(`${SCOPE} .ifx-a { animation: spin 1s; }`)
   })
 
-  it('leaves a rule nested in a kept rule to that rule, which already confines it', () => {
-    expect(text(project('.ifx-a { color: red; .ifx-b { color: blue; } }').css)).toBe(`${SCOPE} .ifx-a { color: red; .ifx-b { color: blue; } }`)
+})
+
+describe('CSS nesting', () => {
+  const authored = '<div className="ifx-a ifx-b lucide not-prose" />'
+  const bypasses = [
+    // `&` inside :is() beside an alternative that is the page root.
+    '.ifx-a { :is(&, :root) .lucide { display: none !important; } }',
+    // The rule moves its custom properties onto the container, and the nested rule stays where `.dark` is.
+    '.dark { --site-color: red; & ~ .not-prose { display: none !important; } }\n.ifx-a { color: var(--site-color); }',
+    '.ifx-a { & ~ .not-prose { display: none; } }',
+    '.ifx-a { @media (min-width: 1px) { :is(&, html) .lucide { display: none; } } }',
+    '.ifx-a { .ifx-b { :root & .lucide { display: none; } } }',
+    ':root { --site-color: red; .not-prose { display: none; } }\n.ifx-a { color: var(--site-color); }',
+  ]
+
+  it.each(bypasses)('%s cannot reach anything outside the page content', (css) => {
+    expect(reach(project(css, authored).css).outside).toBe(0)
+  })
+
+  it('leaves out a rule nested in another and counts it, however deep', () => {
+    const result = project('.ifx-a { color: red; &:hover { color: blue; } .ifx-b { color: teal; & > i { color: gold; } } }')
+    expect(text(result.css)).toBe(`${SCOPE} .ifx-a { color: red }`)
+    expect(result.omittedNestedRules).toBe(3)
+    expect(project('.ifx-a { color: red; }').omittedNestedRules).toBe(0)
+  })
+
+  it('leaves out a rule nested in a theme block, and what only it read', () => {
+    const result = project('.dark { --site-color: red; --ifx-x: blue; & ~ .not-prose { color: var(--ifx-x); } }\n.ifx-a { color: var(--site-color); }')
+    expect(text(result.css)).toBe(`.dark ${SCOPE} { --site-color: red } ${SCOPE} .ifx-a { color: var(--site-color); }`)
+    expect(result.omittedNestedRules).toBe(1)
+    expect(result.skippedVariables).toEqual(['--ifx-x'])
+  })
+
+  it('keeps a media or supports condition written inside a kept rule, which only changes that rule', () => {
+    const css = '.ifx-a { color: red; @media (min-width: 600px) { color: blue; } @supports (display: grid) { @media print { display: grid; } } }'
+    expect(text(project(css).css)).toBe(`${SCOPE} .ifx-a { color: red; @media (min-width: 600px) { color: blue; } @supports (display: grid) { @media print { display: grid; } } }`)
+    expect(reach(project(css).css).outside).toBe(0)
+  })
+
+  it('skips a selector that uses & outside a rule, which stands for the page there', () => {
+    for (const selector of ['& .ifx-a', ':is(&, .ifx-b) .ifx-a', '.ifx-a:not(&)']) {
+      const result = project(`${selector} { color: red; }`)
+      expect(result.css, selector).toBe('')
+      expect(result.omittedSelectors, selector).toBe(1)
+    }
   })
 })
 
