@@ -305,19 +305,21 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
       rule.remove()
     }
   }
-  // A condition inside a rule (`@media`) holds declarations for that rule, which is what it is there to change.
-  const hasStyleRule = (atRule: postcss.AtRule): boolean => Boolean(atRule.nodes?.some((node) =>
+  // A condition inside a rule (`@media`) holds declarations for that rule, which is what it is there to change. A layer, even an empty one
+  // or a bare statement (`@layer a, b;`), sets the order its rules and the shell's compete in, so it stays whatever it holds.
+  const hasStyleRule = (atRule: postcss.AtRule): boolean => atRule.name.toLowerCase() === 'layer' || Boolean(atRule.nodes?.some((node) =>
     node.type === 'rule' || (node.type === 'atrule' && hasStyleRule(node)) || (node.type === 'decl' && isInRule(atRule))))
   const skippedProperties: Array<string> = []
   root.walkAtRules((rule) => {
-    if (rule.name === 'font-face') return
-    if (rule.name === 'property') {
+    const name = rule.name.toLowerCase()
+    if (name === 'font-face') return
+    if (name === 'property') {
       // A registration applies to the whole page, so it must be for a name the shell cannot be using: one a kept rule reads, and whose
       // first word (`--ifx-` in `--ifx-glow`) is one the site's own theme blocks use for its properties too.
-      const name = rule.params.trim()
-      const prefix = name.slice(0, name.indexOf('-', 2) + 1)
-      if (read.has(name) && prefix && [...themeNames].some((own) => own.startsWith(prefix))) return
-      skippedProperties.push(name)
+      const property = rule.params.trim()
+      const prefix = property.slice(0, property.indexOf('-', 2) + 1)
+      if (read.has(property) && prefix && [...themeNames].some((own) => own.startsWith(prefix))) return
+      skippedProperties.push(property)
       rule.remove()
       return
     }

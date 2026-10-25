@@ -256,3 +256,29 @@ describe('a registered custom property (@property)', () => {
     expect(result.skippedProperties).toEqual(['--ifx-glow'])
   })
 })
+
+describe('the layers of a stylesheet (@layer)', () => {
+  it('keeps the statement that orders them, whatever else is left out', () => {
+    const css = '@layer hidden, visible;\n@layer visible { .ifx-a { color: red; } }\n@layer hidden { .ifx-a { color: blue; } }'
+    const projected = text(project(css).css)
+    expect(projected.startsWith('@layer hidden, visible;')).toBe(true)
+    expect(projected).toContain(`@layer visible { ${SCOPE} .ifx-a { color: red; } } @layer hidden { ${SCOPE} .ifx-a { color: blue; } }`)
+  })
+
+  it('keeps a layer whose rules were all left out, and a statement inside a condition', () => {
+    const css = '@layer base { #navbar { color: red; } }\n@media (min-width: 1px) { @layer late, later; }\n@layer theme { .ifx-a { color: red; } }\n@layer base { .ifx-a { color: blue; } }\n@layer { }'
+    const projected = text(project(css).css)
+    expect(projected).toContain('@layer base { }')
+    expect(projected).toContain('@media (min-width: 1px) { @layer late, later; }')
+    expect(projected.indexOf('@layer base { }')).toBeLessThan(projected.indexOf('@layer theme'))
+    expect(projected).toContain(`@layer base { ${SCOPE} .ifx-a { color: blue; } }`)
+  })
+
+  it('reads an at-rule name in any case', () => {
+    expect(text(project('@LAYER a, b;\n@FONT-FACE { font-family: Site; src: url(site.woff2); }').css)).toBe('@LAYER a, b; @FONT-FACE { font-family: Site; src: url(site.woff2); }')
+  })
+
+  it('still removes a condition that is left with nothing in it', () => {
+    expect(project('@media (min-width: 1px) { #navbar { color: red; } }').css).toBe('')
+  })
+})
