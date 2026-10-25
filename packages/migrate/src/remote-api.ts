@@ -4,21 +4,17 @@
  * hop; hosted callers may inject their own DNS-pinned fetch boundary.
  */
 import { createHash } from 'node:crypto'
-import { downloadSpec, parseOpenApi, type OpenApiOperation } from './remote-spec.js'
+import { downloadSpec, parseOpenApi } from './remote-spec.js'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
-import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments, titleOperationPages } from './repository.js'
+import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, DEFAULT_ENDPOINT_DIRECTORY, linkApiMounts, mintlifyEndpointUrls, mountPrefix, parseOpenApiOperationsForLinking, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments, titleOperationPages } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
 import { isPageOnlyTab, markPageOnlyTabs, pageOnlyApi } from './repository.js'
 
-function slug(value: string): string {
-  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
-
 /** The endpoint page of an operation of the spec the renderer serves under `specId`. */
-function operationTarget(specId: string, operation: OpenApiOperation): string {
+function operationTarget(specId: string, operation: { method: string; path: string }): string {
   return `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
 }
 
@@ -27,7 +23,6 @@ interface BoundSpec {
   reference: RemoteApiSpec
   filename: string
   content: Buffer
-  operations: Array<OpenApiOperation>
   tabName: string
   /** Set when the operations the tab listed became pages (`addEndpointPages`): those operations, in listed order, and the spec has no API tab of its own. */
   endpointOperations?: Array<string>
@@ -124,7 +119,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       }
       // The format the body is in, not what its URL says: the saved extension must match it, or the install step drops a YAML spec saved as `.json` as invalid JSON.
       const { format: extension, document } = parseSpecDocument(body.toString('utf8'))
-      const operations = parseOpenApi(document)
+      // Refuses what is not an OpenAPI 3 document, or has too many paths to import.
+      parseOpenApi(document)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
       // Several tabs may bind one spec: it is saved once.
       if (!assets.some((asset) => asset.path === `openapi/${filename}`)) assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
@@ -156,7 +152,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       // A spec the tab rejects below has no binding, so a reference never moves to it.
       if (endpoint) {
         bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
-        bound.push({ reference, filename, content: body, operations, tabName: reference.tabLabel ?? 'API Reference', endpointOperations: endpoint.operations })
+        bound.push({ reference, filename, content: body, tabName: reference.tabLabel ?? 'API Reference', endpointOperations: endpoint.operations })
         continue
       }
       const api = { source: `openapi/${filename}`, ...(reference.navigation === false ? { navigation: false } : {}), ...(reference.groups ? { groups: reference.groups } : {}) }
@@ -171,7 +167,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         continue
       }
       bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
-      bound.push({ reference, filename, content: body, operations, tabName: bindApiTab(tabs, reference, api) })
+      bound.push({ reference, filename, content: body, tabName: bindApiTab(tabs, reference, api) })
     } catch (error) {
       warnings.push({
         code: 'fetch-failed',
@@ -245,18 +241,22 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const existingSources = new Set(redirects.map((redirect) => literalRoute(redirect.source) ?? redirect.source.toLowerCase()))
   const mounts = directories.map(mountPrefix).filter(Boolean)
   const underMount = (source: string): boolean => mounts.some((prefix) => source.toLowerCase() === `/${prefix}` || source.toLowerCase().startsWith(`/${prefix}/`))
-  // Label of an operation -> its endpoint page; null when more than one carries it, or its spec serves no endpoint pages.
+  // Last two segments of an operation's Mintlify URL (its tag and title, or `api-reference` and its title when it has no tag) -> its endpoint page;
+  // null when more than one carries them, or its spec serves no endpoint pages.
   const guesses = new Map<string, string | null>()
   const specIds = apiTabSpecIds(tabs)
-  for (const { reference, filename, operations, tabName } of bound) {
+  for (const { reference, filename, content, tabName } of bound) {
     const specId = specIds.find(({ tab }) => tab.tab === tabName && tab.api?.source === `openapi/${filename}`)?.specId
     // A spec whose every mount lists operations published only those; any other spec published them all.
     const listed = reference.directories?.length && reference.directories.every((directory) => directory.operations)
       ? new Set(reference.directories.flatMap((directory) => directory.operations ?? []).map((name) => name.trim().split(/\s+/)).map(([method, ...path]) => `${method.toLowerCase()} ${path.join(' ')}`))
       : null
-    for (const operation of operations) {
-      if (listed && !listed.has(`${operation.method} ${operation.path}`)) continue
-      const key = `${slug(operation.tag)}/${slug(operation.summary)}`
+    const served = parseOpenApiOperationsForLinking(content).filter((operation) => !listed || listed.has(`${operation.method} ${operation.path}`))
+    const endpoints = mintlifyEndpointUrls(DEFAULT_ENDPOINT_DIRECTORY, served)
+    for (const operation of served) {
+      const endpoint = endpoints.get(operation)!
+      if (!endpoint.named) continue
+      const key = endpoint.url.split('/').slice(-2).join('/')
       guesses.set(key, guesses.has(key) || !specId ? null : operationTarget(specId, operation))
     }
   }

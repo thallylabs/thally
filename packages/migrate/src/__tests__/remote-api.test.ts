@@ -115,7 +115,7 @@ describe('remote OpenAPI hydration', () => {
     expect(result.warnings).toEqual([])
   })
 
-  it('does not guess a redirect when operation labels collide', async () => {
+  it('guesses a redirect to the first of two operations whose labels repeat, as Mintlify numbers the later ones', async () => {
     const duplicate = JSON.stringify({
       openapi: '3.0.0', info: { title: 'Example', version: '1' },
       paths: {
@@ -125,7 +125,8 @@ describe('remote OpenAPI hydration', () => {
     })
     const result = await hydrateRemoteApiSpecs(bundle(), async (url) => ({ finalUrl: url, body: duplicate, contentType: 'application/json' }))
     expect(result.assets).toHaveLength(1)
-    expect(result.docsConfig.redirects).toBeUndefined()
+    // The first keeps the URL; the second is `list-users-1`, which nothing links to.
+    expect(result.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users', destination: '/api/default/users/get', permanent: false }])
   })
 })
 

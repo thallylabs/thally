@@ -39,9 +39,33 @@ export interface MintlifyReferenceAccess {
   access: NavigationAccess
 }
 
+/** A page (its navigation id) or nested group a group lists, in authored order. */
+export type MintlifyDirectoryItem = string | MintlifyDirectoryGroup
+
+export interface MintlifyDirectoryGroup {
+  group: string
+  /** Navigation id of the group's own landing page (`root`). */
+  root?: string
+  hidden?: boolean
+  items: Array<MintlifyDirectoryItem>
+}
+
+/** A group with a `root` page and a `directory` mode: its root page lists the group's pages as cards. */
+export interface MintlifyDirectory extends MintlifyDirectoryGroup {
+  root: string
+  mode: 'accordion' | 'card'
+  locale?: string
+  /** Walked under a language other than the default: that language may have no page of its own, as the default language's root page is served instead. */
+  otherLanguage?: boolean
+  /** How many API operations (`"GET /users"` entries) the group lists, groups nested in it included: Thally lists pages as cards, not operations. */
+  operations?: number
+}
+
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig
   pageReferences: Array<MintlifyPageReference>
+  /** Groups whose `directory` setting asks their root page to list their pages. */
+  directories: Array<MintlifyDirectory>
   /**
    * Access imposed by navigation containers, one entry per appearance of a
    * page (open appearances included, so a page listed in several places can
@@ -672,6 +696,9 @@ interface ProjectionContext {
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   appearances: Array<MintlifyReferenceAccess>
+  directories: Array<MintlifyDirectory>
+  /** `directory` of the nearest enclosing group that sets one. */
+  directoryMode?: 'none' | MintlifyDirectory['mode']
   /** Access accumulated from the containers above the node being walked. */
   access: NavigationAccess
   /** Where an operation entry ("GET /users") under the node being walked goes. */
@@ -687,6 +714,8 @@ interface ProjectionContext {
   limits: { tooDeep: boolean }
   /** Label of the nearest enclosing navigation group, for warnings. */
   groupLabel?: string
+  /** Operation entries met so far under the group being walked, those of the groups nested in it added as each is finished. */
+  operationsListed: number
 }
 
 /**
@@ -904,6 +933,7 @@ function convertPage(
 ): string | MigrationNavigationGroup | null {
   if (typeof value === 'string') {
     if (OPENAPI_OPERATION_REF.test(value)) {
+      context.operationsListed += 1
       const { bound, gated, hidden, level } = context.operations
       if (!context.operationGroups || !bound) {
         warnOnce(
@@ -995,10 +1025,17 @@ function convertPageObject(
   if ('group' in object || pages.length > 0) {
     const children: Array<string | MigrationNavigationGroup> = []
     const outerGroupLabel = context.groupLabel
+    const outerDirectoryMode = context.directoryMode
     context.groupLabel = labelFor(object, 'Documentation')
+    // Mintlify's `directory` applies to a group and every group below it that does not set its own.
+    context.directoryMode = directoryMode(object.directory) ?? outerDirectoryMode
+    const outerListed = context.operationsListed
+    context.operationsListed = 0
+    let listed = 0
+    let rootId: string | null = null
     if (typeof object.root === 'string') {
-      const root = registerReference(object.root, context)
-      if (root) children.push(root)
+      rootId = registerReference(object.root, context)
+      if (rootId) children.push(rootId)
     }
     try {
       for (const page of pages) {
@@ -1017,16 +1054,62 @@ function convertPageObject(
       }
     } finally {
       context.groupLabel = outerGroupLabel
+      context.directoryMode = outerDirectoryMode
+      listed = context.operationsListed
+      context.operationsListed = outerListed + listed
     }
     if (children.length === 0) return null
-    return {
+    const projected: MigrationNavigationGroup = {
       group: labelFor(object, 'Documentation'),
       ...(iconName(object.icon) ? { icon: iconName(object.icon) } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages: children,
     }
+    if (rootId) groupRoots.set(projected, rootId)
+    const mode = directoryMode(object.directory) ?? outerDirectoryMode
+    // A group without a `root` page has nowhere to show its pages, and Mintlify ignores `directory` there.
+    if (typeof object.root === 'string' && (mode === 'card' || mode === 'accordion')) {
+      if (rootId) {
+        context.directories.push({
+          ...directoryGroup(projected),
+          root: rootId,
+          mode,
+          ...(listed > 0 ? { operations: listed } : {}),
+          ...(context.locale ? { locale: context.locale } : {}),
+          ...(context.otherLanguage ? { otherLanguage: true } : {}),
+        })
+      } else {
+        warnOnce(
+          context,
+          `directory-root:${projected.group}`,
+          `Group "${projected.group}" sets directory, but its root ${JSON.stringify(object.root)} is not a page of this site, so its page cards were not added.`,
+        )
+      }
+    }
+    return projected
   }
   return null
+}
+
+/** The navigation id of each projected group's own landing page (`root`), which `pages` lists first among its entries. */
+const groupRoots = new WeakMap<MigrationNavigationGroup, string>()
+
+/** Mintlify's `directory`: `none`, `accordion` or `card`; anything else is no setting at all. */
+function directoryMode(value: unknown): 'none' | MintlifyDirectory['mode'] | undefined {
+  return value === 'none' || value === 'accordion' || value === 'card' ? value : undefined
+}
+
+/** A projected group as the pages it lists, in order, without its landing page. */
+function directoryGroup(group: MigrationNavigationGroup): MintlifyDirectoryGroup {
+  const root = groupRoots.get(group)
+  return {
+    group: group.group,
+    ...(root ? { root } : {}),
+    ...(group.hidden ? { hidden: true } : {}),
+    items: group.pages.flatMap((entry): Array<MintlifyDirectoryItem> => typeof entry === 'string'
+      ? (entry === root ? [] : [entry])
+      : [directoryGroup(entry)]),
+  }
 }
 
 const KNOWN_NAVIGATION_KEYS = new Set([
@@ -1791,6 +1874,7 @@ export function projectMintlifyNavigation(
   const seenReferences = new Set<string>()
   const warningKeys = new Set<string>()
   const appearances: Array<MintlifyReferenceAccess> = []
+  const directories: Array<MintlifyDirectory> = []
   const gatedSourceRefs: Array<string> = []
   const gatedNodes = new Map<object, string>()
   const navigation = objectValue(config.navigation) ?? config
@@ -1851,6 +1935,7 @@ export function projectMintlifyNavigation(
         warnings,
         warningKeys,
         appearances,
+        directories,
         access: descendNavigationAccess(rootAccess, navigationAccess(language)),
         operations: descendOperationScope(rootOperations, language, true),
         operationGroups,
@@ -1858,6 +1943,7 @@ export function projectMintlifyNavigation(
         gatedSourceRefs,
         gatedNodes,
         limits,
+        operationsListed: 0,
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1874,7 +1960,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, appearances, access: rootAccess, operations: rootOperations, operationGroups, gatedSourceRefs, gatedNodes, limits, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, appearances, directories, access: rootAccess, operations: rootOperations, operationGroups, gatedSourceRefs, gatedNodes, limits, operationsListed: 0, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       // A bare list of groups (mint.json): the reference collector does not walk it, so no container binds the operations in it.
@@ -2003,6 +2089,7 @@ export function projectMintlifyNavigation(
       ...(redirects.length > 0 ? { redirects } : {}),
     },
     pageReferences: references,
+    directories,
     referenceAccess: appearances,
     gatedSourceRefs,
     apiTabSlots,
