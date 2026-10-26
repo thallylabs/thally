@@ -3,6 +3,7 @@
 import 'server-only'
 
 import { headers } from 'next/headers'
+import { isAdminEnabledEdge } from '@/lib/admin/auth-edge'
 import { getContentSource } from '@/lib/content-source'
 import { findDocSource } from './translation-source'
 import { resolveDocRoute } from './doc-route'
@@ -12,12 +13,15 @@ import type { I18nConfig } from './config'
 /**
  * The root layout sits above the docs catch-all, so its params contain no
  * locale. Multi-locale sites therefore need request rendering to emit truthful
- * initial HTML. Single-locale sites never touch headers and retain prerendering.
+ * initial HTML. Live admin settings also need this boundary before they enable
+ * a second locale, avoiding a later static-to-dynamic render. Single-locale
+ * sites without live admin settings retain prerendering.
  */
 export async function getDocumentLocale(config: I18nConfig): Promise<string> {
-  if (config.locales.length < 2) return config.defaultLocale
+  if (config.locales.length < 2 && !isAdminEnabledEdge()) return config.defaultLocale
 
   const pathname = (await headers()).get(DOCUMENT_PATH_HEADER)
+  if (config.locales.length < 2) return config.defaultLocale
   if (!pathname?.startsWith('/') || pathname.startsWith('//')) return config.defaultLocale
   let segments: string[]
   try {

@@ -5,9 +5,11 @@ const state = vi.hoisted(() => ({
   pathname: '/es/quickstart' as string | null,
   files: {} as Record<string, string>,
   operation: null as object | null,
+  adminEnabled: false,
   headers: vi.fn(),
 }))
 vi.mock('next/headers', () => ({ headers: state.headers }))
+vi.mock('@/lib/admin/auth-edge', () => ({ isAdminEnabledEdge: () => state.adminEnabled }))
 vi.mock('@/data/docs', () => ({ getI18nConfig: () => ({ defaultLocale: 'en' }) }))
 vi.mock('@/lib/content-source', () => ({
   getContentSource: () => ({
@@ -29,6 +31,7 @@ const config: I18nConfig = {
 beforeEach(() => {
   state.pathname = '/es/quickstart'
   state.operation = null
+  state.adminEnabled = false
   state.files = { 'src/content/quickstart.mdx': 'English source' }
   state.headers.mockReset().mockImplementation(async () => new Headers(state.pathname ? { [DOCUMENT_PATH_HEADER]: state.pathname } : {}))
 })
@@ -78,5 +81,13 @@ describe('server document locale', () => {
   it('keeps single-locale sites statically renderable without reading request headers', async () => {
     expect(await getDocumentLocale({ defaultLocale: 'fr', locales: [{ code: 'fr', label: 'Français' }] })).toBe('fr')
     expect(state.headers).not.toHaveBeenCalled()
+  })
+
+  it('establishes the request boundary before admin settings enable another locale', async () => {
+    state.adminEnabled = true
+    expect(await getDocumentLocale({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] })).toBe('en')
+    expect(state.headers).toHaveBeenCalledOnce()
+    state.files['src/content/es/quickstart.mdx'] = 'Traducción'
+    expect(await getDocumentLocale(config)).toBe('es')
   })
 })

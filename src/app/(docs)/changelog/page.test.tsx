@@ -1,18 +1,20 @@
 /** The source changelog and its translated routes must form one truthful cluster. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 const state = vi.hoisted(() => ({
   description: 'd',
   noindex: false,
   allowed: true,
+  missing: false,
   translations: ['es', 'fr'],
   excluded: [] as string[],
 }))
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound') } }))
 vi.mock('@/data/get-doc', () => ({
-  getDocFromParams: async (_slug: string[], locale?: string) => ({
+  getDocFromParams: async (slug: string[], locale?: string) => state.missing || slug.join('/') !== 'changelog' ? null : ({
     id: 'changelog', slug: ['changelog'], title: 'API Changelog', description: state.description,
-    href: '/changelog', group: 'g', component: () => null,
+    href: '/changelog', group: 'g', component: () => <p>Changelog releases</p>,
     noindex: state.noindex || Boolean(locale && state.excluded.includes(locale)),
     isFallback: Boolean(locale && !state.translations.includes(locale)),
   }),
@@ -25,10 +27,13 @@ vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
 }))
 vi.mock('@/lib/reader-auth/context', () => ({ getReaderContext: async () => ({}) }))
-vi.mock('@/lib/reader-auth/page-gate', () => ({ canReaderViewResolvedDoc: async () => state.allowed }))
+vi.mock('@/lib/reader-auth/page-gate', () => ({
+  canReaderViewResolvedDoc: async () => state.allowed,
+  denyDocumentAccess: () => { throw new Error('document-denied') },
+}))
 vi.mock('@/lib/reader-auth/config', () => ({ isReaderAuthActive: () => false }))
 vi.mock('@/data/api-reference', () => ({ lookupApiOperationForFrontmatter: async () => ({ node: null }) }))
-vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: () => null }))
+vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))
 vi.mock('@/components/docs/doc-pagination', () => ({ DocPagination: () => null }))
 vi.mock('@/components/docs/doc-header', () => ({ DocHeader: () => null }))
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: () => null }))
@@ -47,17 +52,25 @@ vi.mock('@/lib/site-url', () => ({ getSiteUrl: () => 'https://docs.example.test'
 vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({ name: 'OpenRouter | Documentation' }) }))
 vi.mock('@/lib/og', () => ({ buildOgImageUrl: () => '', formatOgBreadcrumb: () => '', formatOgDisplayUrl: () => '' }))
 
-import { generateMetadata } from './page'
+import ChangelogPage, { generateMetadata } from './page'
 import { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 
 const translatedMetadata = (locale: string) => generateDocsMetadata({ params: Promise.resolve({ slug: [locale, 'changelog'] }) })
 
 beforeEach(() => {
-  state.description = 'd'; state.noindex = false; state.allowed = true
+  state.description = 'd'; state.noindex = false; state.allowed = true; state.missing = false
   state.translations = ['es', 'fr']; state.excluded = []
 })
 
 describe('changelog page metadata', () => {
+  it('renders the changelog body and preserves missing or denied document handling', async () => {
+    expect(renderToStaticMarkup(await ChangelogPage())).toContain('Changelog releases')
+    state.missing = true
+    await expect(ChangelogPage()).rejects.toThrow('document-denied')
+    state.missing = false; state.allowed = false
+    await expect(ChangelogPage()).rejects.toThrow('document-denied')
+  })
+
   it('uses the configured separator like other doc pages', async () => {
     expect((await generateMetadata()).title).toEqual({ absolute: 'API Changelog - OpenRouter | Documentation' })
   })
