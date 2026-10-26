@@ -4,9 +4,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { Logo } from './logo'
 
 vi.mock('@/components/theme/reader-theme', () => ({ useReaderTheme: () => ({ resolvedTheme: 'light' }) }))
-vi.mock('./use-site-name', () => ({ useSiteName: () => 'Example', displaySiteName: (name: string) => name }))
+const availability = vi.hoisted(() => ({ light: true, dark: true }))
+vi.mock('./use-site-name', () => ({ useSiteName: () => 'Example', useLogoAvailability: () => availability, displaySiteName: (name: string) => name }))
 
 describe('logo sizing', () => {
+  it('omits the custom image entirely when no logo exists', () => {
+    availability.light = false
+    const html = renderToStaticMarkup(<Logo />)
+    availability.light = true
+    expect(html).not.toContain('/api/brand/logo')
+    expect(html).not.toContain('data-custom-logo')
+    expect(html).toContain('/brand/default-logo-light.svg')
+    expect(html).toContain('>Example</span>')
+  })
+
   it('renders a height-led custom image with bounded, proportional width', () => {
     const html = renderToStaticMarkup(<Logo showText={false} />)
     const custom = html.match(/<img[^>]*data-custom-logo=""[^>]*>/)?.[0]

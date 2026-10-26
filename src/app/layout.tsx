@@ -36,6 +36,7 @@ import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
+import { getDocumentLocale } from '@/lib/i18n/document'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { validMetatags } from '@/lib/metatags'
 import { getBuildSiteAppearance } from '@/lib/cloud-link/appearance'
@@ -246,17 +247,6 @@ const brandCss = Object.entries(brandStyle)
 const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
-function documentLocaleScript(locales: ReadonlyArray<{ code: string }>, defaultLocale: string): string {
-  // The root layout is shared with admin and unprefixed routes, so Next cannot
-  // receive the child catch-all's locale as a root param. Set the document
-  // language before the body renders while the article itself stays SSR-tagged.
-  const directions = Object.fromEntries(locales
-    .filter((locale) => locale.code !== defaultLocale)
-    .map((locale) => [locale.code, localeDirection(locale.code)]))
-  const serialized = JSON.stringify(directions).replace(/</g, '\\u003c')
-  return `(() => { const locales = ${serialized}; const code = location.pathname.split('/')[1]; if (Object.hasOwn(locales, code)) { document.documentElement.lang = code; document.documentElement.dir = locales[code]; } })();`
-}
-
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // These values belong to the immutable release binding, not the compiled
   // module. Resolve them during rendering so content-only publishes can reuse
@@ -277,6 +267,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
   const defaultLang = i18n.defaultLocale
+  const documentLang = await getDocumentLocale(i18n)
   const siteJsonLd = buildSiteJsonLd({
     siteUrl,
     siteName: effectiveSite.name,
@@ -290,8 +281,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     // globals.css --font-heading default and docs.json font overrides — can
     // reference and override them.
     <html
-      lang={defaultLang}
-      dir={localeDirection(defaultLang)}
+      lang={documentLang}
+      dir={localeDirection(documentLang)}
       suppressHydrationWarning
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
@@ -302,7 +293,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     >
       <head>
         <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
-        <Script id="thally-document-locale" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: documentLocaleScript(i18n.locales, defaultLang) }} />
         {!appearance.showToggle && (
           <Script id="thally-locked-appearance" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
         )}

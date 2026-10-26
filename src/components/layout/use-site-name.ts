@@ -11,6 +11,7 @@ import {
 import { siteConfig } from '@/data/site'
 
 const SiteNameContext = createContext<string | null>(null)
+const LogoAvailabilityContext = createContext({ light: false, dark: false })
 
 interface SiteNameProviderProps {
   children: ReactNode
@@ -25,15 +26,26 @@ interface SiteNameProviderProps {
  */
 export function SiteNameProvider({ children, initialName }: SiteNameProviderProps) {
   const [name, setName] = useState(initialName)
+  const [logoAvailability, setLogoAvailability] = useState({ light: false, dark: false })
   useEffect(() => {
     fetch('/api/site-config')
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => {
         if (c?.name && typeof c.name === 'string') setName(c.name)
+        setLogoAvailability({
+          light: c?.logoAvailability?.light === true,
+          dark: c?.logoAvailability?.dark === true,
+        })
       })
       .catch(() => {})
   }, [])
-  return createElement(SiteNameContext.Provider, { value: name }, children)
+  return createElement(SiteNameContext.Provider, { value: name },
+    createElement(LogoAvailabilityContext.Provider, { value: logoAvailability }, children))
+}
+
+/** Only probe configured artwork; missing or unavailable config keeps the default mark. */
+export function useLogoAvailability() {
+  return useContext(LogoAvailabilityContext)
 }
 
 /** The effective site name — request snapshot, refreshed live by the dashboard. */

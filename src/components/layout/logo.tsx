@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useReaderTheme } from '@/components/theme/reader-theme'
 import { cn } from '@/lib/utils'
-import { displaySiteName, useSiteName } from './use-site-name'
+import { displaySiteName, useLogoAvailability, useSiteName } from './use-site-name'
 
 // Stable no-op subscribe for the hydration gate below.
 const emptySubscribe = () => () => {}
@@ -18,9 +18,10 @@ interface LogoProps {
 /** Preserve uploaded artwork proportions in both header and mobile navigation. */
 export function Logo({ className, showText = true }: LogoProps) {
   const siteName = useSiteName()
-  // Show an admin-uploaded logo when one exists; otherwise the default mark +
-  // site name. The <img> probes /api/brand/logo and swaps in on load.
-  const [customOk, setCustomOk] = useState(false)
+  const logoAvailability = useLogoAvailability()
+  // Track the loaded URL so changing mode cannot display a failed replacement
+  // or keep an earlier mode's load state after its artwork is removed.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null)
   const imgRef = useRef<HTMLImageElement>(null)
 
   // Follow the site theme: dark mode requests the dark variant (the route
@@ -32,35 +33,45 @@ export function Logo({ className, showText = true }: LogoProps) {
   const { resolvedTheme } = useReaderTheme()
   const isDark = mounted && resolvedTheme === 'dark'
   const src = isDark ? '/api/brand/logo?mode=dark' : '/api/brand/logo'
+  const hasCustomLogo = logoAvailability[isDark ? 'dark' : 'light']
+  const customOk = hasCustomLogo && loadedSrc === src
 
-  // The <img> is server-rendered, so it can finish loading BEFORE React attaches
-  // onLoad (the event never fires). Check completeness on mount to catch that.
+  // A cached image can complete before its load handler runs. Inspect the
+  // active source whenever configuration or the reader mode changes.
   // The default mark can be missing too (a site that pruned public/brand):
   // drop it rather than show a broken-image icon; the site name stays.
   const defaultRef = useRef<HTMLImageElement>(null)
   const [defaultOk, setDefaultOk] = useState(true)
 
   useEffect(() => {
-    const img = imgRef.current
-    if (img?.complete) setCustomOk(img.naturalWidth > 0)
-    const fallback = defaultRef.current
-    if (fallback?.complete && fallback.naturalWidth === 0) setDefaultOk(false)
-  }, [])
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      const img = imgRef.current
+      if (img?.complete) setLoadedSrc(img.naturalWidth > 0 ? src : null)
+      const fallback = defaultRef.current
+      if (fallback?.complete && fallback.naturalWidth === 0) setDefaultOk(false)
+    })
+    return () => { cancelled = true }
+  }, [src, hasCustomLogo])
 
   return (
     <div className={cn('inline-flex min-w-0 max-w-full items-center gap-2', className)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        ref={imgRef}
-        src={src}
-        alt={siteName}
-        data-custom-logo=""
-        onLoad={() => setCustomOk(true)}
-        onError={() => setCustomOk(false)}
-        // A fixed height gives icons and wordmarks equal visual weight. The
-        // width cap contains unusually wide assets; object-fit avoids distortion.
-        style={{ height: 28, width: 'auto', maxWidth: 'min(160px, 100%)', objectFit: 'contain', objectPosition: 'left', display: customOk ? 'block' : 'none' }}
-      />
+      {hasCustomLogo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={src}
+          ref={imgRef}
+          src={src}
+          alt={siteName}
+          data-custom-logo=""
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setLoadedSrc(null)}
+          // A fixed height gives icons and wordmarks equal visual weight. The
+          // width cap contains unusually wide assets; object-fit avoids distortion.
+          style={{ height: 28, width: 'auto', maxWidth: 'min(160px, 100%)', objectFit: 'contain', objectPosition: 'left', display: customOk ? 'block' : 'none' }}
+        />
+      ) : null}
       {!customOk ? (
         <>
           {/* The default Thally leaf keeps its exact olive in both modes. A
