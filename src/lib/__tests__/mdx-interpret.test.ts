@@ -9,8 +9,13 @@
 
 import { Children, cloneElement, createElement, isValidElement, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ prefetch: vi.fn() }),
+}))
+
 import { interpretMDX } from '@/lib/mdx-interpret'
+import { node, oneOf, propContractOf, requiredText, text, textList, textOrList, withPropContract } from '@/lib/mdx-prop-contract'
 import { Code, Pre } from '@/components/mdx/code-blocks'
 import { useMDXComponents } from '@/components/mdx/mdx-components'
 
@@ -757,5 +762,128 @@ describe('highlighted code is real elements', () => {
     const html = render(content)
     expect(html).toMatch(/<span class="thally-line-add"><span style="color:[^"]+">const<\/span>/)
     expect(html).toMatch(/<\/span>\n<span><span style=/)
+  })
+})
+
+describe('props a component reads as text', () => {
+  const components = useMDXComponents({}) as never
+  const html = async (source: string, map: Record<string, unknown> = components) =>
+    render((await interpretMDX({ source, components: map as never })).content)
+
+  it('does not hand GitHub.Repo a JSX title, which it trims', async () => {
+    const out = await html('<GitHub.Repo repo="acme/docs" title={<span>Docs</span>} />')
+    expect(out).toMatch(/<strong[^>]*>acme\/docs<\/strong>/)
+    expect(out).not.toContain('Docs')
+  })
+
+  it.each([
+    ['a number', 'title={5}'],
+    ['a boolean', 'title'],
+    ['a list', "title={['a']}"],
+    ['an object', 'title={{ a: 1 }}'],
+  ])('falls back to the repository name when the GitHub title is %s', async (_name, attribute) => {
+    expect(await html(`<GitHub repo="acme/docs" ${attribute} />`)).toMatch(/<strong[^>]*>acme\/docs<\/strong>/)
+  })
+
+  it('renders nothing for a GitHub repository that is not text', async () => {
+    expect(await html('<GitHub.Repo repo={<b>acme/docs</b>} title="T" />')).toBe('')
+  })
+
+  it.each(['Info', 'Warning', 'Check', 'Danger', 'Error', 'Note', 'Tip', 'Callout'])(
+    'keeps a %s that was given a JSX icon and numeric colours',
+    async (name) => {
+      expect(await html(`<${name} icon={<svg />} color={5} colorDark>Careful</${name}>`)).toContain('Careful')
+    },
+  )
+
+  // One case per other component whose props are read as text: each crashed the page
+  // when an author passed JSX, a number, a bare attribute or an object.
+  it.each<[string, string, string | RegExp]>([
+    ['CodeBlock', '<CodeBlock language={5} icon={<b>i</b>}>{`const x = 1`}</CodeBlock>', 'const x = 1'],
+    ['CodeGroup', '<CodeGroup icon={<b>i</b>} language={5} code>echo hi</CodeGroup>', 'echo hi'],
+    ['pre', '<pre icon={5} language={<b>i</b>} code>echo hi</pre>', 'echo hi'],
+    ['Card', '<Card title="T" href={<b>x</b>} img={5}>body</Card>', 'body'],
+    ['Tile', '<Tile title="T" href img={<b>x</b>}>body</Tile>', 'body'],
+    ['Hero', '<Hero title="T" primaryHref={5} primaryLabel={{ a: 1 }} secondaryHref secondaryLabel={{ b: 2 }} />', '>T<'],
+    ['Video source', '<Video src={<b>x</b>} />', '<code></code>'],
+    ['Video poster', '<Video src="/a.mp4" poster={5} />', '<video'],
+    ['Accordion', '<Accordion title={<b>JSX</b>} icon={5}>body</Accordion>', 'body'],
+    ['Tooltip', '<Tooltip tip="t" cta="Go" href={5}>word</Tooltip>', 'word'],
+    ['Icon', '<Icon icon={<svg />} src={5} />', /^$/],
+    ['Step', '<Step title={<b>x</b>} titleSize={5}>body</Step>', 'body'],
+    ['Step with a tag name', '<Step title="Go" titleSize="br">body</Step>', '<h3'],
+    ['Update', '<Update label={<b>v</b>} date={5} tags={5}>body</Update>', 'body'],
+    ['ResponseField', '<ResponseField name="n" pre={5} post>body</ResponseField>', 'body'],
+    ['Prompt', '<Prompt description="d" icon={5} actions={5}>text</Prompt>', '>d<'],
+    ['Embed', '<Embed src={5} />', /^$/],
+    ['LegacyView', '<LegacyView src />', /^$/],
+    ['Banner', '<Banner content={{ a: 1 }} />', 'Site banner preview'],
+    ['Color.Item', '<Color.Item hex={{ a: 1 }} name="brand" />', 'brand'],
+  ])('renders %s when a text prop holds something else', async (_name, source, expected) => {
+    const out = await html(source)
+    if (typeof expected === 'string') expect(out).toContain(expected)
+    else expect(out).toMatch(expected)
+  })
+
+  it('never lets a step title size pick the element', async () => {
+    const out = await html('<Steps titleSize="iframe"><Step title="Go">body</Step></Steps>')
+    expect(out).not.toContain('<iframe')
+    expect(out).toContain('<h3')
+  })
+
+  it('keeps JSX where the component draws the prop as a node', async () => {
+    expect(await html('<Card title={<em>Docs</em>} />')).toContain('<em>Docs</em>')
+    expect(await html('<Update label="v1" title={<em>Docs</em>}>x</Update>')).toContain('<em>Docs</em>')
+    expect(await html('<Hero title="T" subtitle={<em>sub</em>} />')).toContain('<em>sub</em>')
+    expect(await html('<Tooltip tip={<em>tip</em>} headline={<b>H</b>}>w</Tooltip>')).toMatch(/<b>H<\/b>[\s\S]*<em>tip<\/em>/)
+    expect(await html('<Badge icon={<svg data-icon />}>b</Badge>')).toContain('<svg data-icon="true">')
+  })
+
+  it('keeps valid text and valid titles', async () => {
+    expect(await html('<GitHub.Repo repo="acme/docs" title="Docs" />')).toMatch(/<strong[^>]*>Docs<\/strong>/)
+    expect(await html('<Step title="Go" titleSize="h2">body</Step>')).toContain('<h2')
+  })
+
+  describe('a declared contract', () => {
+    const show = (props: Record<string, unknown>) =>
+      createElement('div', { 'data-props': JSON.stringify(props, (_key, value) => (isValidElement(value) ? '<element>' : value)) })
+    const Probe = withPropContract(show, {
+      title: text, repo: requiredText, tags: textOrList, items: textList, size: oneOf('a', 'b'), label: node,
+    })
+
+    it('drops what a rule rejects, keeps the rest, and fills in a required prop', async () => {
+      expect(
+        await html(
+          "<Probe title={<b>x</b>} repo={5} tags={5} items={['a', 1]} size=\"c\" label={{ a: 1 }} other={<i>y</i>} constructor={1} />",
+          { Probe },
+        ),
+      ).toBe('<div data-props="{&quot;repo&quot;:&quot;&quot;,&quot;other&quot;:&quot;&lt;element&gt;&quot;,&quot;constructor&quot;:1}"></div>')
+    })
+
+    it('keeps what every rule accepts', async () => {
+      expect(
+        await html("<Probe title=\"T\" repo=\"a/b\" tags=\"x, y\" items={['p']} size=\"a\" label={<b>x</b>} />", { Probe }),
+      ).toBe(
+        '<div data-props="{&quot;title&quot;:&quot;T&quot;,&quot;repo&quot;:&quot;a/b&quot;,&quot;tags&quot;:&quot;x, y&quot;,&quot;items&quot;:[&quot;p&quot;],&quot;size&quot;:&quot;a&quot;,&quot;label&quot;:&quot;&lt;element&gt;&quot;}"></div>',
+      )
+    })
+
+    it('applies to a spread attribute and to an element nested in a prop', async () => {
+      const Wrap: ComponentType<Record<string, unknown>> = ({ icon }) => createElement('section', null, icon as ReactNode)
+      expect(await html('<Probe {...{ title: 5 }} />', { Probe })).toBe('<div data-props="{}"></div>')
+      expect(await html('<Wrap icon={<Probe title={<b>x</b>} />} />', { Wrap, Probe })).toBe(
+        '<section><div data-props="{}"></div></section>',
+      )
+    })
+
+    it('is declared on the registry entries whose props only run after hydration', () => {
+      expect(Object.keys(propContractOf(components.View) ?? {})).toEqual(['icon'])
+    })
+  })
+
+  it('does not apply a built-in contract to a component of the same name that the site registers', async () => {
+    const Own: ComponentType<Record<string, unknown>> = ({ title }) =>
+      createElement('p', null, title as ReactNode)
+    expect(await html('<GitHub title={<span>Docs</span>} />', { GitHub: Own })).toBe('<p><span>Docs</span></p>')
   })
 })

@@ -29,6 +29,7 @@ import { unified } from 'unified'
 import { SKIP, visit } from 'unist-util-visit'
 
 import { parseFrontmatter } from '@/lib/frontmatter'
+import { isRenderableNode, propContractOf } from '@/lib/mdx-prop-contract'
 import { rehypePlugins } from '@/mdx/rehype'
 import { remarkPlugins } from '@/mdx/remark'
 
@@ -300,13 +301,6 @@ function dropEmptyExpressions(tree: Root): WeakSet<object> {
   return childExpressions
 }
 
-/** What React accepts as a child; any other object throws when it is rendered. */
-function isRenderableNode(value: unknown): boolean {
-  if (value === null || value === undefined) return true
-  if (Array.isArray(value)) return value.every(isRenderableNode)
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || isValidElement(value)
-}
-
 /** Props the builtin components call string methods on; an object or array there fails the page. */
 const STRING_PROPS = new Set([
   'code', 'color', 'colorDark', 'content', 'date', 'filename', 'href', 'img', 'language',
@@ -377,9 +371,17 @@ function isPlainData(value: unknown, depth = 0): boolean {
  * values, the string props keep neither, any other component prop keeps plain
  * data (a carousel's `images`, a config object), and a DOM element keeps none
  * apart from `style`.
+ *
+ * Those lists are global, and one name means different things to different
+ * components (`title` is a node to `Card` and text to `GitHub.Repo`), so a
+ * component that declares a contract (`@/lib/mdx-prop-contract`) is held to it
+ * first: a prop named there keeps only the values its rule accepts, and a
+ * rejected value is dropped, so the component renders as it does without the
+ * prop, or takes the rule's fallback where it cannot render without one.
  */
 function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<string, unknown> | null {
   const isElement = typeof type === 'string'
+  const contract = propContractOf(type)
   // A namespace prefix does not make `<svg:script>` anything but a script.
   const tag = isElement ? type.toLowerCase().replace(/^.*:/, '') : ''
   if (tag === 'script' || tag === 'base' || tag === 'plaintext') return null
@@ -388,6 +390,11 @@ function sanitizeProps(type: unknown, props: Record<string, unknown>): Record<st
     const name = key.toLowerCase()
     if (tag === 'meta' && name.replace('-', '') === 'httpequiv') return null
     if (name.startsWith('on') || name === 'srcdoc' || name === 'dangerouslysetinnerhtml') continue
+    const rule = contract && Object.hasOwn(contract, key) ? contract[key] : undefined
+    if (rule && !rule.accepts(value)) {
+      if (rule.fallback !== undefined) clean[key] = rule.fallback
+      continue
+    }
     if (key === 'children' && VOID_TAGS.has(tag)) continue
     if (key === 'style') {
       if (typeof value === 'object' && value !== null && !Array.isArray(value) && !isValidElement(value)) {
