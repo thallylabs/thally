@@ -226,9 +226,12 @@ const bannerContract = { content: requiredText }
 const propContracts: Array<[unknown, PropContract]> = [
   ...(['Info', 'Warning', 'Check', 'Danger', 'Error', 'Note', 'Tip', 'Callout'] as const)
     .map((name): [unknown, PropContract] => [builtinMdxComponents[name], noteContract]),
+  // A code panel reads its source, language and icon from the first element it holds, which is
+  // a `code` element or a CodeBlock, so those carry the same contract as the panel itself.
   [builtinMdxComponents.pre, codeContract],
+  [builtinMdxComponents.code, codeContract],
   [builtinMdxComponents.CodeGroup, codeContract],
-  [builtinMdxComponents.CodeBlock, { icon: text, language: text }],
+  [builtinMdxComponents.CodeBlock, codeContract],
   [builtinMdxComponents.Prompt, { icon: text, actions: textOrList }],
   [builtinMdxComponents.Tooltip, { href: text }],
   [builtinMdxComponents.Card, cardContract],

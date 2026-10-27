@@ -887,3 +887,28 @@ describe('props a component reads as text', () => {
     expect(await html('<GitHub title={<span>Docs</span>} />', { GitHub: Own })).toBe('<p><span>Docs</span></p>')
   })
 })
+
+describe('metadata a code panel reads from the code it holds', () => {
+  const components = useMDXComponents({}) as never
+  const html = async (source: string) => render((await interpretMDX({ source, components })).content)
+
+  it.each([
+    ['a CodeBlock whose source prop is JSX', '<CodeBlock code={<b>x</b>}><code>x</code></CodeBlock>'],
+    ['a CodeBlock whose source prop is a number', '<CodeBlock code={5}><code>x</code></CodeBlock>'],
+    ['a code element whose source prop is JSX', '<pre><code code={<b>x</b>}>x</code></pre>'],
+    ['a code element whose source prop is a bare attribute', '<pre><code code>x</code></pre>'],
+    ['a code element whose language is JSX', '<pre><code language={<b>ts</b>}>x</code></pre>'],
+    ['a code element whose icon is a number', '<pre><code icon={5}>x</code></pre>'],
+    ['code inside a CodeGroup', '<CodeGroup><code code={<b>x</b>} language={5} icon>x</code></CodeGroup>'],
+    ['code inside a CodeBlock', '<CodeBlock language="ts"><code code={5}>x</code></CodeBlock>'],
+    ['a request example', '<RequestExample><CodeBlock code={<b>x</b>}><code>x</code></CodeBlock></RequestExample>'],
+  ])('renders %s', async (_name, source) => {
+    expect(await html(source)).toContain('x')
+  })
+
+  it('keeps the metadata of an ordinary code element', async () => {
+    const out = await html('<pre><code language="ts" code="const a = 1">const a = 1</code></pre>')
+    expect(out).toContain('const a = 1')
+    expect(out).toContain('TypeScript')
+  })
+})
