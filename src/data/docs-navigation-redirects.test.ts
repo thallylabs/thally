@@ -115,6 +115,52 @@ describe('queries along a redirect chain', () => {
     expect(to('tags')).toBe('/found?tag=a&tag=b#top')
   })
 
+  // Next writes a redirect's query back out without encoding it (`stringifyQuery`), and the next request
+  // parses that text again, so across two hops `a%2Bb` becomes `a b`, `%2541` becomes `A` and a `%26`
+  // splits a pair. Rather than copy that, the link stays on the page's own route.
+  it.each([
+    ['a plus sign', 'q=a%2Bb'],
+    ['a percent sign', 'q=100%25'],
+    ['an escape written out', 'q=a%2541b'],
+    ['an ampersand', 'q=a%26b%3Dc'],
+    ['a tab', 'q=a%09b'],
+    ['a line break', 'q=a%0Ab'],
+    ['a name with a plus sign', 'a%2Bb=1'],
+    ['a name with an equals sign', 'a%3Db=1'],
+  ])('leaves a chain of two hops alone when its query holds %s', async (_name, query) => {
+    const to = await redirectTargets(['chain', 'middle'], [
+      { source: '/chain', destination: `/middle?${query}` },
+      { source: '/middle', destination: '/final#anchor' },
+    ])
+    expect(to('chain')).toBeUndefined()
+  })
+
+  it('looks at the query of the last hop and of an earlier one that a later hop overrides', async () => {
+    const last = await redirectTargets(['chain', 'middle'], [
+      { source: '/chain', destination: '/middle' },
+      { source: '/middle', destination: '/final?q=a%2Bb' },
+    ])
+    expect(last('chain')).toBeUndefined()
+    const overridden = await redirectTargets(['chain', 'middle'], [
+      { source: '/chain', destination: '/middle?q=a%26b' },
+      { source: '/middle', destination: '/final?q=x' },
+    ])
+    expect(overridden('chain')).toBeUndefined()
+  })
+
+  it('keeps the query of a single hop whatever it holds', async () => {
+    const to = await redirectTargets(['one'], [{ source: '/one', destination: '/final?q=a%2Bb&p=100%25#x' }])
+    expect(to('one')).toBe('/final?q=a%2Bb&p=100%25#x')
+  })
+
+  it('keeps carrying values that no later hop can read differently', async () => {
+    const to = await redirectTargets(['chain', 'middle'], [
+      { source: '/chain', destination: '/middle?token=YWJj%3D%3D&path=%2Fdocs%3Fa&q=caf%C3%A9' },
+      { source: '/middle', destination: '/final#anchor' },
+    ])
+    expect(to('chain')).toBe('/final?token=YWJj%3D%3D&path=%2Fdocs%3Fa&q=caf%C3%A9#anchor')
+  })
+
   it('carries the query on to an address outside the site', async () => {
     const to = await redirectTargets(['away'], [
       { source: '/away', destination: '/away-2?ref=docs' },

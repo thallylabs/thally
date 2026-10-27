@@ -670,6 +670,16 @@ function redirectKey(path: string): string {
   return (path.replace(/\/+$/, '') || '/').toLowerCase()
 }
 
+/**
+ * What a chain of redirects can change in a query. Next writes a destination's
+ * query back out without encoding it (`stringifyQuery`) and the next request
+ * parses that text again: `+` becomes a space, `%41` becomes `A`, `&` splits a
+ * pair (and `=` splits a name), and a tab or line break is dropped from the URL.
+ * A link cannot copy that, so a chain whose query holds one of these is left alone.
+ */
+const QUERY_VALUE_CHANGES = /[%+&\t\r\n]/
+const QUERY_NAME_CHANGES = /[%+&=\t\r\n]/
+
 /** The characters path-to-regexp, which Next matches redirect sources with, reads as syntax; any other is literal. */
 const REDIRECT_SYNTAX = /[:*+?(){}\\]/
 
@@ -708,7 +718,9 @@ function redirectIndex(redirects: Array<DocsJsonRedirect>): RedirectIndex {
  *
  * Each hop passes the query it was reached with on to its destination, whose
  * own query wins on a duplicate key (`{ ...request.query, ...destination.query }`
- * in Next's `prepareDestination`), so the link carries the merged query.
+ * in Next's `prepareDestination`), so the link carries the merged query. Past
+ * the first hop, a query Next would re-read differently (`QUERY_VALUE_CHANGES`)
+ * leaves the link alone.
  */
 function redirectedHref(href: string): string | undefined {
   const redirects = docsConfig().redirects
@@ -719,6 +731,7 @@ function redirectedHref(href: string): string | undefined {
   let path = href
   // A map keeps a duplicate key where it first appeared, as the object spread in Next does.
   const query = new Map<string, Array<string>>()
+  let rewritten = false
   const visited = new Set<string>()
   // A chain ends at an address outside the site; no redirect of this site applies to it.
   while (!/^https?:\/\//i.test(path)) {
@@ -738,12 +751,15 @@ function redirectedHref(href: string): string | undefined {
     target = search < 0 ? location : location.slice(0, search)
     const own = new Map<string, Array<string>>()
     for (const [name, value] of new URLSearchParams(search < 0 ? '' : location.slice(search + 1))) own.set(name, [...(own.get(name) ?? []), value])
-    for (const [name, values] of own) query.set(name, values)
+    for (const [name, values] of own) {
+      query.set(name, values)
+      if (QUERY_NAME_CHANGES.test(name) || values.some((value) => QUERY_VALUE_CHANGES.test(value))) rewritten = true
+    }
     // A browser keeps the fragment across a redirect that names none.
     if (hash >= 0) fragment = next.slice(hash)
     path = target
   }
-  if (target === undefined) return undefined
+  if (target === undefined || (rewritten && visited.size > 1)) return undefined
   const merged = new URLSearchParams()
   for (const [name, values] of query) for (const value of values) merged.append(name, value)
   return target + (merged.size ? `?${merged}` : '') + fragment
