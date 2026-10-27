@@ -654,10 +654,42 @@ function servedRootHref(href: string): string {
     : href
 }
 
-const redirectDestinations = new WeakMap<Array<DocsJsonRedirect>, Map<string, string>>()
+/**
+ * The docs.json redirects as the lookup `redirectedHref` needs, in order:
+ * the first exact source for each path, and the literal start of every
+ * pattern source, each with its place in the list.
+ */
+interface RedirectIndex {
+  exact: Map<string, { index: number; destination: string }>
+  patterns: Array<{ index: number; prefix: string }>
+}
+
+const redirectIndexes = new WeakMap<Array<DocsJsonRedirect>, RedirectIndex>()
 
 function redirectKey(path: string): string {
   return (path.replace(/\/+$/, '') || '/').toLowerCase()
+}
+
+/** The characters path-to-regexp, which Next matches redirect sources with, reads as syntax; any other is literal. */
+const REDIRECT_SYNTAX = /[:*+?(){}\\]/
+
+function redirectIndex(redirects: Array<DocsJsonRedirect>): RedirectIndex {
+  const cached = redirectIndexes.get(redirects)
+  if (cached) return cached
+  const index: RedirectIndex = { exact: new Map(), patterns: [] }
+  redirects.forEach(({ source, destination }, position) => {
+    const syntax = source.search(REDIRECT_SYNTAX)
+    if (syntax >= 0) {
+      // Everything a pattern matches starts with its literal text, whatever the case. A parameter owns
+      // the `/` or `.` before it and may be optional, so the start stops short of those delimiters.
+      index.patterns.push({ index: position, prefix: source.slice(0, syntax).toLowerCase().replace(/[/.]+$/, '') })
+    } else if (!index.exact.has(redirectKey(source))) {
+      // Next applies the first redirect whose source matches.
+      index.exact.set(redirectKey(source), { index: position, destination })
+    }
+  })
+  redirectIndexes.set(redirects, index)
+  return index
 }
 
 /**
@@ -667,6 +699,13 @@ function redirectKey(path: string): string {
  * name the final address. A destination the site cannot link to, or a loop,
  * leaves the page's own route as the link.
  *
+ * Next applies the first redirect, in docs.json order, whose source matches,
+ * and only exact sources are indexed here. A pattern source listed before the
+ * exact one that could match the path might be the redirect that applies
+ * instead, so the link is left alone: better its own route, which Next resolves,
+ * than a guess at where a pattern leads. The same holds at the end of a chain,
+ * where a pattern that could match the last address might lead on.
+ *
  * Each hop passes the query it was reached with on to its destination, whose
  * own query wins on a duplicate key (`{ ...request.query, ...destination.query }`
  * in Next's `prepareDestination`), so the link carries the merged query.
@@ -674,22 +713,25 @@ function redirectKey(path: string): string {
 function redirectedHref(href: string): string | undefined {
   const redirects = docsConfig().redirects
   if (!redirects?.length) return undefined
-  let destinations = redirectDestinations.get(redirects)
-  if (!destinations) {
-    destinations = new Map()
-    // Next.js applies the first redirect whose source matches.
-    for (const { source, destination } of redirects) if (!destinations.has(redirectKey(source))) destinations.set(redirectKey(source), destination)
-    redirectDestinations.set(redirects, destinations)
-  }
+  const { exact, patterns } = redirectIndex(redirects)
   let target: string | undefined
   let fragment = ''
   let path = href
   // A map keeps a duplicate key where it first appeared, as the object spread in Next does.
   const query = new Map<string, Array<string>>()
   const visited = new Set<string>()
-  for (let next = destinations.get(redirectKey(path)); next !== undefined; next = destinations.get(redirectKey(path))) {
-    if (!/^(?:https?:\/\/|\/(?![/\\]))/i.test(next) || visited.has(redirectKey(path))) return undefined
-    visited.add(redirectKey(path))
+  // A chain ends at an address outside the site; no redirect of this site applies to it.
+  while (!/^https?:\/\//i.test(path)) {
+    const key = redirectKey(path)
+    const hit = exact.get(key)
+    // An earlier pattern that could match the path might be the redirect that applies, and where it
+    // leads is unknown. With no exact source at all, any pattern could be the one that applies.
+    const before = hit?.index ?? Infinity
+    if (patterns.some((pattern) => pattern.index < before && key.startsWith(pattern.prefix))) return undefined
+    if (!hit) break
+    const next = hit.destination
+    if (!/^(?:https?:\/\/|\/(?![/\\]))/i.test(next) || visited.has(key)) return undefined
+    visited.add(key)
     const hash = next.indexOf('#')
     const location = hash < 0 ? next : next.slice(0, hash)
     const search = location.indexOf('?')

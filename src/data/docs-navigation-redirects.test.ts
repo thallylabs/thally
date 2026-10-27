@@ -123,3 +123,87 @@ describe('queries along a redirect chain', () => {
     expect(to('away')).toBe('https://example.com/landing?ref=docs&x=1')
   })
 })
+
+describe('which redirect applies first', () => {
+  // Next applies the first redirect, in docs.json order, whose source matches the path. A pattern
+  // source (`:param`, `*`, `+`, `?`, `(…)`, `{…}`) that could match comes first when it is listed first.
+  it('leaves the link alone when an earlier wildcard could be the redirect that applies', async () => {
+    const to = await redirectTargets(['docs/x'], [
+      { source: '/docs/:path*', destination: '/new/:path*' },
+      { source: '/docs/x', destination: '/elsewhere' },
+    ])
+    expect(to('docs/x')).toBeUndefined()
+  })
+
+  it('still shortcuts when the earlier pattern cannot match the path', async () => {
+    const to = await redirectTargets(['docs/x'], [
+      { source: '/blog/:slug', destination: '/news/:slug' },
+      { source: '/api/(.*)', destination: '/reference' },
+      { source: '/docs/x', destination: '/elsewhere#top' },
+    ])
+    expect(to('docs/x')).toBe('/elsewhere#top')
+  })
+
+  it('is not held up by a pattern listed after the exact source', async () => {
+    const to = await redirectTargets(['docs/x'], [
+      { source: '/docs/x', destination: '/elsewhere#top' },
+      { source: '/docs/:path*', destination: '/new/:path*' },
+    ])
+    expect(to('docs/x')).toBe('/elsewhere#top')
+  })
+
+  it('treats a parameter as able to match the address before its slash', async () => {
+    // `/docs/:path*` matches `/docs` itself: the slash belongs to the optional parameter.
+    const to = await redirectTargets(['docs'], [
+      { source: '/docs/:path*', destination: '/new/:path*' },
+      { source: '/docs', destination: '/elsewhere' },
+    ])
+    expect(to('docs')).toBeUndefined()
+  })
+
+  it('matches a pattern whatever the case of its literal start', async () => {
+    const to = await redirectTargets(['docs/x'], [
+      { source: '/Docs/:path+', destination: '/new/:path+' },
+      { source: '/docs/x', destination: '/elsewhere' },
+    ])
+    expect(to('docs/x')).toBeUndefined()
+  })
+
+  it.each(['/:locale/docs/x', '/(en|fr)/docs/x', '/{docs}/x'])(
+    'cannot rule out a pattern that starts with a parameter: %s',
+    async (source) => {
+      const to = await redirectTargets(['docs/x'], [
+        { source, destination: '/new' },
+        { source: '/docs/x', destination: '/elsewhere' },
+      ])
+      expect(to('docs/x')).toBeUndefined()
+    },
+  )
+
+  it('checks every hop of a chain, not only the first', async () => {
+    const to = await redirectTargets(['hop', 'step'], [
+      { source: '/hop', destination: '/step' },
+      { source: '/s:rest', destination: '/somewhere-else' },
+      { source: '/step', destination: '/end#here' },
+    ])
+    // `/s:rest` is listed before `/step`, so it may be the redirect that applies at the second hop.
+    expect(to('hop')).toBeUndefined()
+    expect(to('step')).toBeUndefined()
+  })
+
+  it('cannot say where a chain ends when a pattern could redirect its last address', async () => {
+    const to = await redirectTargets(['hop'], [
+      { source: '/hop', destination: '/docs/y' },
+      { source: '/docs/:path*', destination: '/new/:path*' },
+    ])
+    expect(to('hop')).toBeUndefined()
+  })
+
+  it('does not look for local redirects once a chain leaves the site', async () => {
+    const to = await redirectTargets(['away'], [
+      { source: '/away', destination: 'https://example.com/landing' },
+      { source: '/:path*', destination: '/never' },
+    ])
+    expect(to('away')).toBe('https://example.com/landing')
+  })
+})
