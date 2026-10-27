@@ -267,6 +267,17 @@ describe('which redirect applies first', () => {
     expect(to('docsx')).toBe('/other#anchor')
   })
 
+  it.each(['/docs./:slug', '/docs./:slug+'])(
+    'keeps the literal text before a required parameter as part of its start: %s',
+    async (source) => {
+      const to = await redirectTargets(['docs./x'], [
+        { source, destination: '/v2/:slug' },
+        { source: '/docs./x', destination: '/landing#anchor' },
+      ])
+      expect(to('docs./x')).toBeUndefined()
+    },
+  )
+
   it('checks every hop of a chain, not only the first', async () => {
     const to = await redirectTargets(['hop', 'step'], [
       { source: '/hop', destination: '/step' },

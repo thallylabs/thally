@@ -700,10 +700,13 @@ function redirectIndex(redirects: Array<DocsJsonRedirect>): RedirectIndex {
     if (syntax >= 0) {
       // Everything a pattern matches starts with its literal text, whatever the case. A parameter owns
       // the `/` or `.` before it and may be optional, so the start stops short of those delimiters.
+      // A required parameter owns only the `/` right before it: any literal text ahead of that stays.
+      const requiresSegment = source[syntax - 1] === '/' && /^:\w+\+?(?:\/|$)/.test(source.slice(syntax))
+      const literal = source.slice(0, syntax).toLowerCase()
       index.patterns.push({
         index: position,
-        prefix: source.slice(0, syntax).toLowerCase().replace(/[/.]+$/, ''),
-        requiresSegment: source[syntax - 1] === '/' && /^:\w+\+?(?:\/|$)/.test(source.slice(syntax)),
+        prefix: requiresSegment ? literal.slice(0, -1) : literal.replace(/[/.]+$/, ''),
+        requiresSegment,
       })
     } else if (!index.exact.has(redirectKey(source))) {
       // Next applies the first redirect whose source matches.
