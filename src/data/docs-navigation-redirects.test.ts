@@ -226,6 +226,47 @@ describe('which redirect applies first', () => {
     },
   )
 
+  // A required parameter takes a whole path segment, so `/docs/:slug` matches `/docs/x` but not `/docs`.
+  it('is not held up by a pattern whose required parameter cannot match the address', async () => {
+    const to = await redirectTargets(['docs'], [
+      { source: '/docs/:slug', destination: '/v2/:slug' },
+      { source: '/docs', destination: '/landing#anchor' },
+    ])
+    expect(to('docs')).toBe('/landing#anchor')
+  })
+
+  it.each(['/docs/:slug', '/docs/:slug+', '/:section/:slug', '/docs/:slug/edit'])(
+    'still lets a pattern with a required parameter decide an address below its start: %s',
+    async (source) => {
+      const to = await redirectTargets(['docs/x'], [
+        { source, destination: '/v2' },
+        { source: '/docs/x', destination: '/landing#anchor' },
+      ])
+      expect(to('docs/x')).toBeUndefined()
+    },
+  )
+
+  it.each(['/docs/:path*', '/docs/:slug?', '/docs/:slug*', '/docs/:slug(.*)', '/docs{/:slug}?', '/docs/:a?/:b'])(
+    'keeps an optional or custom pattern able to match the address before its parameter: %s',
+    async (source) => {
+      const to = await redirectTargets(['docs'], [
+        { source, destination: '/v2/:slug' },
+        { source: '/docs', destination: '/landing#anchor' },
+      ])
+      expect(to('docs')).toBeUndefined()
+    },
+  )
+
+  it('does not mistake a longer first segment for the required parameter', async () => {
+    const to = await redirectTargets(['docs', 'docsx'], [
+      { source: '/docs/:slug', destination: '/v2/:slug' },
+      { source: '/docsx', destination: '/other#anchor' },
+      { source: '/docs', destination: '/landing#anchor' },
+    ])
+    expect(to('docs')).toBe('/landing#anchor')
+    expect(to('docsx')).toBe('/other#anchor')
+  })
+
   it('checks every hop of a chain, not only the first', async () => {
     const to = await redirectTargets(['hop', 'step'], [
       { source: '/hop', destination: '/step' },

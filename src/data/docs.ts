@@ -657,11 +657,13 @@ function servedRootHref(href: string): string {
 /**
  * The docs.json redirects as the lookup `redirectedHref` needs, in order:
  * the first exact source for each path, and the literal start of every
- * pattern source, each with its place in the list.
+ * pattern source, each with its place in the list. A pattern that goes on with
+ * a required parameter (`/docs/:slug`) takes a whole path segment after its
+ * start, so it cannot match the start itself.
  */
 interface RedirectIndex {
   exact: Map<string, { index: number; destination: string }>
-  patterns: Array<{ index: number; prefix: string }>
+  patterns: Array<{ index: number; prefix: string; requiresSegment: boolean }>
 }
 
 const redirectIndexes = new WeakMap<Array<DocsJsonRedirect>, RedirectIndex>()
@@ -683,6 +685,12 @@ const QUERY_NAME_CHANGES = /[%+&=\t\r\n]/
 /** The characters path-to-regexp, which Next matches redirect sources with, reads as syntax; any other is literal. */
 const REDIRECT_SYNTAX = /[:*+?(){}\\]/
 
+/** Whether a path, already keyed, may be matched by a pattern source: never false where Next would match. */
+function couldMatch(pattern: RedirectIndex['patterns'][number], key: string): boolean {
+  if (!pattern.requiresSegment) return key.startsWith(pattern.prefix)
+  return key.startsWith(`${pattern.prefix}/`) && key.length > pattern.prefix.length + 1
+}
+
 function redirectIndex(redirects: Array<DocsJsonRedirect>): RedirectIndex {
   const cached = redirectIndexes.get(redirects)
   if (cached) return cached
@@ -692,7 +700,11 @@ function redirectIndex(redirects: Array<DocsJsonRedirect>): RedirectIndex {
     if (syntax >= 0) {
       // Everything a pattern matches starts with its literal text, whatever the case. A parameter owns
       // the `/` or `.` before it and may be optional, so the start stops short of those delimiters.
-      index.patterns.push({ index: position, prefix: source.slice(0, syntax).toLowerCase().replace(/[/.]+$/, '') })
+      index.patterns.push({
+        index: position,
+        prefix: source.slice(0, syntax).toLowerCase().replace(/[/.]+$/, ''),
+        requiresSegment: source[syntax - 1] === '/' && /^:\w+\+?(?:\/|$)/.test(source.slice(syntax)),
+      })
     } else if (!index.exact.has(redirectKey(source))) {
       // Next applies the first redirect whose source matches.
       index.exact.set(redirectKey(source), { index: position, destination })
@@ -740,7 +752,7 @@ function redirectedHref(href: string): string | undefined {
     // An earlier pattern that could match the path might be the redirect that applies, and where it
     // leads is unknown. With no exact source at all, any pattern could be the one that applies.
     const before = hit?.index ?? Infinity
-    if (patterns.some((pattern) => pattern.index < before && key.startsWith(pattern.prefix))) return undefined
+    if (patterns.some((pattern) => pattern.index < before && couldMatch(pattern, key))) return undefined
     if (!hit) break
     const next = hit.destination
     if (!/^(?:https?:\/\/|\/(?![/\\]))/i.test(next) || visited.has(key)) return undefined
