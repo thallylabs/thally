@@ -666,6 +666,10 @@ function redirectKey(path: string): string {
  * client router drops the fragment of a redirect it follows, so a link has to
  * name the final address. A destination the site cannot link to, or a loop,
  * leaves the page's own route as the link.
+ *
+ * Each hop passes the query it was reached with on to its destination, whose
+ * own query wins on a duplicate key (`{ ...request.query, ...destination.query }`
+ * in Next's `prepareDestination`), so the link carries the merged query.
  */
 function redirectedHref(href: string): string | undefined {
   const redirects = docsConfig().redirects
@@ -680,17 +684,27 @@ function redirectedHref(href: string): string | undefined {
   let target: string | undefined
   let fragment = ''
   let path = href
+  // A map keeps a duplicate key where it first appeared, as the object spread in Next does.
+  const query = new Map<string, Array<string>>()
   const visited = new Set<string>()
   for (let next = destinations.get(redirectKey(path)); next !== undefined; next = destinations.get(redirectKey(path))) {
     if (!/^(?:https?:\/\/|\/(?![/\\]))/i.test(next) || visited.has(redirectKey(path))) return undefined
     visited.add(redirectKey(path))
     const hash = next.indexOf('#')
-    target = hash < 0 ? next : next.slice(0, hash)
+    const location = hash < 0 ? next : next.slice(0, hash)
+    const search = location.indexOf('?')
+    target = search < 0 ? location : location.slice(0, search)
+    const own = new Map<string, Array<string>>()
+    for (const [name, value] of new URLSearchParams(search < 0 ? '' : location.slice(search + 1))) own.set(name, [...(own.get(name) ?? []), value])
+    for (const [name, values] of own) query.set(name, values)
     // A browser keeps the fragment across a redirect that names none.
     if (hash >= 0) fragment = next.slice(hash)
-    path = target.split('?', 1)[0]
+    path = target
   }
-  return target === undefined ? undefined : target + fragment
+  if (target === undefined) return undefined
+  const merged = new URLSearchParams()
+  for (const [name, values] of query) for (const value of values) merged.append(name, value)
+  return target + (merged.size ? `?${merged}` : '') + fragment
 }
 
 function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: FrontmatterData): DocEntry {

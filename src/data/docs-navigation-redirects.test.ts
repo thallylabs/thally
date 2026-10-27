@@ -73,3 +73,53 @@ describe('sidebar entries for redirected pages', () => {
     }
   })
 })
+
+/** Lay out a sidebar of `pages`, redirected by `redirects`, and read where each entry's link ends. */
+async function redirectTargets(pages: Array<string>, redirects: Array<{ source: string; destination: string }>) {
+  state.sources = Object.fromEntries(pages.map((id) => [`src/content/${id}.mdx`, `---\ntitle: ${id}\n---\nBody\n`]))
+  state.config = { tabs: [{ tab: 'Reference', pages }], redirects }
+  const { getSidebarCollections } = await import('./docs')
+  const items = getSidebarCollections()[0].sections[0].items
+  return (id: string) => items.find((item) => item.href === `/${id}`)?.redirectTo
+}
+
+describe('queries along a redirect chain', () => {
+  // Next passes the request's query on to a redirect's destination, which may add to it:
+  // `{ ...request.query, ...destination.query }` in prepareDestination.
+  it('keeps the query a hop names through the hops after it', async () => {
+    const to = await redirectTargets(['chain', 'middle'], [
+      { source: '/chain', destination: '/middle?locale=fr' },
+      { source: '/middle', destination: '/final#anchor' },
+    ])
+    expect(to('chain')).toBe('/final?locale=fr#anchor')
+  })
+
+  it('lets the destination win on a duplicate key and keeps the key where it first appeared', async () => {
+    const to = await redirectTargets(['dup'], [
+      { source: '/dup', destination: '/dup-2?locale=fr&a=1' },
+      { source: '/dup-2', destination: '/dup-end?locale=de&b=2' },
+    ])
+    expect(to('dup')).toBe('/dup-end?locale=de&a=1&b=2')
+  })
+
+  it('combines a fragment and a query named in different hops', async () => {
+    const to = await redirectTargets(['combo'], [
+      { source: '/combo', destination: '/combo-2?a=1#first' },
+      { source: '/combo-2', destination: '/combo-end?b=2' },
+    ])
+    expect(to('combo')).toBe('/combo-end?a=1&b=2#first')
+  })
+
+  it('keeps every value of a repeated key', async () => {
+    const to = await redirectTargets(['tags'], [{ source: '/tags', destination: '/found?tag=a&tag=b#top' }])
+    expect(to('tags')).toBe('/found?tag=a&tag=b#top')
+  })
+
+  it('carries the query on to an address outside the site', async () => {
+    const to = await redirectTargets(['away'], [
+      { source: '/away', destination: '/away-2?ref=docs' },
+      { source: '/away-2', destination: 'https://example.com/landing?x=1' },
+    ])
+    expect(to('away')).toBe('https://example.com/landing?ref=docs&x=1')
+  })
+})
