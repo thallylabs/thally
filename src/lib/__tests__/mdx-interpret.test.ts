@@ -912,3 +912,40 @@ describe('metadata a code panel reads from the code it holds', () => {
     expect(out).toContain('TypeScript')
   })
 })
+
+describe('parents that read the props of their children', () => {
+  const components = useMDXComponents({}) as never
+  const html = async (source: string) => render((await interpretMDX({ source, components })).content)
+
+  it.each([
+    ['a JSX title', '<CodeGroup><CodeBlock title={<b>JS</b>}>x</CodeBlock></CodeGroup>'],
+    ['a numeric tag', '<CodeGroup><CodeBlock tag={5}>x</CodeBlock></CodeGroup>'],
+    ['a bare title on a pre', '<CodeGroup><pre title><code>x</code></pre></CodeGroup>'],
+    ['a JSX tag on a code element', '<CodeGroup><code tag={<b>t</b>}>x</code></CodeGroup>'],
+    ['a JSX title among several samples', '<CodeGroup><CodeBlock title={<b>JS</b>}>x</CodeBlock><CodeBlock title="Python">y</CodeBlock></CodeGroup>'],
+    ['a numeric class name on a code element', '<pre><code className={5}>x</code></pre>'],
+    ['a bare class name on a CodeBlock', '<CodeGroup><CodeBlock className>x</CodeBlock></CodeGroup>'],
+    ['a numeric class name in a request example', '<RequestExample><CodeBlock className={5}>x</CodeBlock></RequestExample>'],
+    ['a class name that is JSX in a response example', '<ResponseExample><pre className={<b>c</b>}><code>x</code></pre></ResponseExample>'],
+    ['source, language and icon on a plain element', '<pre><span code={<b>x</b>} language={5} icon>x</span></pre>'],
+    ['source on a plain element in a request example', '<RequestExample><pre><span code={<b>x</b>}>x</span></pre></RequestExample>'],
+    ['source, language and icon on an element in a group', '<CodeGroup><span code={5} language={<b>ts</b>} icon={5}>x</span></CodeGroup>'],
+  ])('renders a code group holding %s', async (_name, source) => {
+    expect(await html(source)).toContain('x')
+  })
+
+  it('still lists each sample under its text title', async () => {
+    const out = await html('<CodeGroup><CodeBlock title="JavaScript">a</CodeBlock><CodeBlock title="Python">b</CodeBlock></CodeGroup>')
+    expect(out).toContain('JavaScript')
+    expect(out).toContain('Python')
+  })
+
+  it('still shows a JSX title where a lone pre renders it', async () => {
+    expect(await html('<pre title={<b>JS</b>}><code>x</code></pre>')).toContain('<b>JS</b>')
+  })
+
+  it('draws a JSX title on a tab, a card and a step', async () => {
+    expect(await html('<Tabs><Tab title={<b>One</b>}>x</Tab></Tabs>')).toContain('<b>One</b>')
+    expect(await html('<CardGroup><Card title={<b>Two</b>}>x</Card></CardGroup>')).toContain('<b>Two</b>')
+  })
+})
