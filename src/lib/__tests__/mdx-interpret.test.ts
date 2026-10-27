@@ -877,7 +877,7 @@ describe('props a component reads as text', () => {
     })
 
     it('is declared on the registry entries whose props only run after hydration', () => {
-      expect(Object.keys(propContractOf(components.View) ?? {})).toEqual(['icon'])
+      expect(Object.keys(propContractOf((components as Record<string, unknown>).View) ?? {})).toEqual(['icon'])
     })
   })
 
