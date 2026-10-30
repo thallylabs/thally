@@ -24,6 +24,7 @@ vi.mock('@/data/api-reference', () => ({
 }))
 vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
+  getContextualOptions: () => ['copy', 'llms-full', 'mcp', 'cursor', 'vscode'],
   getApiSpecLinkVisible: () => specLink.visible,
   getBreadcrumbs: () => [],
   getDocEntries: () => fixtures.docs,
@@ -41,6 +42,12 @@ describe('API endpoint metadata', () => {
   it('uses the configured title separator for the full title', async () => {
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: ['default', 'analytics', 'query', 'post'] }) })
     expect(metadata.title).toEqual({ absolute: 'Query analytics data - OpenRouter' })
+  })
+
+  it('passes configured page actions and this site identity to generated API headers', async () => {
+    const tree = JSON.stringify(await ApiReferencePage({ params: Promise.resolve({ slug: ['default', 'analytics', 'query', 'post'] }) }))
+    expect(tree).toContain('"options":["copy","llms-full","mcp","cursor","vscode"]')
+    expect(tree).toContain('"serverName":"openrouter-docs"')
   })
 
   it('shows the visible spec link by default and hides it with api.specLink false', async () => {

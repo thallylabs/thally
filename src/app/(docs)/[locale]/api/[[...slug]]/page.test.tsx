@@ -32,6 +32,7 @@ vi.mock('@/lib/i18n/request', () => ({
 }))
 vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
+  getContextualOptions: () => ['copy', 'llms-full', 'mcp', 'cursor', 'vscode'],
   getApiSpecLinkVisible: () => fixtures.specLinkVisible,
   getBreadcrumbs: () => [],
   getDocEntries: () => fixtures.docs,

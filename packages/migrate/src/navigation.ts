@@ -1511,7 +1511,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   const feedback = objectValue(config.feedback)
   const seo = objectValue(config.seo)
   const contextualOptions = Array.isArray(objectValue(config.contextual)?.options) ? objectValue(config.contextual)!.options as Array<unknown> : []
-  const projectedContextual = contextualOptions.filter((option): option is string => typeof option === 'string' && ['copy', 'view', 'chatgpt', 'claude', 'perplexity'].includes(option))
+  const projectedContextual = contextualOptions.filter((option): option is string => typeof option === 'string' && ['copy', 'view', 'chatgpt', 'claude', 'perplexity', 'llms-full', 'mcp', 'cursor', 'vscode'].includes(option))
   const droppedContextual = contextualOptions.filter((option) => !projectedContextual.includes(option as string))
   if (droppedContextual.length > 0) {
     warnings.push({ code: 'unsupported-config', message: `contextual.options entries not supported by the page menu were dropped: ${droppedContextual.map((option) => typeof option === 'string' ? option : 'custom entry').join(', ')}.`, source: 'docs.json' })

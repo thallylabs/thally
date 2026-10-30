@@ -41,3 +41,16 @@ describe('Mintlify navigation tag and boost', () => {
     expect(tags).toContain('1 entry')
   })
 })
+
+/** Page actions must survive repository imports without admitting unknown provider extensions. */
+describe('Mintlify page actions', () => {
+  it('retains legacy and new page actions in authored order and reports unsupported entries', () => {
+    const options = ['copy', 'llms-full', 'mcp', 'cursor', 'vscode', 'view', 'chatgpt', 'claude', 'perplexity']
+    const result = projectMintlifyNavigation({ navigation: { pages: ['index'] }, contextual: { options: [...options, 'unknown-provider', { label: 'Custom' }] } })
+    expect(result.docsConfig.contextual?.options).toEqual(options)
+    const warnings = result.warnings.filter((warning) => warning.message.includes('contextual.options'))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('unknown-provider, custom entry')
+    expect(warnings[0].message).not.toContain('cursor')
+  })
+})

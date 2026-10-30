@@ -10,13 +10,14 @@ import { pageFullTitle } from '@/lib/page-meta'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getApiPlaygroundDisplay, getApiSpecLinkVisible, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getApiSpecLinkVisible, getContextualOptions, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
 import { getContentSource, isRemoteContentSource } from '@/lib/content-source'
 import { findDocSource } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import { agentServerName } from '@/lib/agent-identity'
 import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 import { isReaderAuthActive } from '@/lib/reader-auth/config'
 import { getReaderContext } from '@/lib/reader-auth/context'
@@ -159,7 +160,7 @@ async function renderApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }
