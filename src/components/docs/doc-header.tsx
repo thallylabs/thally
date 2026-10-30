@@ -1,7 +1,10 @@
+/** Server-rendered document identity and configured reader page actions. */
 import { ChevronRight } from 'lucide-react'
 import { getContextualOptions, type DocEntry } from '@/data/docs'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
 import { InlineCodeText } from '@/components/mdx/inline-code-text'
+import { agentServerName } from '@/lib/agent-identity'
+import { resolveBuildSiteConfig } from '@/lib/site-config'
 
 interface DocHeaderProps {
   doc: DocEntry
@@ -42,7 +45,7 @@ export function DocHeader({ doc, eyebrow, showCopyPage = true, showDescription =
             <p className="mt-2 max-w-[58ch] text-lg leading-7 text-foreground/80"><InlineCodeText>{doc.description}</InlineCodeText></p>
           ) : null}
         </div>
-        {showCopyPage ? <CopyPageButton options={getContextualOptions()} /> : null}
+        {showCopyPage ? <CopyPageButton options={getContextualOptions()} serverName={agentServerName(resolveBuildSiteConfig().name)} /> : null}
       </div>
     </header>
   )

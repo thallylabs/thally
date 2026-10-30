@@ -381,8 +381,18 @@ Fine-tune spacing and widths in `src/config/layout.ts`:
 
 Use six-digit hex values. `primary` fills buttons; `accent` colors links and highlights.
 
-`contextual.options` sets the entries of the page menu, in display order. Supported entries are `copy`, `view`, `chatgpt`, `claude` and `perplexity`:
+`contextual.options` sets the entries of the page menu, in display order. Supported entries are `copy`, `view`, `chatgpt`, `claude`, `perplexity`, `llms-full`, `mcp`, `cursor`, and `vscode`:
 
 ```json
 "contextual": { "options": ["copy", "view", "chatgpt"] }
 ```
+
+`copy` also appears inside the dropdown. `llms-full` opens this site's `/llms-full.txt`. `mcp` copies `npx -y add-mcp <site-origin>/api/mcp`; `cursor` and `vscode` open their editor's MCP installer with the same endpoint. These installation actions appear after the menu checks that the site's public MCP endpoint is enabled. They stay hidden if that check fails or MCP is disabled.
+
+For a menu focused on documentation and editor integrations:
+
+```json
+"contextual": { "options": ["copy", "llms-full", "mcp", "cursor", "vscode"] }
+```
+
+Omitting `contextual.options` retains the existing copy, Markdown, ChatGPT, Claude, and Perplexity menu. An empty array hides page actions.

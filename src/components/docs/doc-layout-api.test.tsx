@@ -10,7 +10,7 @@ vi.mock('@/data/docs', () => ({
 }))
 vi.mock('@/lib/cloud-link/client', () => ({ getManagedSiteConfigSnapshot: () => null }))
 vi.mock('@/lib/cloud-link/content-controls', () => ({ getBuildContentControls: () => ({}) }))
-vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({}) }))
+vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({ name: 'Fixture' }) }))
 vi.mock('@/components/docs/copy-page-button', () => ({ CopyPageButton: () => null }))
 vi.mock('@/components/docs/feedback', () => ({ Feedback: () => null }))
 import { DocLayout } from './doc-layout'

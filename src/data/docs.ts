@@ -345,7 +345,7 @@ export interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
-  /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`) in display order. */
+  /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`, `llms-full`, `mcp`, `cursor`, `vscode`) in display order. */
   contextual?: { options?: Array<string> }
   /** Hex brand colours per mode (six digits); `primary` fills buttons, `accent` links and highlights, `background` is the canvas. */
   colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string; background?: string }>>

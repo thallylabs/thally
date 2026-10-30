@@ -1,5 +1,6 @@
 /** API-prefixed MDX must reach the localized document renderer. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { operationFrom } from '@/components/api/test-fixtures'
 
 const fixtures = vi.hoisted(() => ({
   specLinkVisible: true,
@@ -32,6 +33,9 @@ vi.mock('@/lib/i18n/request', () => ({
 }))
 vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
+  getApiMdxConfig: () => ({}),
+  getApiPlaygroundCredentials: () => ({}),
+  getContextualOptions: () => ['copy', 'llms-full', 'mcp', 'cursor', 'vscode'],
   getApiSpecLinkVisible: () => fixtures.specLinkVisible,
   getBreadcrumbs: () => [],
   getDocEntries: () => fixtures.docs,
@@ -60,7 +64,8 @@ describe('localized API MDX routing', () => {
   it('shows the visible spec link by default and hides it with api.specLink false', async () => {
     fixtures.node = {
       href: '/api/default/analytics/query/post',
-      operation: { title: 'Query', method: 'POST', path: '/analytics/query', specId: 'default' },
+      slug: ['default', 'analytics', 'query', 'post'],
+      operation: operationFrom({ openapi: '3.1.0', info: { title: 'Analytics', version: '1' }, paths: { '/analytics/query': { post: { summary: 'Query', responses: { '200': { description: 'OK' } } } } } }),
     }
     const params = Promise.resolve({ locale: 'fr', slug: ['default', 'analytics', 'query', 'post'] })
     fixtures.specLinkVisible = true

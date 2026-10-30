@@ -290,9 +290,9 @@ describe('config mapping', () => {
   })
 
   it('keeps the contextual menu options Thally supports, in order, and warns about the rest', () => {
-    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, contextual: { options: ['copy', 'view', 'chatgpt', 'cursor', 'claude'] } }), ...intro })
-    expect(bundle.docsConfig.contextual).toEqual({ options: ['copy', 'view', 'chatgpt', 'claude'] })
-    expect(bundle.warnings.some((warning) => /contextual\.options.*cursor/.test(warning.message))).toBe(true)
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, contextual: { options: ['copy', 'view', 'chatgpt', 'cursor', 'claude', 'unknown-provider'] } }), ...intro })
+    expect(bundle.docsConfig.contextual).toEqual({ options: ['copy', 'view', 'chatgpt', 'cursor', 'claude'] })
+    expect(bundle.warnings.some((warning) => /contextual\.options.*unknown-provider/.test(warning.message))).toBe(true)
   })
 
   it('labels languages with their native names like the Mintlify picker', () => {

@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { ParameterLinkProvider } from '@/components/api/parameter-link'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
+import type { PageActionsConfig } from '@/lib/page-actions'
 import { ExamplePanel } from '@/components/api/example-panel'
 import { TryItDialog } from '@/components/api/try-it-dialog'
 import { OperationCodePanel } from '@/components/api/operation-code-panel'
@@ -25,6 +26,8 @@ import { Prose } from '@/components/mdx/prose'
 const markdownProse = 'prose prose-sm max-w-none dark:prose-invert'
 
 interface OperationPanelProps {
+  /** Serializable release configuration for spec-only page header actions. */
+  pageActions?: PageActionsConfig
   operation: NormalizedOperation
   /** The page's own MDX body, shown between the header and the schema. */
   children?: React.ReactNode
@@ -43,7 +46,7 @@ export function OperationPanel(props: OperationPanelProps) {
   return <ParameterLinkProvider key={`${props.operation.specId}:${props.operation.id}:${props.operation.key}`}><OperationPanelContent {...props} /></ParameterLinkProvider>
 }
 
-function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale }: OperationPanelProps) {
+function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale, pageActions }: OperationPanelProps) {
   const t = (key: ApiLabelKey, n?: number) => apiLabel(locale, key, n)
   const controller = useTryItController(operation)
   const interactive = playground === 'interactive' && !operation.isWebhook
@@ -80,7 +83,7 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
           {showTitle ? (
             <div className="thally-endpoint-title"><h1 className="break-words font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
               {operation.title}
-            </h1><CopyPageButton /></div>
+            </h1><CopyPageButton {...pageActions} /></div>
           ) : null}
           {showTitle ? description : null}
           <EndpointBar operation={operation} display={playground} onTryIt={() => setDialogOpen(true)} />
