@@ -23,6 +23,7 @@ import {
 } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { agentServerName } from '@/lib/agent-identity'
+import { apiOperationMarkdown, describeApiOperation } from '@/lib/openapi/operation-projection'
 import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 import { isReaderAuthActive } from '@/lib/reader-auth/config'
 import { getReaderContext } from '@/lib/reader-auth/context'
@@ -189,7 +190,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     </div>
   )

@@ -1,5 +1,6 @@
 /** Endpoint pages apply the docs.json title separator like prose pages. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { operationFrom } from '@/components/api/test-fixtures'
 
 const specLink = vi.hoisted(() => ({ visible: true }))
 const fixtures = vi.hoisted(() => ({
@@ -17,13 +18,16 @@ vi.mock('@/app/(docs)/[[...slug]]/page', () => ({ default: fixtures.renderDoc, g
 vi.mock('@/data/api-reference', () => ({
   getApiOperationBySlug: vi.fn(async (slug?: string[]) => !slug?.length ? null : ({
     href: '/api/default/analytics/query/post',
-    operation: { title: 'Query analytics data', method: 'POST', path: '/analytics/query', specId: 'default' },
+    slug: ['default', 'analytics', 'query', 'post'],
+    operation: operationFrom({ openapi: '3.1.0', info: { title: 'Analytics', version: '1' }, paths: { '/analytics/query': { post: { summary: 'Query analytics data', responses: { '200': { description: 'OK' } } } } } }),
   })),
   getAllApiOperationNodes: vi.fn(async () => fixtures.nodes),
   getApiOperationNodes: vi.fn(async () => fixtures.nodes),
 }))
 vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
+  getApiMdxConfig: () => ({}),
+  getApiPlaygroundCredentials: () => ({}),
   getContextualOptions: () => ['copy', 'llms-full', 'mcp', 'cursor', 'vscode'],
   getApiSpecLinkVisible: () => specLink.visible,
   getBreadcrumbs: () => [],
@@ -48,6 +52,7 @@ describe('API endpoint metadata', () => {
     const tree = JSON.stringify(await ApiReferencePage({ params: Promise.resolve({ slug: ['default', 'analytics', 'query', 'post'] }) }))
     expect(tree).toContain('"options":["copy","llms-full","mcp","cursor","vscode"]')
     expect(tree).toContain('"serverName":"openrouter-docs"')
+    expect(tree).toContain('"markdown":"## POST /analytics/query')
   })
 
   it('shows the visible spec link by default and hides it with api.specLink false', async () => {

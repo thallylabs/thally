@@ -31,8 +31,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function render(options?: Array<string>) {
-  await act(async () => { root.render(<CopyPageButton options={options} serverName="tenant-docs" />) })
+async function render(options?: Array<string>, markdown?: string) {
+  await act(async () => { root.render(<CopyPageButton options={options} serverName="tenant-docs" markdown={markdown} />) })
 }
 async function click(element: Element) {
   await act(async () => { element.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
@@ -61,6 +61,28 @@ describe('reader page actions', () => {
     expect(fetchMock).toHaveBeenCalledWith(pathname === '/' ? '/introduction.md' : `${pathname}.md`)
     expect(writeText).toHaveBeenCalledWith('# Current page')
     expect(container.querySelector('[role="status"]')?.textContent).toBe('Copied to clipboard')
+  })
+
+  it('copies canonical generated API Markdown without requesting a nonexistent mirror', async () => {
+    route.pathname = '/api/default/posts/post'
+    await render(fiveActions, '## POST /posts — Create post\n\nRequest body (application/json): title, body\n\nResponses: 201 Created')
+    await click(container.querySelector('[aria-label="Copy page as markdown"]')!)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Request body (application/json): title, body'))
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Responses: 201 Created'))
+  })
+
+  it('snapshots fallback content before a slow mirror response and excludes menu controls', async () => {
+    let resolveMirror!: (response: Response) => void
+    fetchMock.mockImplementation(() => new Promise((resolve) => { resolveMirror = resolve }))
+    document.querySelector('article')!.append(container)
+    await render(['copy', 'view'])
+    await open()
+    await click(item('Copy page'))
+    await open()
+    document.querySelector('article')!.append('Later page content')
+    await act(async () => { resolveMirror(new Response('', { status: 404 })) })
+    expect(writeText).toHaveBeenCalledWith('Rendered fallback')
   })
 
   it('uses the rendered article if the Markdown mirror is disabled', async () => {

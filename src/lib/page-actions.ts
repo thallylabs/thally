@@ -3,6 +3,8 @@
 export interface PageActionsConfig {
   options?: ReadonlyArray<string>
   serverName?: string
+  /** Canonical operation projection for generated pages without an authored Markdown mirror. */
+  markdown?: string
 }
 
 /** Keep legacy menus unchanged until a site opts into the additional actions. */

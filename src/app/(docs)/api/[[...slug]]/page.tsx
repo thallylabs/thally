@@ -18,6 +18,7 @@ import { buildApiOperationJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { agentServerName } from '@/lib/agent-identity'
+import { apiOperationMarkdown, describeApiOperation } from '@/lib/openapi/operation-projection'
 import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 import { isReaderAuthActive } from '@/lib/reader-auth/config'
 import { getReaderContext } from '@/lib/reader-auth/context'
@@ -160,7 +161,7 @@ async function renderApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }

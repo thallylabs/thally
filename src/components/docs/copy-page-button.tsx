@@ -21,7 +21,7 @@ interface MenuItem {
 type CopyState = 'idle' | 'copied' | 'failed'
 
 /** Copy the current page or connect a reader's tools to this documentation site. */
-export function CopyPageButton({ options = DEFAULT_PAGE_ACTIONS, serverName = agentServerName('Documentation') }: PageActionsConfig) {
+export function CopyPageButton({ options = DEFAULT_PAGE_ACTIONS, serverName = agentServerName('Documentation'), markdown }: PageActionsConfig) {
   const pathname = usePathname()
   const menuId = useId()
   const [copyState, setCopyState] = useState<CopyState>('idle')
@@ -107,15 +107,22 @@ export function CopyPageButton({ options = DEFAULT_PAGE_ACTIONS, serverName = ag
   }
 
   async function handleCopy(kind: 'page' | 'mcp' = 'page') {
+    // Snapshot content before fetching: a reader may reopen the menu while the
+    // mirror responds. Never copy menu labels, clipboard announcements or chrome.
+    const article = kind === 'page' && !markdown ? document.querySelector('article')?.cloneNode(true) as HTMLElement | undefined : undefined
+    article?.querySelectorAll('[data-page-actions], [role="menu"], [role="status"]').forEach((node) => node.remove())
+    const fallback = article?.innerText || article?.textContent?.trim() || null
     if (open) closeMenu(true)
     try {
       let text: string | null
       if (kind === 'mcp') {
         text = mcpPageActions(window.location.origin, serverName).command
+      } else if (markdown) {
+        text = markdown
       } else {
         // Mirror-disabled sites still offer their rendered article as before.
         const response = await fetch(pageMarkdownPath(pathname))
-        text = response.ok ? await response.text() : document.querySelector('article')?.innerText ?? null
+        text = response.ok ? await response.text() : fallback
       }
       if (!text) throw new Error('No page content available')
       await navigator.clipboard.writeText(text)
@@ -148,7 +155,7 @@ export function CopyPageButton({ options = DEFAULT_PAGE_ACTIONS, serverName = ag
 
   const menuItemClass = 'flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left text-sm text-foreground/80 transition hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/60 focus-visible:text-foreground [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0'
   return (
-    <div ref={containerRef} className="relative flex h-[34px] shrink-0 items-stretch rounded-[9px] border border-border"
+    <div ref={containerRef} data-page-actions className="relative flex h-[34px] shrink-0 items-stretch rounded-[9px] border border-border"
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false) }}
       onKeyDown={(event) => {
         if (!open) return
