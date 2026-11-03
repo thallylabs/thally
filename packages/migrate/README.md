@@ -128,6 +128,9 @@ versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
 compatible page frontmatter, site identity, and OpenAPI configuration.
+A page `icon` written as an object (`name`, `style`, `library`) maps to the page's
+`icon` and `iconType`; Thally has one icon library per site, so a page `library`
+other than the site's `icons.library` (Font Awesome when unset) is reported.
 A page with no `description`, other than one that names an API operation, gets
 one from its first paragraph, which keeps it for search and metadata but marks it
 `descriptionPlacement: body`, so the runtime does not print the same sentence under
@@ -598,6 +601,12 @@ homepage and explicit redirects. Locale tags and recognized locale-prefixed
 sections are normalized without discarding original URL redirects.
 Mintlify's generated `param-*` links for settings headings and named fields
 become explicit anchors in migrated MDX.
+A component `href` that starts with `./` or `../` (`<Card href="./lesson-1">`) is
+rewritten to the root-absolute path the browser reaches from the page's own route
+(`/ua-course/lesson-1` on `ua-course/intro`; a directory index is served at its
+parent route), keeping any query and fragment, so Thally's cards render it and
+`thally check` validates it. A `href` that climbs above the site root stops at the
+root, as the browser does. Markdown links and code are left alone.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
 For a copied client component that receives a simple page-authored JSX callback,
@@ -696,11 +705,18 @@ Other relative imports of a copied file are handled the same way: a namespace
 import (`import * as X from './comp.jsx'`) and a dynamic `import('./comp.jsx')`
 point at the copied module, and a relative side-effect import
 (`import './styles.css'`) is removed with a warning, like one from an npm
-package. A page is excluded only when the relative target is not copied (for
+package. An `import` line inside a template literal of an `export` (a code sample
+held in a string) is text, so it stays in the string and is not hoisted. A page is
+excluded only when the relative target is not copied (for
 example a Next.js `./metadata` module, or an `export ... from` re-export), with
 a single warning naming it. An MDX expression that names an identifier the page
 never defines (`{missing}`) is removed with a warning, since it would throw at
 render; define the name or escape the braces as `\{ \}` to keep the text.
+Prose braces that are not a valid expression at all (a URL placeholder such as
+`/{chainId?}`) are escaped as literal text, which is how Mintlify shows them, and
+one warning per page names the lines. The page is kept only if it then compiles:
+a broken expression in a JSX attribute, a broken `export`, or a brace that never
+closes still excludes the page.
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
 number, boolean, `null`, or an object/array of those) or a self-contained
@@ -899,6 +915,8 @@ are copied into `public/`, but Thally's site configuration has no static
 field for them — branding is managed from the admin dashboard at runtime —
 so each site gets one warning naming the copied files and pointing at the
 dashboard's branding settings instead of leaving the loss silent.
+A `docs.json` logo or favicon path written with a leading `./` (`./logo/icon.svg`)
+counts like `logo/icon.svg`; one that climbs out with `../` is not imported.
 
 ## Cloning a GitHub repository
 

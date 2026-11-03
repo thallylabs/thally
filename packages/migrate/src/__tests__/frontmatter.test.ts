@@ -79,6 +79,51 @@ describe('parseMarkdownPage', () => {
     }
   })
 
+  describe('object-form icon', () => {
+    const parse = (icon: string, extra: { siteIconLibrary?: string } = {}) => {
+      const warnings: Array<string> = []
+      const page = parseMarkdownPage({ id: 'guide', platform: 'mintlify', source: 'guide.mdx', raw: `---\n${icon}\n---\nBody.`, warn: (message) => warnings.push(message), ...extra })
+      return { page, warnings }
+    }
+
+    it('maps name to icon and a supported style to iconType', () => {
+      const { page, warnings } = parse('icon:\n  name: "rocket"\n  style: "solid"\n  library: "fontawesome"')
+      expect(page).toMatchObject({ icon: 'rocket', iconType: 'solid' })
+      expect(warnings).toEqual([])
+    })
+
+    it('keeps just the name when no style is given, and falls back to a top-level iconType', () => {
+      expect(parse('icon:\n  name: rocket').page).toMatchObject({ icon: 'rocket', iconType: undefined })
+      expect(parse('icon:\n  name: rocket\niconType: brands').page).toMatchObject({ icon: 'rocket', iconType: 'brands' })
+      expect(parse('icon:\n  name: rocket\n  style: regular\niconType: brands').page?.iconType).toBe('regular')
+    })
+
+    it('ignores a style the page icon cannot express but keeps the name', () => {
+      for (const style of ['duotone', 'sharp-solid', '[solid]', '42']) {
+        expect(parse(`icon:\n  name: rocket\n  style: ${style}`).page).toMatchObject({ icon: 'rocket', iconType: undefined })
+      }
+      expect(parse('icon:\n  name: rocket\n  style: duotone\niconType: solid').page?.iconType).toBe('solid')
+    })
+
+    it('ignores an object with no usable name without failing the page', () => {
+      for (const icon of ['icon:\n  style: solid', 'icon:\n  name: 5', 'icon:\n  name: "  "', 'icon: [rocket]', 'icon: {}', 'icon:\n  name: [rocket]']) {
+        const { page, warnings } = parse(icon)
+        expect(page).toMatchObject({ icon: undefined, iconType: undefined })
+        expect(warnings).toEqual([])
+      }
+    })
+
+    it('warns when the page names a different icon library than the site uses, and only then', () => {
+      const lucide = 'icon:\n  name: rocket\n  library: lucide'
+      const { page, warnings } = parse(lucide)
+      expect(page?.icon).toBe('rocket')
+      expect(warnings).toEqual([expect.stringMatching(/Page "guide".*"lucide".*site uses "fontawesome".*"rocket"/)])
+      expect(parse(lucide, { siteIconLibrary: 'lucide' }).warnings).toEqual([])
+      expect(parse('icon:\n  name: rocket\n  library: fontawesome', { siteIconLibrary: 'tabler' }).warnings).toHaveLength(1)
+      expect(parse('icon:\n  name: rocket\n  library: 5').warnings).toEqual([])
+    })
+  })
+
   it('does not execute javascript frontmatter in scraped pages', () => {
     const marker = '__migrate_page_frontmatter_probe__'
     const globals = globalThis as unknown as Record<string, unknown>

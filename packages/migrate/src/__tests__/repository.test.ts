@@ -3041,6 +3041,90 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  describe('prose braces acorn cannot parse', () => {
+    const migrateOne = (pages: Record<string, string>) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-braces-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: Object.keys(pages) } }))
+      for (const [id, content] of Object.entries(pages)) {
+        mkdirSync(dirname(join(root, `${id}.mdx`)), { recursive: true })
+        writeFileSync(join(root, `${id}.mdx`), content)
+      }
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+
+    it('keeps a page whose URL placeholder is not a valid expression, escapes it and warns with the line', () => {
+      const bundle = migrateOne({ 'aa/guides/bundler': '---\ntitle: Bundler\ndescription: "Use {id?} here"\n---\n\n## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n\nTotal {1 + 1}\n' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'aa/guides/bundler')
+      expect(page?.body).toContain('https://bundler.particle.network/\\{chainId?}')
+      expect(page?.body).toContain('Total {1 + 1}')
+      expect(page?.description).toBe('Use {id?} here')
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'unsupported-config',
+        source: 'aa/guides/bundler.mdx',
+        message: 'Escaped `{` on line 3 so the page compiles; the braces render as literal text.',
+      }))
+      expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+    })
+
+    it('applies the brace repair after the closing-tag repair, with one warning each', () => {
+      const bundle = migrateOne({ mixed: '---\ntitle: Mixed\n---\n\n\\<Warning>\nWatch out.\n</Warning>\n\nSee /{chainId?}\n' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'mixed')
+      expect(page?.body).toContain('\\</Warning>')
+      expect(page?.body).toContain('/\\{chainId?}')
+      const messages = bundle.warnings.filter((warning) => warning.source === 'mixed.mdx').map((warning) => warning.message)
+      expect(messages).toContain('Escaped unmatched closing tag(s) on line 3 so the page compiles; they render as literal text.')
+      expect(messages).toContain('Escaped `{` on line 5 so the page compiles; the braces render as literal text.')
+    })
+
+    it('still excludes a page whose broken expression is a JSX attribute', () => {
+      const bundle = migrateOne({ broken: '---\ntitle: Broken\n---\n\nsee {a?}\n\n<Card title={a b}>\nbody\n</Card>\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'skipped-file',
+        source: 'broken.mdx',
+        message: expect.stringContaining('does not compile as MDX'),
+      }))
+      expect(bundle.warnings.some((warning) => warning.message.includes('Escaped `{`'))).toBe(false)
+    })
+
+    it('still excludes a page whose export does not parse', () => {
+      const bundle = migrateOne({ esm: '---\ntitle: Esm\n---\n\nexport const x = ;\n\nsee {a?}\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'esm.mdx' }))
+    })
+  })
+
+  describe('import lines inside a template literal', () => {
+    const literal = "`\nimport React from 'react';\nimport { AuthType } from \"@particle-network/auth-core\";\n  import { X } from \"@scope/x\";\n\nconst a = 1;\n`"
+    const component = (name: string) => `export const ${name} = () => {\n  const snippet = ${literal}\n  return <pre>{snippet}</pre>\n}`
+    const migrate = (files: Record<string, string>) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-template-literal-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['home'] } }))
+      for (const [name, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, name)), { recursive: true })
+        writeFileSync(join(root, name), content)
+      }
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    }
+    const unmoved = (bundle: ReturnType<typeof migrate>): void => {
+      const body = bundle.pages[0].body
+      expect(body).toContain(literal)
+      expect(body.startsWith('import ')).toBe(false)
+      expect(bundle.warnings.filter((warning) => warning.message.includes('MDX import of'))).toEqual([])
+    }
+
+    it('keeps them in the template literal of a page export', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\n${component('Code')}\n\n<Code />\n` }))
+    })
+
+    it('keeps them in the template literal of an inlined snippet component', () => {
+      unmoved(migrate({
+        'snippets/code.mdx': component('Code'),
+        'home.mdx': "---\ntitle: Home\n---\n\nimport { Code } from '/snippets/code.mdx'\n\n<Code />\n",
+      }))
+    })
+  })
+
   it('excludes a page that re-exports from a relative module the migration does not ship, but keeps relative snippet imports', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-module-'))
     mkdirSync(join(root, 'snippets'))
@@ -3951,6 +4035,26 @@ function docusaurusFixture(sidebarSource?: string): string {
   writeFileSync(join(root, 'static', 'img', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
   return root
 }
+
+describe('relative component hrefs on other platforms', () => {
+  it('leaves them as written for Docusaurus', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\n---\n\n<a href="./nowhere">Next</a>')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.title === 'Authentication')?.body).toContain('href="./nowhere"')
+  })
+
+  it('leaves them as written for Fern when no page matches', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-relative-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'pages'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Welcome\n    path: pages/welcome.mdx\n')
+    writeFileSync(join(fernRoot, 'pages', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\n<Card href="./nowhere" />')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+    expect(bundle.pages.find((page) => page.title === 'Welcome')?.body).toContain('href="./nowhere"')
+  })
+})
 
 describe('Docusaurus repository migration', () => {
   it('expands category DocCardList at its authored position', () => {
@@ -6226,6 +6330,106 @@ describe('Mintlify mounted links', () => {
     expect(body).toContain('[Example](/docs/fr/quickstart)')
   })
 
+})
+
+// The source site's own host comes from docs.json (`seo.metatags.canonical`, else `integrations.plausible.domain`); a link to it that
+// reaches an imported page becomes root-relative, anything else keeps its absolute URL.
+describe('Mintlify links to the site\'s own domain', () => {
+  const PAGE = '---\ntitle: Page\n---\n\n'
+
+  /** Migrates a Mintlify fixture with the given docs.json fields and pages (path -> body); returns the body of `other`. */
+  function migrateOther(config: Record<string, unknown>, other: string, pages: Array<string> = ['docs/guide/start']): string {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-own-domain-'))
+    const ids = [...pages, 'other']
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', ...config, navigation: { pages: ids } }))
+    for (const id of pages) {
+      mkdirSync(dirname(join(root, id)), { recursive: true })
+      writeFileSync(join(root, `${id}.mdx`), `${PAGE}Target.`)
+    }
+    writeFileSync(join(root, 'other.mdx'), `${PAGE}${other}`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    return bundle.pages.find((page) => page.id === 'other')?.body ?? ''
+  }
+  const plausible = (domain: string) => ({ integrations: { plausible: { domain } } })
+
+  it('makes a same-host Markdown link and Card href root-relative when the page exists', () => {
+    const body = migrateOther(plausible('docs.example.com'), [
+      '[x](https://docs.example.com/docs/guide/start#step)',
+      '[q](http://docs.example.com/docs/guide/start?view=all)',
+      '[upper](https://DOCS.example.com/docs/guide/start)',
+      '<Card title="T" href="https://docs.example.com/docs/guide/start" />',
+    ].join('\n\n'))
+    expect(body).toContain('[x](/docs/guide/start#step)')
+    expect(body).toContain('[q](/docs/guide/start?view=all)')
+    expect(body).toContain('[upper](/docs/guide/start)')
+    expect(body).toContain('href="/docs/guide/start"')
+    expect(body).not.toContain('docs.example.com')
+  })
+
+  it('keeps a same-host link to a page that does not exist absolute', () => {
+    const missing = '[m](https://docs.example.com/docs/guide/missing)\n\n[a](https://docs.example.com/docs/guide/image.png)\n\n[h](https://docs.example.com)'
+    const body = migrateOther(plausible('docs.example.com'), missing)
+    expect(body).toContain('[m](https://docs.example.com/docs/guide/missing)')
+    expect(body).toContain('[a](https://docs.example.com/docs/guide/image.png)')
+    expect(body).toContain('[h](https://docs.example.com)')
+  })
+
+  it('keeps a link to another host, port or account absolute', () => {
+    const links = [
+      'https://other.example.com/docs/guide/start',
+      'https://www.docs.example.com/docs/guide/start',
+      'https://docs.example.com.evil.test/docs/guide/start',
+      'https://docs.example.com:8443/docs/guide/start',
+      'https://user@docs.example.com/docs/guide/start',
+    ]
+    const body = migrateOther(plausible('docs.example.com'), links.map((link) => `[l](${link})`).join('\n\n'))
+    for (const link of links) expect(body).toContain(`[l](${link})`)
+  })
+
+  it('makes a link to a redirect source root-relative', () => {
+    const body = migrateOther(
+      { ...plausible('docs.example.com'), redirects: [{ source: '/docs/old', destination: '/docs/guide/start' }] },
+      '[old](https://docs.example.com/docs/old)',
+    )
+    expect(body).toContain('[old](/docs/old)')
+  })
+
+  it('removes a mount prefix only when the rest is an imported page', () => {
+    const body = migrateOther(plausible('example.com'), '[g](https://example.com/docs/guide)\n\n[n](https://example.com/docs/nope)', ['guide'])
+    expect(body).toContain('[g](/guide)')
+    expect(body).toContain('[n](https://example.com/docs/nope)')
+  })
+
+  it('prefers seo.metatags.canonical over the Plausible domain', () => {
+    const body = migrateOther(
+      { seo: { metatags: { canonical: 'https://canonical.example.com/docs' } }, ...plausible('docs.example.com') },
+      '[c](https://canonical.example.com/docs/guide/start)\n\n[p](https://docs.example.com/docs/guide/start)',
+    )
+    expect(body).toContain('[c](/docs/guide/start)')
+    expect(body).toContain('[p](https://docs.example.com/docs/guide/start)')
+  })
+
+  it('falls back to the Plausible domain when the canonical is not an http(s) URL, and ignores a Plausible list', () => {
+    const link = '[p](https://docs.example.com/docs/guide/start)'
+    expect(migrateOther({ seo: { metatags: { canonical: 'docs.example.com' } }, ...plausible('docs.example.com') }, link)).toContain('[p](/docs/guide/start)')
+    expect(migrateOther(plausible('docs.example.com,other.example.com'), link)).toContain(link)
+  })
+
+  it('changes nothing without a canonical or Plausible domain', () => {
+    const links = '[x](https://docs.example.com/docs/guide/start#step)\n\n<Card title="T" href="https://docs.example.com/docs/guide/start" />'
+    const body = migrateOther({}, links)
+    expect(body).toContain('[x](https://docs.example.com/docs/guide/start#step)')
+    expect(body).toContain('href="https://docs.example.com/docs/guide/start"')
+  })
+
+  // MDX has no `<https://...>` autolinks (a page holding one does not compile), so only bare URLs and code can show a same-host URL.
+  it('never touches code or bare URLs', () => {
+    const url = 'https://docs.example.com/docs/guide/start'
+    const body = migrateOther(plausible('docs.example.com'), [url, `\`[x](${url})\``, `\`\`\`md\n[x](${url})\n\`\`\``].join('\n\n'))
+    expect(body).toContain(`\`[x](${url})\``)
+    expect(body).toContain(`\`\`\`md\n[x](${url})\n\`\`\``)
+    expect(body.replace(/`[^`]*`|```[\s\S]*?```/g, '').match(new RegExp(url.replace(/[./]/g, '\\$&'), 'g'))).toHaveLength(1)
+  })
 })
 
 describe('scanFiles follows a submodule symlink inside the repository checkout', () => {

@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -3346,7 +3346,18 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
 /** MDX imports from nested Markdown partials must live at page scope. */
 function hoistMdxImports(source: string): string {
   const imports = new Set<string>()
-  const withoutImports = replaceOutsideCode(source, (body) => body.replace(
+  // A template literal in an `export` can hold a code sample whose lines read as imports; it is set aside whole and put back.
+  const literals: Array<string> = []
+  let protectedSource = ''
+  let cursor = 0
+  for (const [start, end] of source.includes('`') ? esmTemplateLiteralRanges(source) : []) {
+    if (start < cursor) continue
+    literals.push(source.slice(start, end))
+    protectedSource += `${source.slice(cursor, start)}\u0002${literals.length - 1}\u0002`
+    cursor = end
+  }
+  protectedSource += source.slice(cursor)
+  const withoutImports = replaceOutsideCode(protectedSource, (body) => body.replace(
     /^[ \t]*import\s+(?:\{[^}\n]+\}|[A-Za-z_$][\w$]*)\s+from\s+(['"])[^'"\n]+\1[ \t]*;?/gm,
     (statement: string) => {
       imports.add(statement.trim().replace(/;?$/, ';'))
@@ -3357,6 +3368,7 @@ function hoistMdxImports(source: string): string {
   const frontmatter = withoutImports.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
   const prefix = frontmatter?.[0] ?? ''
   return `${prefix}${[...imports].join('\n')}\n\n${withoutImports.slice(prefix.length).replace(/^(?:\r?\n)*/, '')}`
+    .replace(/\u0002(\d+)\u0002/g, (marker, index: string) => literals[Number(index)] ?? marker)
 }
 
 /** Fern can publish a repository beneath a domain path such as `/skills`. */
@@ -3434,15 +3446,35 @@ function stripFernBasePathFromLinks(body: string, basePath: string): string {
     )))
 }
 
-/** Remove a published Mintlify mount path only when its destination is an imported page. */
-function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>): string {
-  const rewrite = (target: string): string => {
+/**
+ * The host a Mintlify site is served from, read from its docs.json: `seo.metatags.canonical` when it is an http(s) URL, otherwise
+ * `integrations.plausible.domain` when that names a single hostname (Plausible also takes a comma list, which names no one site).
+ */
+function mintlifySourceHost(config: Record<string, unknown> | null): string | undefined {
+  const canonical = (config?.seo as { metatags?: { canonical?: unknown } } | undefined)?.metatags?.canonical
+  if (typeof canonical === 'string') {
+    try {
+      const url = new URL(canonical.trim())
+      if (url.protocol === 'http:' || url.protocol === 'https:') return url.hostname
+    } catch { /* not a URL: the Plausible domain is next */ }
+  }
+  const domain = (config?.integrations as { plausible?: { domain?: unknown } } | undefined)?.plausible?.domain
+  return typeof domain === 'string' && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(domain.trim()) ? domain.trim().toLowerCase() : undefined
+}
+
+/**
+ * Remove a published Mintlify mount path only when its destination is an imported page. A link to the source site's own host
+ * (`sourceHost`) gets the same treatment and becomes root-relative only when that proves the route exists here.
+ */
+function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>, sourceHost?: string): string {
+  /** The root-relative route `target` reaches here, or undefined when it names no imported page. */
+  const resolve = (target: string): string | undefined => {
     const suffixAt = target.search(/[?#]/)
     const pathname = suffixAt < 0 ? target : target.slice(0, suffixAt)
     const suffix = suffixAt < 0 ? '' : target.slice(suffixAt)
-    if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('\\')) return target
+    if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('\\')) return undefined
     const segments = pathname.slice(1).split('/')
-    if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return target
+    if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return undefined
     const markdown = pathname.endsWith('.md')
     const sourceMdx = pathname.endsWith('.mdx')
     const routeSegments = markdown || sourceMdx ? [...segments.slice(0, -1), segments.at(-1)!.replace(/\.mdx?$/, '')] : segments
@@ -3456,11 +3488,23 @@ function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>)
       const candidate = routeSegments.slice(count).join('/')
       if (pageIds.has(candidate)) return `/${candidate}${markdown ? '.md' : ''}${suffix}`
     }
-    return target
+    return undefined
+  }
+  const rewrite = (target: string): string => {
+    if (target.startsWith('/')) return resolve(target) ?? target
+    if (!sourceHost) return target
+    try {
+      const url = new URL(target)
+      // Exact host only: another port or a login is another site.
+      if (url.hostname !== sourceHost || url.port || url.username || url.password) return target
+      return resolve(`${url.pathname}${url.search}${url.hash}`) ?? target
+    } catch {
+      return target
+    }
   }
   return replaceOutsideCode(body, (text) => text
-    .replace(/(\]\()(\/[^\s)]+)(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
-    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]+)\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
+    .replace(/(\]\()(\/[^\s)]+|https?:\/\/[^\s)]+)(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
+    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]+|https?:\/\/[^'"\n]+)\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
 /** Preserve source fragments that resolve to a unique heading or table row. */
@@ -5054,6 +5098,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return { locale, navigationId, id: isDefaultLocale ? navigationId : `${locale}/${navigationId}` }
   }
   const routeAliases: NonNullable<MigrationDocsConfig['redirects']> = []
+  const sourceIcons = mintlifyConfig?.icons
+  const sourceIconLibrary = sourceIcons && typeof sourceIcons === 'object' ? (sourceIcons as Record<string, unknown>).library : undefined
   const pageFiles = [...files].sort((left, right) => {
     const leftOrder = referenceOrder.get(normalizedReferenceKey(left.relativePath)) ?? Number.MAX_SAFE_INTEGER
     const rightOrder = referenceOrder.get(normalizedReferenceKey(right.relativePath)) ?? Number.MAX_SAFE_INTEGER
@@ -5328,6 +5374,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       navigationId,
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
+      ...(typeof sourceIconLibrary === 'string' ? { siteIconLibrary: sourceIconLibrary } : {}),
       raw,
       platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
@@ -5439,15 +5486,29 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     let mdxError = invalidMdxReason(page.body)
     if (mdxError) {
       // Fail closed: only keep a repair that actually compiles.
-      const repaired = escapeUnmatchedClosingTags(page.body)
-      if (repaired.lines.length > 0 && invalidMdxReason(repaired.body) === null) {
-        page.body = repaired.body
+      const closingTags = escapeUnmatchedClosingTags(page.body)
+      const closingTagsWarning = {
+        code: 'unsupported-config' as const,
+        message: `Escaped unmatched closing tag(s) on line ${closingTags.lines.join(', ')} so the page compiles; they render as literal text.`,
+        source: file.relativePath,
+      }
+      if (closingTags.lines.length > 0 && invalidMdxReason(closingTags.body) === null) {
+        page.body = closingTags.body
         mdxError = null
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Escaped unmatched closing tag(s) on line ${repaired.lines.join(', ')} so the page compiles; they render as literal text.`,
-          source: file.relativePath,
-        })
+        warnings.push(closingTagsWarning)
+      } else {
+        // Runs on the closing-tag repair's output; `escapeUnparseableExpressions` keeps its result only if the page compiles.
+        const braces = escapeUnparseableExpressions(closingTags.body)
+        if (braces.lines.length > 0) {
+          page.body = braces.body
+          mdxError = null
+          if (closingTags.lines.length > 0) warnings.push(closingTagsWarning)
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Escaped \`{\` on line ${braces.lines.join(', ')} so the page compiles; the braces render as literal text.`,
+            source: file.relativePath,
+          })
+        }
       }
     }
     if (mdxError) {
@@ -6368,7 +6429,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ...pages.map((page) => page.id),
       ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, '')),
     ])
-    for (const page of pages) page.body = rewriteMintlifyMountedLinks(page.body, reachablePaths)
+    const sourceHost = mintlifySourceHost(mintlifyConfig)
+    for (const page of pages) page.body = rewriteMintlifyMountedLinks(page.body, reachablePaths, sourceHost)
   }
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
@@ -6605,6 +6667,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (source) page.body = rewriteFernRelativePageLinks(page.body, source, routes)
     }
   }
+  if (platform === 'mintlify') {
+    // Page ids are final here, and an id is the route Mintlify served the page at.
+    for (const page of pages) page.body = rewriteRelativeJsxHrefs(page.body, page.id)
+  }
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
   preserveLinkedAnchors(pages)
   if (platform === 'fern' && fernRawConfig) {
@@ -6785,7 +6851,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const assetPaths = new Set(assets.map((asset) => asset.path))
   const publicBrandPath = (value: unknown): string | undefined => {
     if (typeof value !== 'string' || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return undefined
-    const normalized = fernBrandAssetPaths.get(value) ?? normalizeAssetPath(value)
+    // `normalizeAssetPath` rejects every `.` segment, but docs.json writes `./logo/x.svg`: drop a leading `./` run only.
+    const normalized = fernBrandAssetPaths.get(value) ?? normalizeAssetPath(value.replace(/^(?:\.[/\\]+)+/, ''))
     return normalized && assetPaths.has(normalized) ? `/${normalized}` : undefined
   }
   const brandVariants = (value: unknown): { light?: string; dark?: string; showTitle?: boolean } => {

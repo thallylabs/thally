@@ -448,13 +448,21 @@ function thallyHeadingSlug(text: string): string {
 }
 
 /**
+ * A link's `](destination)` with one level of parentheses inside it, in the URL or the quoted title (Docusaurus headings end in
+ * `[\u200b](#id "Direct link to Interchain Security Module (ISM)")`). The alternatives never overlap, so it cannot backtrack badly.
+ */
+const LINK_DESTINATION = String.raw`\]\((?:[^()]|\([^()]*\))*\)`
+/** What typesetting leaves alone: code, tags and link destinations (`split` keeps these at the odd indexes). */
+const TYPESET_PROTECTED = new RegExp(`(\`[^\`]*\`|<[^>]*>|${LINK_DESTINATION})`)
+
+/**
  * Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. A heading that opens with a straight
  * double quote and does not end with one gets a closing quote first (2 of 2 such headings on a live site); one quoted from end to end
  * keeps its opening quote (another live site).
  */
 function typesetQuotes(text: string): string {
   const opensClosed = text.startsWith('"') && !text.trimEnd().endsWith('"')
-  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => {
+  return text.split(TYPESET_PROTECTED).map((part, index) => {
     if (index % 2) return part
     return part
       // The leading quote of such a heading is left straight here, so the next step closes it.
@@ -466,20 +474,23 @@ function typesetQuotes(text: string): string {
 
 /** Mintlify typesets `...` as an ellipsis in a heading's text, not in its code, and its id keeps it (`f(x, ...)` is `f-x-…`). */
 function typesetEllipses(text: string): string {
-  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => (index % 2 ? part : part.replace(/\.{3}/g, '\u2026'))).join('')
+  return text.split(TYPESET_PROTECTED).map((part, index) => (index % 2 ? part : part.replace(/\.{3}/g, '\u2026'))).join('')
 }
+
+const LINK_HOLDING_CODE = new RegExp(`(\`[^\`]*\`)|!?\\[((?:\`[^\`]*\`|[^\\]\`])*)${LINK_DESTINATION}`, 'g')
+const PLAIN_LINK = new RegExp(`!?\\[([^\\]]*)${LINK_DESTINATION}`, 'g')
 
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
   // A link's text can hold code (`[`Scrape`](/n8n)`), and the split below would cut the link in three and leave its target in the text,
   // so a link that holds code spans goes first. A code span is skipped whole: link syntax inside it is text.
   const unlinked = !source.includes('`') ? source
-    : source.replace(/(`[^`]*`)|!?\[((?:`[^`]*`|[^\]`])*)\]\([^)]*\)/g, (_match: string, code?: string, text = '') => code ?? text)
+    : source.replace(LINK_HOLDING_CODE, (_match: string, code?: string, text = '') => code ?? text)
   // What a code span holds is text, whatever it looks like: no comment, link, tag or emphasis is read inside it (`Option<T>` keeps its `<T>`).
   return unlinked.split(/(`[^`]*`)/).map((part, index) => (index % 2 ? part.slice(1, -1) : part
     // An authored MDX comment is not rendered, so Mintlify's id never sees it.
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(PLAIN_LINK, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
     .replace(/(?<!\\)(\*\*|__|~~|\*)/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
@@ -1744,6 +1755,68 @@ export function rewriteFernRelativePageLinks(
       (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
 }
 
+/**
+ * Mintlify renders a component's `./x` or `../x` href as an anchor the browser
+ * resolves against the page URL, but Thally's Card keeps only root-absolute
+ * hrefs and `thally check` validates only those. Rewrite each to the path the
+ * browser reaches from `pagePath`, the route the page is served at. A
+ * directory index keeps its parent's route (`guides/index.mdx` has the id
+ * `guides` and is served at `/guides`, as on Mintlify), so `./x` there
+ * resolves to `/x`, as the author saw it. Markdown links stay browser-relative.
+ * A href that climbs above the site root stops at the root, as the browser
+ * does, so `../x` on a top-level page is `/x`.
+ */
+export function rewriteRelativeJsxHrefs(body: string, pagePath: string): string {
+  const rewrite = (target: string): string => {
+    if (!/^\.\.?\//.test(target) || target.includes('\\') || /[\u0000-\u001f\u007f]/.test(target)) return target
+    const suffixAt = target.search(/[?#]/)
+    const pathname = suffixAt < 0 ? target : target.slice(0, suffixAt)
+    // A percent-encoded dot or slash is read differently by the browser than by a plain split.
+    if (/%2e|%2f|%5c/i.test(pathname)) return target
+    const segments = pagePath.split('/').slice(0, -1)
+    for (const part of pathname.split('/')) {
+      if (part === '..') {
+        segments.pop()
+      } else if (part !== '.' && part !== '') {
+        segments.push(part)
+      }
+    }
+    return `/${segments.join('/')}${pathname.endsWith('/') && segments.length > 0 ? '/' : ''}${suffixAt < 0 ? '' : target.slice(suffixAt)}`
+  }
+  return replaceOutsideCodeAndComments(body, (text) => text
+    .replace(/((?<![\w-])href\s*=\s*)(["'])([^"'\n]+)\2/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`)
+    .replace(/((?<![\w-])href\s*=\s*\{\s*)(["'])([^"'\n]+)\2(?=\s*\})/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
+}
+
+/**
+ * The `[start, end)` offsets in `body`, in document order, of every template literal inside the page's
+ * `export` blocks: a code sample held in a string, whose lines are text even when one reads `import x from 'y'`.
+ * Empty when the page does not parse as MDX yet.
+ */
+export function esmTemplateLiteralRanges(body: string): Array<[number, number]> {
+  let tree: MdxOffsetNode
+  try {
+    tree = descriptionParser.parse(body) as MdxOffsetNode
+  } catch {
+    return []
+  }
+  const ranges: Array<[number, number]> = []
+  const scan = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as { type?: unknown; start?: unknown; end?: unknown }
+    if (node.type === 'TemplateLiteral' && typeof node.start === 'number' && typeof node.end === 'number') ranges.push([node.start, node.end])
+    for (const child of Object.values(node)) scan(child)
+  }
+  const visit = (node: MdxOffsetNode): void => {
+    if (node.type === 'mdxjsEsm') scan(node.data?.estree)
+    node.children?.forEach(visit)
+  }
+  visit(tree)
+  return ranges.sort((left, right) => left[0] - right[0])
+}
+
 /** Convert Fern's indented file-list shorthand to Thally's nested Tree nodes. */
 function normalizeFernFileTrees(body: string): string {
   return replaceOutsideCode(body, (whole) => whole.replace(/<FileTree\s*>\s*\n([\s\S]*?)\n\s*<\/FileTree>/g,
@@ -2161,6 +2234,21 @@ function normalizeDocusaurusTabs(body: string): string {
   return result.replace(/<ThallyTabs\b/g, '<Tabs').replace(/<\/ThallyTabs>/g, '</Tabs>')
 }
 
+/**
+ * A TabItem outside any <Tabs>...</Tabs> pair (malformed source) never reaches normalizeDocusaurusTabs' block match; fall back to
+ * its own label/value so it still renders as a Tab.
+ */
+function normalizeStrayTabItems(body: string): string {
+  return body
+    .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
+      const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+        ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+        ?? 'Tab'
+      return `<Tab title="${title.replace(/"/g, '&quot;')}">`
+    })
+    .replace(/<\/TabItem>/g, '</Tab>')
+}
+
 const TAB_FENCE_OPEN = /^(`{3,}|~{3,})(\S*)\s+tab\b(.*)$/
 
 /**
@@ -2517,6 +2605,77 @@ export function escapeUnmatchedClosingTags(body: string): { body: string; lines:
   return { body: result + body.slice(cursor), lines }
 }
 
+/** Whether `text[index]` is escaped, that is preceded by an odd run of backslashes. */
+function isBackslashEscaped(text: string, index: number): boolean {
+  let slashes = 0
+  while (index - 1 - slashes >= 0 && text[index - 1 - slashes] === '\\') slashes++
+  return slashes % 2 === 1
+}
+
+const MAX_EXPRESSION_REPAIRS = 50
+
+/**
+ * Escape prose braces that MDX reads as an expression acorn cannot parse
+ * (`https://host/{chainId?}`); Mintlify shows them as literal text. Each round
+ * compiles the page and, for an acorn failure inside an expression, escapes
+ * every `{` of the balanced span around it: escaping only the outer one
+ * would leave a nested `{y}` as a live expression that throws at render.
+ * Fails closed: any other error (an `export`, a JSX attribute whose escaped
+ * brace is no longer valid JSX, an unclosed brace) or more than 50 repairs
+ * returns `body` unchanged. Otherwise `body` compiles, and `lines` holds the
+ * 1-based lines that got an escape.
+ */
+export function escapeUnparseableExpressions(body: string): { body: string; lines: Array<number> } {
+  let current = body
+  const lines = new Set<number>()
+  for (let repairs = 0; ; repairs++) {
+    let failure: { source?: string; ruleId?: string; place?: { offset?: number } } | null
+    try {
+      compileSync(current, { outputFormat: 'program' })
+      return { body: current, lines: [...lines].sort((left, right) => left - right) }
+    } catch (error) {
+      failure = error as typeof failure
+    }
+    const offset = failure?.place?.offset
+    if (repairs === MAX_EXPRESSION_REPAIRS || failure?.source !== 'micromark-extension-mdx-expression'
+      || failure.ruleId !== 'acorn' || typeof offset !== 'number') return { body, lines: [] }
+    const masked = maskCodeRegions(current)
+    // The offset is where acorn failed inside the expression, so its opening brace is the first unbalanced `{` before it.
+    let opener = -1
+    for (let i = offset - 1, depth = 0; i >= 0 && opener < 0; i--) {
+      if (isBackslashEscaped(masked, i)) continue
+      if (masked[i] === '}') depth++
+      else if (masked[i] === '{') {
+        if (depth === 0) opener = i
+        else depth--
+      }
+    }
+    if (opener < 0) return { body, lines: [] }
+    let braces: Array<number> = []
+    let closed = false
+    for (let i = opener, depth = 0; i < masked.length && !closed; i++) {
+      if (isBackslashEscaped(masked, i)) continue
+      if (masked[i] === '{') {
+        depth++
+        braces.push(i)
+      } else if (masked[i] === '}') {
+        closed = --depth === 0
+      }
+    }
+    if (!closed) braces = [opener]
+    let line = 1
+    let cursor = 0
+    let result = ''
+    for (const brace of braces) {
+      for (let i = cursor; i < brace; i++) if (current.charCodeAt(i) === 10) line++
+      lines.add(line)
+      result += `${current.slice(cursor, brace)}\\`
+      cursor = brace
+    }
+    current = result + current.slice(cursor)
+  }
+}
+
 function isKnownComponentName(name: string, body: string): boolean {
   if (isThallyBuiltinComponent(name)) return true
   if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${name}\\b`, 'm').test(body)) return true
@@ -2752,6 +2911,8 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     ))
     rewritten = rewritten.replace(/^\n{2,}/, '\n')
   }
+  // Mintlify sources converted from Docusaurus keep its `<Tabs values>` and `<TabItem>`; a fenced example of them stays as written.
+  if (runMintlify && rewritten.includes('<TabItem')) rewritten = replaceOutsideCode(rewritten, normalizeDocusaurusTabs)
   if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
   rewritten = unwrapHtmlCommentInMdxComment(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
@@ -2766,24 +2927,13 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       .replace(/<Tree\.File/g, '<File')
       .replace(/<\/Tree\.File>/g, '</File>')
     if (runDocusaurus) {
-      result = result
-        // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
-        // never reaches normalizeDocusaurusTabs' block match above; fall
-        // back to its own label/value so it still renders as a Tab.
-        .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
-          const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-            ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-            ?? 'Tab'
-          return `<Tab title="${title.replace(/"/g, '&quot;')}">`
-        })
-        .replace(/<\/TabItem>/g, '</Tab>')
-      result = normalizeDocusaurusLinkTags(result)
+      result = normalizeDocusaurusLinkTags(normalizeStrayTabItems(result))
         // The repository adapter expands DocCardList from the resolved
         // sidebar after page discovery. Its source tag has no runtime peer.
         .replace(/<(?:DocCardList|TOCInline)\b[^<>]*\/>/g, '')
     }
     if (runMintlify) {
-      result = normalizeMintlifyUpdateLabels(result)
+      result = normalizeMintlifyUpdateLabels(normalizeStrayTabItems(result))
         // Mintlify documents `<FileTree>` as a plain alias of `<Tree>`; Thally
         // only registers the latter.
         .replace(/<FileTree(\s[^>]*)?>/g, '<Tree$1>')
@@ -2893,6 +3043,8 @@ export function parseMarkdownPage(input: {
   ) => MarkdownPageIdentity
   /** Receives a message when frontmatter is dropped or altered. */
   warn?: (message: string) => void
+  /** The icon library the migrated site uses; Mintlify's default, Font Awesome, when omitted. */
+  siteIconLibrary?: string
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
   if (input.platform === 'mintlify') {
@@ -2927,11 +3079,20 @@ export function parseMarkdownPage(input: {
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
-  const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
-  const iconType = icon && typeof parsed.data.iconType === 'string'
-    && ['regular', 'solid', 'outline', 'brands'].includes(parsed.data.iconType)
-    ? parsed.data.iconType as MigrationPage['iconType']
+  // Mintlify also writes the icon as `{ name, style, library }`.
+  const iconObject = parsed.data.icon && typeof parsed.data.icon === 'object' && !Array.isArray(parsed.data.icon)
+    ? parsed.data.icon as Record<string, unknown>
     : undefined
+  const iconSource = iconObject ? iconObject.name : parsed.data.icon
+  const icon = typeof iconSource === 'string' && iconSource.trim() ? iconSource.trim() : undefined
+  const iconStyle = (value: unknown): MigrationPage['iconType'] =>
+    typeof value === 'string' && ['regular', 'solid', 'outline', 'brands'].includes(value) ? value as MigrationPage['iconType'] : undefined
+  const iconType = icon ? iconStyle(iconObject?.style) ?? iconStyle(parsed.data.iconType) : undefined
+  // Thally has one icon library per site, so a page's own library only works when it is the site's.
+  const siteIconLibrary = input.siteIconLibrary ?? 'fontawesome'
+  if (icon && typeof iconObject?.library === 'string' && iconObject.library !== siteIconLibrary) {
+    input.warn?.(`Page "${identity.id}": its icon names the "${iconObject.library}" icon library, but this site uses "${siteIconLibrary}", so the icon "${icon}" is looked up there and may show a different icon or none. Use an icon name from "${siteIconLibrary}", or set icons.library in docs.json to "${iconObject.library}".`)
+  }
   const meta: NonNullable<MigrationPage['meta']> = {}
   for (const [source, field] of PAGE_META_FIELDS) {
     const value = parsed.data[source]

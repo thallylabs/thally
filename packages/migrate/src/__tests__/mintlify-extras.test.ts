@@ -325,6 +325,61 @@ describe('config mapping', () => {
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
   })
 
+  describe('relative component hrefs', () => {
+    const body = (title: string, text: string) => `---\ntitle: ${title}\n---\n\n${text}\n`
+    const bodyOf = (bundle: MigrationBundle, id: string) => bundle.pages.find((candidate) => candidate.id === id)?.body
+
+    it('rewrites ./ and ../ hrefs to the root-absolute path the browser reaches, and leaves Markdown links', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'ua-course/overview', 'guides/index'] } }),
+        'intro.mdx': body('Intro', '<Card title="One" href="./lesson-1" />'),
+        'ua-course/overview.mdx': body('Overview', '<Card title="One" href="./lesson-1" />\n<Card title="Up" href={"../ref/x?tab=1#top"} />\n\n[kept](./lesson-2)\n\n```mdx\n<Card href="./code" />\n```'),
+        'guides/index.mdx': body('Guides', '<Card title="One" href="./x" />'),
+      })
+      expect(bodyOf(bundle, 'intro')).toContain('href="/lesson-1"')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('href="/ua-course/lesson-1"')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('href={"/ref/x?tab=1#top"}')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('[kept](./lesson-2)')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('<Card href="./code" />')
+      // `guides/index.mdx` is the page `guides`, served at `/guides`: the browser resolves ./x against `/`.
+      expect(bodyOf(bundle, 'guides')).toContain('href="/x"')
+      expect(bundle.warnings.filter((warning) => /relative/i.test(warning.message))).toEqual([])
+    })
+
+    it('clamps a href that climbs above the site root at the root, silently, as the browser does', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'a/b'] } }),
+        'intro.mdx': body('Intro', '<Card href="../x" />\n<Card href="./ok" />'),
+        'a/b.mdx': body('B', '<Card href="../../z" />'),
+      })
+      expect(bodyOf(bundle, 'intro')).toContain('<Card href="/x" />\n<Card href="/ok" />')
+      expect(bodyOf(bundle, 'a/b')).toContain('<Card href="/z" />')
+      expect(bundle.warnings.filter((warning) => /relative|climb/i.test(warning.message))).toEqual([])
+    })
+  })
+
+  describe('object-form page icon', () => {
+    const icon = (library: string) => page('Intro', `icon:\n  name: rocket\n  style: solid\n  library: ${library}\n`)
+
+    it('carries name and style, silent when the page library is the one the site uses', () => {
+      for (const [config, library] of [[{}, 'fontawesome'], [{ icons: { library: 'lucide' } }, 'lucide']] as const) {
+        const bundle = site({ 'docs.json': JSON.stringify({ ...nav, ...config }), 'intro.mdx': icon(library) })
+        expect(bundle.pages[0]).toMatchObject({ icon: 'rocket', iconType: 'solid' })
+        expect(bundle.warnings.filter((warning) => /icon library/.test(warning.message))).toEqual([])
+      }
+    })
+
+    it('warns, naming the page, when the page library differs from docs.json icons.library', () => {
+      const bundle = site({ 'docs.json': JSON.stringify({ ...nav, icons: { library: 'lucide' } }), 'intro.mdx': icon('fontawesome') })
+      expect(bundle.pages[0]).toMatchObject({ icon: 'rocket', iconType: 'solid' })
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'unsupported-config',
+        source: 'intro.mdx',
+        message: expect.stringMatching(/Page "intro".*"fontawesome".*site uses "lucide"/),
+      }))
+    })
+  })
+
   describe('brand logo, favicon and background', () => {
     const png = Buffer.from('PNGDATA')
     const brandWarning = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => /Brand asset/.test(warning.message))
@@ -390,6 +445,29 @@ describe('config mapping', () => {
       })
       expect(bundle.docsConfig.favicon).toEqual({ light: '/icons/dark.png', dark: '/icons/dark.png' })
       expect(brandWarning(bundle)[0].message).toMatch(/imported favicon \(\/icons\/dark\.png\) is used for both/)
+    })
+
+    it('imports a logo and favicon written with a leading ./ (Blockscout)', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: './logo/light.png', dark: '././logo/dark.png' }, favicon: './logo/Color_BS_symbol.svg' }),
+        'logo/light.png': png,
+        'logo/dark.png': png,
+        'logo/Color_BS_symbol.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+        ...intro,
+      })
+      expect(bundle.docsConfig.favicon).toEqual({ light: '/logo/Color_BS_symbol.svg' })
+      expect(bundle.docsConfig.navbar?.logo).toMatchObject({ light: '/logo/light.png', dark: '/logo/dark.png' })
+      expect(brandWarning(bundle)).toEqual([])
+    })
+
+    it('still rejects a favicon that climbs out of the site with ../', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, favicon: '../favicon.png' }),
+        'favicon.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.favicon).toBeUndefined()
+      expect(brandWarning(bundle)[0].message).toContain('../favicon.png')
     })
 
     it('warns that logo.href is dropped because the header logo always links home', () => {
