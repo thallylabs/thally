@@ -1820,21 +1820,23 @@ function templateLiteralRanges(body: string): Array<[number, number]> | null {
 /**
  * The `[start, end)` offsets in `body`, in document order, of every template literal the page's JavaScript holds
  * (in an `export`, an expression or a JSX attribute): a code sample in a string, whose lines are text even when one
- * reads `import x from 'y'`. The frontmatter is blanked first, as YAML is not MDX. A prose brace that acorn
- * rejects (`/{chainId?}`) stops the parse, so the page is then read with those braces escaped and the offsets are
- * mapped back. Empty when the page still does not parse, for example with an HTML comment that is not yet normalized.
+ * reads `import x from 'y'`. The frontmatter is blanked first, as YAML is not MDX. What stops the parse and later
+ * passes repair anyway is set right for the read, by edits that only blank or insert, so the offsets map back: an HTML
+ * comment is blanked, and an unmatched closing tag and a prose brace that acorn rejects (`/{chainId?}`) get a backslash.
+ * Empty when the page still does not parse, for example with an HTML tag that is never closed.
  */
 export function esmTemplateLiteralRanges(body: string): Array<[number, number]> {
   const text = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, (frontmatter) => frontmatter.replace(/[^\r\n]/g, ' '))
   const direct = templateLiteralRanges(text)
   if (direct) return direct
-  const repaired = escapeUnparseableExpressions(text)
-  const ranges = repaired.escaped.length > 0 ? templateLiteralRanges(repaired.body) : null
+  const blanked = text.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\r\n]/g, ' '))
+  const repaired = escapeUnparseableExpressions(escapeUnmatchedClosingTags(blanked).body)
+  const ranges = templateLiteralRanges(repaired.body)
   if (!ranges) return []
-  // Each escape only inserts a backslash before a `{`, so the inserted positions are where the two texts first differ.
+  // Each escape only inserts a backslash before a `{` or `<`, so the inserted positions are where the two texts first differ.
   const inserted: Array<number> = []
   for (let at = 0, source = 0; at < repaired.body.length; at++) {
-    if (repaired.body[at] === text[source]) source++
+    if (repaired.body[at] === blanked[source]) source++
     else inserted.push(at)
   }
   const original = (offset: number): number => offset - inserted.filter((at) => at < offset).length

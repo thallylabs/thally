@@ -3093,6 +3093,39 @@ describe('Mintlify repository migration', () => {
       expect(message).toBe(`Escaped the braces of \`{a?}\`, \`{b?}\`, \`{${'x'.repeat(58)}…\`, and 2 more so the page compiles; they render as literal text.`)
     })
 
+    const hook = 'export const Counter = () => { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button> }\n\n<Counter />'
+
+    it('extracts an inline hook component from a page whose prose brace stopped the analysis', () => {
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\nCall /x/{chainId?}\n\n${hook}\n` })
+      const page = bundle.pages.find((candidate) => candidate.id === 'home')
+      expect(page?.body).toContain('Call /x/\\{chainId?}')
+      expect(page?.body).toMatch(/<Migrated\w+ \/>/)
+      expect(page?.body).not.toContain("import { useState } from 'react'")
+      expect(bundle.componentFiles?.some((file) => file.path.includes('/migrated/'))).toBe(true)
+      expect(bundle.warnings.filter((warning) => warning.message.includes('Custom component analysis could not parse'))).toEqual([])
+      expect(bundle.warnings.filter((warning) => warning.message.startsWith('Escaped the braces'))).toHaveLength(1)
+    })
+
+    it('leaves the braces of a math block alone when the page also needs a brace repair', () => {
+      const bundle = migrateOne({ home: '---\ntitle: Home\n---\n\nPath /{chainId?}\n\n$$\n\\begin{align*}\nx\n\\end{align*}\n$$\n' })
+      const body = bundle.pages.find((candidate) => candidate.id === 'home')?.body ?? ''
+      expect(body).toContain('Path /\\{chainId?}')
+      expect(body).toContain('\\begin{align*}')
+      expect(body).not.toContain('\\begin\\{')
+    })
+
+    it('excludes such a page as before when the analysis cannot be redone on the repaired page', () => {
+      // The HTML comment keeps the page from compiling until it is normalized, so only the late repair could fix it.
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n<!-- note -->\n\nCall /x/{chainId?}\n\n${hook}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'skipped-file',
+        source: 'home.mdx',
+        message: expect.stringContaining('does not compile as MDX'),
+      }))
+      expect(bundle.warnings.some((warning) => warning.message.includes('Escaped the braces'))).toBe(false)
+    })
+
     it('still excludes a page whose broken expression is a JSX attribute', () => {
       const bundle = migrateOne({ broken: '---\ntitle: Broken\n---\n\nsee {a?}\n\n<Card title={a b}>\nbody\n</Card>\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
       expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
@@ -3140,6 +3173,11 @@ describe('Mintlify repository migration', () => {
 
     it('keeps them when the frontmatter or another prose brace would stop the page parsing', () => {
       unmoved(migrate({ 'home.mdx': `---\ntitle: Home\ndescription: "Use {id?} here"\n---\n\nPath /{chainId?}\n\n${component('Code')}\n\n<Code />\n` }))
+    })
+
+    it('keeps them when an HTML comment or an unmatched closing tag stops the page parsing', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\n<!-- note -->\n\n${component('Code')}\n\n<Code />\n` }))
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\ntext </Foo> here\n\n${component('Code')}\n\n<Code />\n` }))
     })
 
     it('keeps them in the template literal of an inlined snippet component', () => {
@@ -6445,6 +6483,18 @@ describe('Mintlify links to the site\'s own domain', () => {
     expect(migrateOther({ seo: { metatags: { canonical: 'https://example.com/' } } }, link('example.com'), ['pricing'])).toContain('[l](/pricing)')
   })
 
+  it('keeps a canonical address\'s path: only links under it can reach a docs page', () => {
+    const links = [
+      '[o](https://example.com/security)',
+      '[b](https://example.com/docsfoo/guide/start)',
+      '[d](https://example.com/docs/guide/start)',
+    ].join('\n\n')
+    const body = migrateOther({ seo: { metatags: { canonical: 'https://example.com/docs/' } } }, links, ['security', 'docs/guide/start'])
+    expect(body).toContain('[o](https://example.com/security)')
+    expect(body).toContain('[b](https://example.com/docsfoo/guide/start)')
+    expect(body).toContain('[d](/docs/guide/start)')
+  })
+
   it('prefers seo.metatags.canonical over the Plausible domain', () => {
     const body = migrateOther(
       { seo: { metatags: { canonical: 'https://canonical.example.com/docs' } }, ...plausible('docs.example.com') },
@@ -6481,7 +6531,7 @@ describe('rewriteMintlifyMountedLinks on long runs', () => {
   it.each(['](/a', '](https://h/a', ' href="/a', ' href="https://h/a'])('stays linear on a repeated %s with no end', (unit) => {
     const body = unit.repeat(15_000)
     const started = performance.now()
-    expect(rewriteMintlifyMountedLinks(body, new Set(['a']), 'h')).toBe(body)
+    expect(rewriteMintlifyMountedLinks(body, new Set(['a']), { host: 'h', path: '' })).toBe(body)
     expect(performance.now() - started).toBeLessThan(1000)
   })
 

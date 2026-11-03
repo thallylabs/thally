@@ -346,13 +346,16 @@ describe('config mapping', () => {
       expect(bundle.warnings.filter((warning) => /relative/i.test(warning.message))).toEqual([])
     })
 
-    it('gives ./a.mdx and ./a.md the same extension handling as /guides/a.mdx and /guides/a.md', () => {
+    it('does not read a relative href as a mount prefix: a dead ./a stays under its own directory', () => {
       const bundle = site({
-        'docs.json': JSON.stringify({ navigation: { pages: ['guides/intro', 'guides/a'] } }),
-        'guides/intro.mdx': body('Intro', '<Card href="./a.mdx" />\n<Card href="./a.md" />\n<Card href="/guides/a.mdx" />\n<Card href="/guides/a.md" />'),
-        'guides/a.mdx': body('A', 'A.'),
+        'docs.json': JSON.stringify({ navigation: { pages: ['a', 'guides/intro', 'fr/guides/a', 'guides/b'] } }),
+        'a.mdx': body('Root A', 'A.'),
+        'guides/b.mdx': body('B', 'B.'),
+        'guides/intro.mdx': body('Intro', '<Card href="./a" /> <Card href="./b.mdx" />'),
+        'fr/guides/a.mdx': body('Fr', '<Card href="./b" />'),
       })
-      expect(bodyOf(bundle, 'guides/intro')).toContain('<Card href="/guides/a" />\n<Card href="/guides/a.md" />\n<Card href="/guides/a" />\n<Card href="/guides/a.md" />')
+      expect(bodyOf(bundle, 'guides/intro')).toContain('<Card href="/guides/a" /> <Card href="/guides/b.mdx" />')
+      expect(bodyOf(bundle, 'fr/guides/a')).toContain('<Card href="/fr/guides/b" />')
     })
 
     it('clamps a href that climbs above the site root at the root, silently, as the browser does', () => {

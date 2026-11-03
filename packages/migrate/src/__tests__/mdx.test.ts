@@ -1216,8 +1216,16 @@ describe('esmTemplateLiteralRanges', () => {
     expect(spans(body)).toEqual(['`\nimport a from "b";\n`'])
   })
 
+  it('finds them in the page\'s own offsets when an HTML comment or an unmatched closing tag stops the parse', () => {
+    const literal = '`\nimport a from "b";\n`'
+    const code = `export const c = () => ${literal}\n`
+    expect(spans(`<!-- note\nmore -->\n\n${code}`)).toEqual([literal])
+    expect(spans(`text </Foo> and more\n\n${code}`)).toEqual([literal])
+    expect(spans(`<!-- a -->\n\nPath /{chainId?} and </Foo>\n\n<!-- b -->\n\n${code}`)).toEqual([literal])
+  })
+
   it('is still empty when the repaired page does not parse either', () => {
-    expect(spans('Path /{chainId?}\n\n<!-- note -->\n\nexport const c = `x`\n')).toEqual([])
+    expect(spans('Path /{chainId?}\n\nline<br>\n\nexport const c = `x`\n')).toEqual([])
   })
 })
 

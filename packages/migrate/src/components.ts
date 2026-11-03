@@ -208,6 +208,9 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
   return undefined
 }
 
+/** The start of the warning for a page this analysis could not parse; the repository adapter looks for it. */
+export const COMPONENT_ANALYSIS_FAILED = 'Custom component analysis could not parse this MDX'
+
 // remark-gfm, like the runtime's compile and `MDX_COMPILE_OPTIONS`: a page that compiles must also parse here.
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
@@ -1303,7 +1306,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     try {
       tree = parser.parse(content) as MdxNode
     } catch {
-      warn('Custom component analysis could not parse this MDX; its source was preserved for manual migration.', currentFile)
+      warn(`${COMPONENT_ANALYSIS_FAILED}; its source was preserved for manual migration.`, currentFile)
       // The AST walk below is how every `@site/...`/relative component
       // import normally gets copied or removed; none of that runs on a page
       // that can't even be parsed. Left alone, an import like that survives

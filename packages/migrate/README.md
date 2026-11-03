@@ -276,7 +276,7 @@ Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
 Mintlify sources also get `smartQuotes: true`, because Mintlify renders straight
 quotes in prose as curly ones; the setting leaves code, heading ids, Markdown and
-`llms.txt` as written, and so it does the destination of a Markdown link with its
+`llms.txt` as written, and so does the destination of a Markdown link with its
 quoted title (a Docusaurus heading ends in `[](#id "Direct link to ...")`).
 
 Thally leaves out the sidebar heading of a group named after its tab or dropdown, because
@@ -609,12 +609,14 @@ parent route), keeping any query and fragment, so Thally's cards render it and
 `thally check` validates it. A `href` that climbs above the site root stops at the
 root, as the browser does. Markdown links and code are left alone.
 A link to the source site's own host becomes root-relative when it reaches an
-imported page, and a leading mount path such as `/docs/` is dropped when what
-remains is an imported page: the host is
-`seo.metatags.canonical` when set, else the `integrations.plausible.domain` when its
-first label is `docs`, `developer` or `developers`, because Plausible is often set up
-for the marketing apex, whose pages are not docs pages. Another host, port or login,
-and a path that is no imported page, keep the absolute URL.
+imported page. The host is `seo.metatags.canonical` when set (a link outside the path
+that address names, such as `/docs`, is left alone), else the
+`integrations.plausible.domain` when its first label is `docs`, `developer` or
+`developers`, because Plausible is often set up for the marketing apex, whose pages
+are not docs pages. Separately, a leading mount path such as `/docs/` is dropped from
+a link, whatever its host, when what remains is an imported page. Another host, port
+or login, a path that is no imported page, and a target longer than 2048 characters
+keep the URL as written.
 Mintlify pages converted from Docusaurus keep `<Tabs values>` and `<TabItem>`: they
 become `<Tabs>` and `<Tab title>`, titled by the item's `label`, else the `values`
 label for its `value`, else the `value`. A
@@ -721,9 +723,9 @@ point at the copied module, and a relative side-effect import
 package. An `import` line inside a template literal of the page's JavaScript (an
 `export`, an expression or a JSX attribute value: a code sample held in a string) is
 text, so it stays in the string and is not hoisted. That needs the page to parse as
-MDX at that point, with the frontmatter set aside and any prose brace acorn rejects
-escaped; a page that still does not parse (an HTML comment not yet converted, say)
-is hoisted as before. A page is excluded only when the relative target is not copied (for
+MDX at that point, with the frontmatter set aside, HTML comments blanked, and unmatched
+closing tags and prose braces acorn rejects escaped for the read; a page that still
+does not parse (an HTML tag that is never closed, say) is hoisted as before. A page is excluded only when the relative target is not copied (for
 example a Next.js `./metadata` module, or an `export ... from` re-export), with
 a single warning naming it. An MDX expression that names an identifier the page
 never defines (`{missing}`) is removed with a warning, since it would throw at
@@ -736,6 +738,9 @@ remark-gfm, which autolinks it, braces included, and every check of whether a pa
 compiles reads it that way. The page is kept only if it then compiles, and a page
 that needs more than 50 repairs is not repaired: a broken expression in a JSX
 attribute, a broken `export`, or a brace that never closes still excludes the page.
+A page the component analysis could not parse is repaired first and analysed again,
+so its inline components are still extracted; if the analysis still fails on it, a
+page that needed a brace repair is excluded as before.
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
 number, boolean, `null`, or an object/array of those) or a self-contained
