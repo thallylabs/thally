@@ -465,10 +465,49 @@ function extractLinks(content: string): FoundLink[] {
     for (const m of line.matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
       links.push({ target: m[1], line: lineNumber })
     }
-    for (const m of line.matchAll(/href=["']([^"']+)["']/g)) {
-      links.push({ target: m[1], line: lineNumber })
+    for (const m of line.matchAll(LINK_PROP)) {
+      links.push({ target: m[1] ?? m[2] ?? m[3] ?? m[4], line: lineNumber })
     }
   })
+  return links
+}
+
+/**
+ * A component prop that holds a link: `href`, or any prop named like one
+ * (`secondaryHref` on `<Hero>`), given as a string or a constant string
+ * expression. A prop such as `hreflang` is not a link and does not match.
+ */
+const LINK_PROP = /\b(?:href|[A-Za-z]+Href)=(?:"([^"]+)"|'([^']+)'|\{\s*(?:"([^"]+)"|'([^']+)')\s*\})/g
+
+/**
+ * Links in `src/data/site.ts` (navbar, footer and other site-wide links) render
+ * on every page, so a removed page they point at 404s from everywhere. Only
+ * `href: '...'` string literals are read; a computed href is left alone.
+ */
+function extractSiteConfigLinks(source: string): FoundLink[] {
+  const links: FoundLink[] = []
+  let inBlockComment = false
+  for (const [index, rawLine] of source.split('\n').entries()) {
+    let line = rawLine
+    if (inBlockComment) {
+      const end = line.indexOf('*/')
+      if (end === -1) continue
+      line = line.slice(end + 2)
+      inBlockComment = false
+    }
+    line = line.replace(/\/\*.*?\*\//g, '')
+    const open = line.indexOf('/*')
+    if (open !== -1) {
+      line = line.slice(0, open)
+      inBlockComment = true
+    }
+    line = line.replace(/(^|[^:])\/\/.*$/, '$1')
+    for (const m of line.matchAll(/\bhref\s*:\s*(?:'([^']+)'|"([^"]+)")/g)) {
+      const target = m[1] ?? m[2]
+      // A bare fragment would be checked against the page the link renders on, which differs per page.
+      if (!target.startsWith('#')) links.push({ target, line: index + 1 })
+    }
+  }
   return links
 }
 
@@ -941,6 +980,15 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     anchorsByPath.set(path, anchors)
     anchorsByPath.set(`/${pageId}`, anchors)
     linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), images: extractImageRefs(content), offset: lineOffset })
+  }
+
+  const siteConfig = join(projectDir, 'src', 'data', 'site.ts')
+  if (existsSync(siteConfig)) {
+    try {
+      linksByFile.push({ file: 'src/data/site.ts', path: '/', anchors: new Set(), links: extractSiteConfigLinks(readFileSync(siteConfig, 'utf8')), images: [], offset: 0 })
+    } catch {
+      // Unreadable: the build reports it; there are no links to check here.
+    }
   }
 
   // The build compiles snippets as it does pages, and a page that uses a snippet
