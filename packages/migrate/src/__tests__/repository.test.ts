@@ -3114,9 +3114,45 @@ describe('Mintlify repository migration', () => {
       expect(body).not.toContain('\\begin\\{')
     })
 
-    it('excludes such a page as before when the analysis cannot be redone on the repaired page', () => {
-      // The HTML comment keeps the page from compiling until it is normalized, so only the late repair could fix it.
-      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n<!-- note -->\n\nCall /x/{chainId?}\n\n${hook}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+    it('keeps a page whose analysis was stopped by an HTML comment as well as a prose brace, with the comment converted', () => {
+      for (const [comment, expected] of [
+        ['<!-- c -->', ['{/* c */}']],
+        ['{/* c */}\n<!-- d -->', ['{/* c */}', '{/* d */}']],
+        ['<p style="a:b">x</p>\n<!-- c -->', ['{/* c */}']],
+      ] as const) {
+        const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n${comment}\n\nCall /x/{chainId?}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+        const body = bundle.pages.find((page) => page.id === 'home')?.body
+        expect(body, comment).toBeDefined()
+        expect(body).toContain('Call /x/\\{chainId?}')
+        for (const text of expected) expect(body).toContain(text)
+        expect(body).not.toContain('<!--')
+        expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('reads the frontmatter as the page does when it repairs braces for the analysis', () => {
+      // A trailing space after the opening `---` and an empty block are both frontmatter to the page parser.
+      const spaced = migrateOne({ home: '--- \ntitle: Home\ndescription: Use {a b} here\n---\n\nCall /x/{chainId?}\n' })
+      const spacedPage = spaced.pages.find((page) => page.id === 'home')
+      expect(spacedPage?.description).toBe('Use {a b} here')
+      expect(spacedPage?.body).toContain('Call /x/\\{chainId?}')
+      const empty = migrateOne({ home: '---\n---\n\nCall /x/{chainId?}\n\n---\n\nmore\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      const emptyPage = empty.pages.find((page) => page.id === 'home')
+      expect(emptyPage?.body).toContain('Call /x/\\{chainId?}')
+      expect(emptyPage?.body).toContain('more')
+    })
+
+    it('extracts the component when an HTML comment as well as a prose brace stopped the analysis', () => {
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n<!-- note -->\n\nCall /x/{chainId?}\n\n${hook}\n` })
+      const body = bundle.pages.find((candidate) => candidate.id === 'home')?.body
+      expect(body).toContain('{/* note */}')
+      expect(body).toMatch(/<Migrated\w+ \/>/)
+      expect(body).not.toContain("import { useState } from 'react'")
+    })
+
+    it('excludes such a page as before when the analysis still cannot read the repaired page', () => {
+      // Only the later normalizing turns the placeholder tag into text, so the repair cannot be tried on the page the analysis reads.
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\nSet <Feature> here\n\nCall /x/{chainId?}\n\n${hook}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
       expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
       expect(bundle.warnings).toContainEqual(expect.objectContaining({
         code: 'skipped-file',

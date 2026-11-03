@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeHtmlComments, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -5384,12 +5384,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         // A page that does not parse cannot be analysed, so a prose brace acorn rejects (or an unmatched closing tag) would leave its
         // inline components unextracted. Repair it first, as the page would be below, and run the analysis again on the result.
         // Math is protected first, as the page is below: the braces of a `$$\begin{align*}` block are not prose braces.
-        const mathProtected = protectMathBlocks(beforeTransform).body
-        const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(mathProtected)?.[0] ?? ''
-        const repair = repairUncompilableMdx(mathProtected.slice(frontmatter.length))
+        // HTML comments are converted first too, as the analysis does on its own copy, since they stop a page compiling.
+        const { front, body } = splitFrontmatterBlock(protectMathBlocks(beforeTransform).body)
+        const repair = repairUncompilableMdx(normalizeHtmlComments(body))
         if (repair) {
           const failed = warnings.splice(warningsBeforeTransform)
-          const retried = componentMigrator.transform(frontmatter + repair.body, file.absolutePath)
+          const retried = componentMigrator.transform(front + repair.body, file.absolutePath)
           if (analysisFailed()) {
             warnings.splice(warningsBeforeTransform, warnings.length, ...failed)
           } else {

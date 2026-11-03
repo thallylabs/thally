@@ -1399,7 +1399,7 @@ export function escapeFernLiteralBraces(raw: string): string {
  * frontmatter block verbatim (not parsed) because callers here only need to
  * avoid rewriting it, not read its values.
  */
-function splitFrontmatterBlock(raw: string): { front: string; body: string } {
+export function splitFrontmatterBlock(raw: string): { front: string; body: string } {
   const hasBom = raw.charCodeAt(0) === 0xfeff
   const bom = hasBom ? raw[0] : ''
   const source = hasBom ? raw.slice(1) : raw

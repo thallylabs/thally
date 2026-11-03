@@ -738,8 +738,9 @@ remark-gfm, which autolinks it, braces included, and every check of whether a pa
 compiles reads it that way. The page is kept only if it then compiles, and a page
 that needs more than 50 repairs is not repaired: a broken expression in a JSX
 attribute, a broken `export`, or a brace that never closes still excludes the page.
-A page the component analysis could not parse is repaired first and analysed again,
-so its inline components are still extracted; if the analysis still fails on it, a
+A page the component analysis could not parse is repaired first (its HTML comments
+converted for the read) and analysed again, so its inline components are still
+extracted; if the analysis still fails on it, a
 page that needed a brace repair is excluded as before.
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
