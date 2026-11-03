@@ -80,7 +80,9 @@ export interface TooltipProps {
 }
 
 function isSafeLink(href: string): boolean {
-  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(https?:|mailto:)/i.test(href)
+  // `./` and `../` pass through unchanged so the browser resolves them against the page URL, as Mintlify does.
+  // A slash right after the dots (`.//evil.com`) is refused like a protocol-relative `//evil.com`.
+  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(?:\.\.?\/)+(?!\/)[^\\]*$/.test(href) || /^(https?:|mailto:)/i.test(href)
 }
 
 interface TooltipPosition {
