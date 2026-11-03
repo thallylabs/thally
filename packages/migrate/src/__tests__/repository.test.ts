@@ -3053,6 +3053,27 @@ describe('Mintlify repository migration', () => {
       return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     }
 
+    // These pages need the later normalizing before they compile (the orphan `<Feature>` tag), so the brace repair happens late:
+    // the passes that read the page's syntax tree did nothing until then and must still give it what any page gets.
+    const lateRepaired = (body: string): string | undefined => migrateOne({
+      home: `---\ntitle: Home\n---\n\nText <Feature> needs pro.\n\n${body}\n\nCall /x/{chainId?}\n`,
+    }).pages.find((page) => page.id === 'home')?.body
+
+    it('gives a page repaired late what the passes that read its syntax tree give any page', () => {
+      // An undefined expression is neutralized (here escaped as literal text, as the first of these passes does on a page that parses).
+      expect(lateRepaired('| a |\n|---|\n| {x} |')).toContain('| \\{x\\} |')
+      expect(lateRepaired('Hello {name} there')).toContain('Hello \\{name\\} there')
+      // An unresolved component becomes a div, a paragraph container with paragraphs in it a div, and Link an anchor.
+      expect(lateRepaired('<Widget size="1">inner</Widget>')).toContain('<div>inner</div>')
+      expect(lateRepaired('<p>\n\ninner para\n\n</p>')).toContain('<div>\n\ninner para\n\n</div>')
+      expect(lateRepaired('<Link href="/a">a</Link>')).toContain('<a href="/a">a</a>')
+      for (const body of ['| {x} |', '<Widget>w</Widget>']) expect(lateRepaired(body)).toContain('Call /x/\\{chainId?}')
+    })
+
+    it('adds nothing to a late-repaired page that needs none of those passes', () => {
+      expect(lateRepaired('Plain text.')).toBe('Text &lt;Feature&gt; needs pro.\n\nPlain text.\n\nCall /x/\\{chainId?}')
+    })
+
     it('keeps a bare URL with braces as written, with no repair and no warning: the runtime autolinks it', () => {
       const bundle = migrateOne({ 'aa/guides/bundler': '---\ntitle: Bundler\n---\n\n## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n' })
       const page = bundle.pages.find((candidate) => candidate.id === 'aa/guides/bundler')
@@ -3171,6 +3192,21 @@ describe('Mintlify repository migration', () => {
         expect(body, prose).toContain('Call /x/\\{chainId?}')
         expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file'), prose).toEqual([])
       }
+    })
+
+    it('still excludes such a page when a fence opened inside a template literal hides its npm import from the scan', () => {
+      const bundle = migrateOne({
+        home: "---\ntitle: Home\n---\n\nText <Feature> needs pro. Call /x/{chainId?}\n\n<CodeBlock code={`\n~~~\n`} />\n\nimport { A, B } from 'some-npm-pkg'\n\n<A />\n",
+        fine: '---\ntitle: Fine\n---\n\nFine.\n',
+      })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'home.mdx' }))
+    })
+
+    it('keeps such a page when the only require( is inside a closed code fence', () => {
+      const bundle = migrateOne({ home: '---\ntitle: Home\n---\n\n<Feature> requires a Pro plan\n\nCall /x/{chainId?}\n\n```js\nconst a = require("x")\n```\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['home'])
+      expect(bundle.pages[0].body).toContain('require("x")')
     })
 
     it('still excludes such a page when it has an import, an export or an event handler for the analysis to handle', () => {
@@ -4163,6 +4199,25 @@ function docusaurusFixture(sidebarSource?: string): string {
   writeFileSync(join(root, 'static', 'img', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
   return root
 }
+
+describe('a Fern page repaired late', () => {
+  it('gets its literal brace escaped as a page that parses does', () => {
+    const migrateFern = (body: string) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-late-repair-'))
+      const fernRoot = join(root, 'fern')
+      mkdirSync(join(fernRoot, 'pages'), { recursive: true })
+      writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+      writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Welcome\n    path: pages/welcome.mdx\n')
+      writeFileSync(join(fernRoot, 'pages', 'welcome.mdx'), `---\ntitle: Welcome\n---\n\n${body}\n`)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' }).pages.find((page) => page.title === 'Welcome')?.body
+    }
+    const text = 'Text <Feature> needs pro. Hello {name} there.\n\n'
+    const repaired = migrateFern(`${text}Call /x/{chainId?}`)
+    expect(repaired).toContain('Call /x/\\{chainId?}')
+    expect(repaired).toContain('Hello \\{name\\} there')
+    expect(repaired).not.toContain('Hello {name}')
+  })
+})
 
 describe('relative component hrefs on other platforms', () => {
   it('leaves them as written for Docusaurus', () => {

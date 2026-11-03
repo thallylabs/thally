@@ -2001,12 +2001,18 @@ describe('pageHasComponentWork', () => {
     ]) expect(pageHasComponentWork(page), page).toBe(true)
   })
 
+  it('does not let a fence opened inside a template literal hide a real import after it', () => {
+    expect(pageHasComponentWork("<CodeBlock code={`\n~~~\n`} />\n\nimport { A, B } from 'some-npm-pkg'\n\n<A />")).toBe(true)
+    expect(pageHasComponentWork('Text.\n\n```js\nnever closed\n\nimport x from "x"')).toBe(true)
+  })
+
   it('finds nothing in prose, other tags and expressions, or in code', () => {
     for (const page of [
       'Set <Feature> here and call /x/{chainId?}',
       'We import data and export it; the important part is onclick, not onClickable',
       '<Card title="T" href="/a" />',
       '```jsx\nimport X from "x"\n<b onClick={go}>go</b>\n```\n\nUse `export const a = 1` and `require("x")`.',
+      'Text.\n\n```js\nconst a = require("x")\n```\n\nMore text.',
       '---\nimport: x\n---\n\ntext',
     ]) expect(pageHasComponentWork(page), page).toBe(false)
   })

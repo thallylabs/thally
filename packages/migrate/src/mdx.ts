@@ -1680,6 +1680,15 @@ export function indentSnippetLines(snippet: string, indent: string): string {
 }
 
 /**
+ * `body` as `replaceOutsideCode` hands it to a transform (fenced and inline code masked), and whether a fence is never closed,
+ * so that everything after it is masked: a line that starts with a fence mark inside a template literal does that.
+ */
+export function maskedOutsideCode(body: string): { text: string; openFence: boolean } {
+  const { masked, openFence } = maskCode(body)
+  return { text: masked, openFence: openFence !== null }
+}
+
+/**
  * Apply a textual rename to the WHOLE body outside fenced/inline code (via
  * `maskCode`), so a match may span multiple lines.
  */
@@ -2848,7 +2857,7 @@ export function removeUndefinedExpressions(body: string, warn?: (message: string
 }
 
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
-function normalizeFlowParagraphContainers(body: string): string {
+export function normalizeFlowParagraphContainers(body: string): string {
   if (!body.includes('<p')) return body
   interface FlowNode {
     type: string

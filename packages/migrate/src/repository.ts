@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeHtmlComments, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1383,6 +1383,15 @@ function invalidMdxReason(body: string): string | null {
     return null
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** The warning for a capitalized tag nothing backs, which `replaceUnknownComponents` neutralizes. */
+function unresolvedComponentWarning(name: string, source: string): MigrationWarning {
+  return {
+    code: 'unsupported-config',
+    message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
+    source,
   }
 }
 
@@ -5549,13 +5558,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // throw "Expected component X to be defined" at render. Warn once per
       // component name and neutralize it: keep a paired tag's children,
       // drop a self-closing one outright.
-      page.body = replaceUnknownComponents(page.body, (name) => {
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
-          source: file.relativePath,
-        })
-      })
+      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) })
     }
     if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
@@ -5565,9 +5568,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // escaped, as the analysis cannot be told to read the repaired page now. One with nothing for it to do loses nothing.
       const repair = repairUncompilableMdx(page.body)
       if (repair && (repair.braces.length === 0 || !componentAnalysisLeftWork)) {
-        page.body = repair.body
-        mdxError = null
-        warnings.push(...repairWarnings(repair, file.relativePath))
+        // The passes that read the page's syntax tree did nothing while it did not parse: give it them now, in the order the
+        // page normally gets them, and keep the repair only if it still compiles.
+        const settledWarnings: Array<MigrationWarning> = []
+        let settled = escapeFernLiteralBraces(repair.body)
+        settled = normalizeFlowParagraphContainers(settled)
+        settled = removeUndefinedExpressions(settled, (message) => { settledWarnings.push({ code: 'unsupported-config', message, source: pageWarningSource }) })
+        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+        if (invalidMdxReason(settled) === null) {
+          page.body = settled
+          mdxError = null
+          warnings.push(...repairWarnings(repair, file.relativePath), ...settledWarnings)
+        }
       }
     }
     if (mdxError) {
