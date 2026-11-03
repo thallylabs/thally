@@ -80,7 +80,7 @@ describe('parseMarkdownPage', () => {
   })
 
   describe('object-form icon', () => {
-    const parse = (icon: string, extra: { siteIconLibrary?: string } = {}) => {
+    const parse = (icon: string, extra: { siteIconLibrary?: string } = { siteIconLibrary: 'fontawesome' }) => {
       const warnings: Array<string> = []
       const page = parseMarkdownPage({ id: 'guide', platform: 'mintlify', source: 'guide.mdx', raw: `---\n${icon}\n---\nBody.`, warn: (message) => warnings.push(message), ...extra })
       return { page, warnings }
@@ -121,6 +121,8 @@ describe('parseMarkdownPage', () => {
       expect(parse(lucide, { siteIconLibrary: 'lucide' }).warnings).toEqual([])
       expect(parse('icon:\n  name: rocket\n  library: fontawesome', { siteIconLibrary: 'tabler' }).warnings).toHaveLength(1)
       expect(parse('icon:\n  name: rocket\n  library: 5').warnings).toEqual([])
+      // With no site library to compare against, nothing is claimed.
+      expect(parse(lucide, {}).warnings).toEqual([])
     })
   })
 

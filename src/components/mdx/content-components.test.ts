@@ -123,9 +123,15 @@ describe('standalone rich-content primitives', () => {
       expect(markup).not.toContain('target="_blank"')
       expect(markup).not.toContain('data-card-external')
     }
-    for (const href of ['.\\evil', './\\evil', '..\\x', './/evil.com', '..//evil.com', '//evil.com', 'a/b', '.hidden', 'javascript:alert(1)']) {
+    for (const href of ['.\\evil', './\\evil', '..\\x', './/evil.com', '..//evil.com', './\t/evil.com', '../\n/x', '//evil.com', 'a/b', '.hidden', 'javascript:alert(1)']) {
       expect(renderToStaticMarkup(createElement(Component, { title: 'T', href }))).not.toContain('href=')
     }
+  })
+
+  it('checks a long relative href in linear time', () => {
+    const started = performance.now()
+    expect(renderToStaticMarkup(createElement(Card, { title: 'T', href: `${'./'.repeat(100_000)}\\` }))).not.toContain('href=')
+    expect(performance.now() - started).toBeLessThan(500)
   })
 
   it('never nests anchors when a linked card body contains a link', () => {

@@ -5,6 +5,7 @@ import type * as acorn from 'acorn'
 import { analyze } from 'eslint-scope'
 import { posix } from 'node:path'
 import { compileSync } from '@mdx-js/mdx'
+import type { CompileOptions } from '@mdx-js/mdx'
 import { nameToEmoji } from 'gemoji'
 import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
@@ -18,6 +19,13 @@ import { parseFrontmatter } from './frontmatter.js'
 import { SOURCE_PAGE_ATTRIBUTE } from './source-styles.js'
 import { normalizeMintlifyCodeFences } from './fence-meta.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
+
+/**
+ * How every check of whether a page compiles reads it. The runtime compiles with remark-gfm
+ * (`src/mdx/remark.ts`), under which a bare URL is an autolink that swallows its braces, so a
+ * page compiles here exactly when it compiles there.
+ */
+export const MDX_COMPILE_OPTIONS: CompileOptions = { outputFormat: 'program', remarkPlugins: [remarkGfm] }
 
 export interface MarkdownPageIdentity {
   id: string
@@ -1311,11 +1319,11 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   // original did, the conversion made things worse — keep the original and
   // let the caller warn, rather than silently excluding the page later.
   try {
-    compileSync(protectedBody, { outputFormat: 'program' })
+    compileSync(protectedBody, MDX_COMPILE_OPTIONS)
     return { body: protectedBody, converted }
   } catch {
     try {
-      compileSync(raw, { outputFormat: 'program' })
+      compileSync(raw, MDX_COMPILE_OPTIONS)
       return { body: raw, converted: false, guardTriggered: true }
     } catch {
       // The original didn't compile either (the usual case math protection
@@ -1790,17 +1798,13 @@ export function rewriteRelativeJsxHrefs(body: string, pagePath: string): string 
       (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
 }
 
-/**
- * The `[start, end)` offsets in `body`, in document order, of every template literal inside the page's
- * `export` blocks: a code sample held in a string, whose lines are text even when one reads `import x from 'y'`.
- * Empty when the page does not parse as MDX yet.
- */
-export function esmTemplateLiteralRanges(body: string): Array<[number, number]> {
+/** `[start, end)` offsets of every template literal in the estrees of `body`'s ESM blocks, expressions and JSX attribute expressions, or null when it does not parse. */
+function templateLiteralRanges(body: string): Array<[number, number]> | null {
   let tree: MdxOffsetNode
   try {
     tree = descriptionParser.parse(body) as MdxOffsetNode
   } catch {
-    return []
+    return null
   }
   const ranges: Array<[number, number]> = []
   const scan = (value: unknown): void => {
@@ -1809,12 +1813,32 @@ export function esmTemplateLiteralRanges(body: string): Array<[number, number]> 
     if (node.type === 'TemplateLiteral' && typeof node.start === 'number' && typeof node.end === 'number') ranges.push([node.start, node.end])
     for (const child of Object.values(node)) scan(child)
   }
-  const visit = (node: MdxOffsetNode): void => {
-    if (node.type === 'mdxjsEsm') scan(node.data?.estree)
-    node.children?.forEach(visit)
-  }
-  visit(tree)
+  scan(tree)
   return ranges.sort((left, right) => left[0] - right[0])
+}
+
+/**
+ * The `[start, end)` offsets in `body`, in document order, of every template literal the page's JavaScript holds
+ * (in an `export`, an expression or a JSX attribute): a code sample in a string, whose lines are text even when one
+ * reads `import x from 'y'`. The frontmatter is blanked first, as YAML is not MDX. A prose brace that acorn
+ * rejects (`/{chainId?}`) stops the parse, so the page is then read with those braces escaped and the offsets are
+ * mapped back. Empty when the page still does not parse, for example with an HTML comment that is not yet normalized.
+ */
+export function esmTemplateLiteralRanges(body: string): Array<[number, number]> {
+  const text = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, (frontmatter) => frontmatter.replace(/[^\r\n]/g, ' '))
+  const direct = templateLiteralRanges(text)
+  if (direct) return direct
+  const repaired = escapeUnparseableExpressions(text)
+  const ranges = repaired.escaped.length > 0 ? templateLiteralRanges(repaired.body) : null
+  if (!ranges) return []
+  // Each escape only inserts a backslash before a `{`, so the inserted positions are where the two texts first differ.
+  const inserted: Array<number> = []
+  for (let at = 0, source = 0; at < repaired.body.length; at++) {
+    if (repaired.body[at] === text[source]) source++
+    else inserted.push(at)
+  }
+  const original = (offset: number): number => offset - inserted.filter((at) => at < offset).length
+  return ranges.map(([start, end]) => [original(start), original(end)])
 }
 
 /** Convert Fern's indented file-list shorthand to Thally's nested Tree nodes. */
@@ -2236,17 +2260,32 @@ function normalizeDocusaurusTabs(body: string): string {
 
 /**
  * A TabItem outside any <Tabs>...</Tabs> pair (malformed source) never reaches normalizeDocusaurusTabs' block match; fall back to
- * its own label/value so it still renders as a Tab.
+ * its own label/value so it still renders as a Tab. Only an opener with a `</TabItem>` of its own is mapped: a lone `<TabItem>`
+ * named in prose would become an unclosed `<Tab>` and fail the page, and is left to the orphan-tag escape.
  */
 function normalizeStrayTabItems(body: string): string {
-  return body
-    .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
-      const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-        ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-        ?? 'Tab'
-      return `<Tab title="${title.replace(/"/g, '&quot;')}">`
-    })
-    .replace(/<\/TabItem>/g, '</Tab>')
+  const tags = [...body.matchAll(/<TabItem\b([^<>]*)>|<\/TabItem>/g)].filter((tag) => !/\/$/.test(tag[1] ?? ''))
+  const openers: Array<number> = []
+  const paired = new Set<number>()
+  tags.forEach((tag, index) => {
+    if (tag[0] !== '</TabItem>') openers.push(index)
+    else if (openers.length > 0) {
+      paired.add(openers.pop()!)
+      paired.add(index)
+    }
+  })
+  let result = ''
+  let cursor = 0
+  tags.forEach((tag, index) => {
+    if (!paired.has(index)) return
+    const attributes = tag[1] ?? ''
+    const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+      ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+      ?? 'Tab'
+    result += `${body.slice(cursor, tag.index)}${tag[0] === '</TabItem>' ? '</Tab>' : `<Tab title="${title.replace(/"/g, '&quot;')}">`}`
+    cursor = tag.index! + tag[0].length
+  })
+  return result + body.slice(cursor)
 }
 
 const TAB_FENCE_OPEN = /^(`{3,}|~{3,})(\S*)\s+tab\b(.*)$/
@@ -2568,14 +2607,14 @@ function pinStepsTitleSize(body: string): string {
  * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
  * literal text, so the bare closer is a compile error. Escaping the closer the
  * same way keeps the page. Linear: one regex pass with a per-name open count.
- * Returns the 1-based line numbers repaired; `body` is returned unchanged when
- * there are none.
+ * Returns the text of each closing tag repaired; `body` is returned unchanged
+ * when there are none.
  */
-export function escapeUnmatchedClosingTags(body: string): { body: string; lines: Array<number> } {
+export function escapeUnmatchedClosingTags(body: string): { body: string; escaped: Array<string> } {
   const masked = maskCodeRegions(body)
   const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)/g
   const open = new Map<string, number>()
-  const edits: Array<number> = []
+  const edits: Array<{ start: number; end: number }> = []
   for (let match = tagPattern.exec(masked); match; match = tagPattern.exec(masked)) {
     const [whole, escaped, closing, name] = match
     const tag = readTagEnd(masked, match.index + whole.length)
@@ -2588,21 +2627,17 @@ export function escapeUnmatchedClosingTags(body: string): { body: string; lines:
     } else if (open.get(name)) {
       open.set(name, open.get(name)! - 1)
     } else {
-      edits.push(match.index)
+      edits.push({ start: match.index, end: tag.end })
     }
   }
-  if (edits.length === 0) return { body, lines: [] }
+  if (edits.length === 0) return { body, escaped: [] }
   let result = ''
   let cursor = 0
-  const lines: Array<number> = []
-  let line = 1
-  for (const start of edits) {
+  for (const { start } of edits) {
     result += `${body.slice(cursor, start)}\\`
-    for (let i = cursor; i < start; i++) if (body.charCodeAt(i) === 10) line++
-    lines.push(line)
     cursor = start
   }
-  return { body: result + body.slice(cursor), lines }
+  return { body: result + body.slice(cursor), escaped: edits.map(({ start, end }) => body.slice(start, end)) }
 }
 
 /** Whether `text[index]` is escaped, that is preceded by an odd run of backslashes. */
@@ -2622,23 +2657,23 @@ const MAX_EXPRESSION_REPAIRS = 50
  * would leave a nested `{y}` as a live expression that throws at render.
  * Fails closed: any other error (an `export`, a JSX attribute whose escaped
  * brace is no longer valid JSX, an unclosed brace) or more than 50 repairs
- * returns `body` unchanged. Otherwise `body` compiles, and `lines` holds the
- * 1-based lines that got an escape.
+ * returns `body` unchanged. Otherwise `body` compiles, and `escaped` holds the
+ * text of each span that got an escape.
  */
-export function escapeUnparseableExpressions(body: string): { body: string; lines: Array<number> } {
+export function escapeUnparseableExpressions(body: string): { body: string; escaped: Array<string> } {
   let current = body
-  const lines = new Set<number>()
+  const escaped: Array<string> = []
   for (let repairs = 0; ; repairs++) {
     let failure: { source?: string; ruleId?: string; place?: { offset?: number } } | null
     try {
-      compileSync(current, { outputFormat: 'program' })
-      return { body: current, lines: [...lines].sort((left, right) => left - right) }
+      compileSync(current, MDX_COMPILE_OPTIONS)
+      return { body: current, escaped }
     } catch (error) {
       failure = error as typeof failure
     }
     const offset = failure?.place?.offset
     if (repairs === MAX_EXPRESSION_REPAIRS || failure?.source !== 'micromark-extension-mdx-expression'
-      || failure.ruleId !== 'acorn' || typeof offset !== 'number') return { body, lines: [] }
+      || failure.ruleId !== 'acorn' || typeof offset !== 'number') return { body, escaped: [] }
     const masked = maskCodeRegions(current)
     // The offset is where acorn failed inside the expression, so its opening brace is the first unbalanced `{` before it.
     let opener = -1
@@ -2650,25 +2685,23 @@ export function escapeUnparseableExpressions(body: string): { body: string; line
         else depth--
       }
     }
-    if (opener < 0) return { body, lines: [] }
+    if (opener < 0) return { body, escaped: [] }
     let braces: Array<number> = []
-    let closed = false
-    for (let i = opener, depth = 0; i < masked.length && !closed; i++) {
+    let close = -1
+    for (let i = opener, depth = 0; i < masked.length && close < 0; i++) {
       if (isBackslashEscaped(masked, i)) continue
       if (masked[i] === '{') {
         depth++
         braces.push(i)
-      } else if (masked[i] === '}') {
-        closed = --depth === 0
+      } else if (masked[i] === '}' && --depth === 0) {
+        close = i
       }
     }
-    if (!closed) braces = [opener]
-    let line = 1
+    if (close < 0) braces = [opener]
+    escaped.push(current.slice(opener, close < 0 ? opener + 1 : close + 1))
     let cursor = 0
     let result = ''
     for (const brace of braces) {
-      for (let i = cursor; i < brace; i++) if (current.charCodeAt(i) === 10) line++
-      lines.add(line)
       result += `${current.slice(cursor, brace)}\\`
       cursor = brace
     }
@@ -2721,7 +2754,7 @@ function escapeOrphanCapitalizedTags(body: string): string {
   // expression or export. A page that already compiles needs no escaping;
   // never rewrite one.
   try {
-    compileSync(body, { outputFormat: 'program' })
+    compileSync(body, MDX_COMPILE_OPTIONS)
     return body
   } catch {
     // Fails to compile: escape the placeholders below.
@@ -2980,7 +3013,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const normalized = escapeOrphanCapitalizedTags(provideScopedGlobalReferences(rewritten))
   if (runDocusaurus && sourceBody !== body) {
     try {
-      compileSync(normalized, { outputFormat: 'program' })
+      compileSync(normalized, MDX_COMPILE_OPTIONS)
     } catch {
       // Some Docusaurus sites use this fence for imports or JSX fragments
       // whose surrounding source requires their private remark transforms.
@@ -3043,7 +3076,7 @@ export function parseMarkdownPage(input: {
   ) => MarkdownPageIdentity
   /** Receives a message when frontmatter is dropped or altered. */
   warn?: (message: string) => void
-  /** The icon library the migrated site uses; Mintlify's default, Font Awesome, when omitted. */
+  /** The icon library the migrated site uses; a page icon naming another one is reported, and none is when omitted. */
   siteIconLibrary?: string
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
@@ -3089,9 +3122,8 @@ export function parseMarkdownPage(input: {
     typeof value === 'string' && ['regular', 'solid', 'outline', 'brands'].includes(value) ? value as MigrationPage['iconType'] : undefined
   const iconType = icon ? iconStyle(iconObject?.style) ?? iconStyle(parsed.data.iconType) : undefined
   // Thally has one icon library per site, so a page's own library only works when it is the site's.
-  const siteIconLibrary = input.siteIconLibrary ?? 'fontawesome'
-  if (icon && typeof iconObject?.library === 'string' && iconObject.library !== siteIconLibrary) {
-    input.warn?.(`Page "${identity.id}": its icon names the "${iconObject.library}" icon library, but this site uses "${siteIconLibrary}", so the icon "${icon}" is looked up there and may show a different icon or none. Use an icon name from "${siteIconLibrary}", or set icons.library in docs.json to "${iconObject.library}".`)
+  if (icon && typeof iconObject?.library === 'string' && input.siteIconLibrary !== undefined && iconObject.library !== input.siteIconLibrary) {
+    input.warn?.(`Page "${identity.id}": its icon names the "${iconObject.library}" icon library, but this site uses "${input.siteIconLibrary}", so the icon "${icon}" is looked up there and may show a different icon or none. Use an icon name from "${input.siteIconLibrary}", or set icons.library in docs.json to "${iconObject.library}".`)
   }
   const meta: NonNullable<MigrationPage['meta']> = {}
   for (const [source, field] of PAGE_META_FIELDS) {

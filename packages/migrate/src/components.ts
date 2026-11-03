@@ -9,6 +9,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { basename, dirname, extname, posix, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
+import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import ts from 'typescript'
@@ -207,7 +208,8 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
   return undefined
 }
 
-const parser = unified().use(remarkParse).use(remarkMdx)
+// remark-gfm, like the runtime's compile and `MDX_COMPILE_OPTIONS`: a page that compiles must also parse here.
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
 /**

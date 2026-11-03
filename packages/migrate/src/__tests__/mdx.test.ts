@@ -1,6 +1,7 @@
 /** Generated page descriptions contain readable prose, never component syntax. */
 
 import { compileSync } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
@@ -1035,6 +1036,22 @@ describe('Mintlify pages that kept Docusaurus Tabs', () => {
     expect(normalizeMdx('<TabItem value="a" label="Alpha">Body</TabItem>', 'mintlify')).toBe('<Tab title="Alpha">Body</Tab>')
   })
 
+  it('leaves a <TabItem> that is only named in prose to the orphan-tag escape, so the page still compiles', () => {
+    const output = normalizeMdx('The <TabItem> tag is used.', 'mintlify')
+    expect(output).toBe('The &lt;TabItem&gt; tag is used.')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+    expect(normalizeMdx('<TabItem value="a" label="A">One</TabItem>\n\nThe <TabItem> tag.', 'mintlify'))
+      .toBe('<Tab title="A">One</Tab>\n\nThe &lt;TabItem&gt; tag.')
+    expect(normalizeMdx('The <TabItem value="a"> and </TabItem> tags.', 'mintlify')).toBe('The <Tab title="a"> and </Tab> tags.')
+  })
+
+  it('maps nested stray <TabItem> pairs and never a self-closing one', () => {
+    expect(normalizeMdx('<TabItem label="Out"><TabItem label="In">x</TabItem></TabItem>', 'mintlify'))
+      .toBe('<Tab title="Out"><Tab title="In">x</Tab></Tab>')
+    expect(normalizeMdx('<TabItem value="a" />\n\n<TabItem value="b">B</TabItem>', 'mintlify'))
+      .toBe('<TabItem value="a" />\n\n<Tab title="b">B</Tab>')
+  })
+
   it('leaves Docusaurus Tabs shown in a fenced example alone, and still maps the ones outside it', () => {
     const fenced = `\`\`\`mdx\n${docusaurusTabs}\n\`\`\``
     expect(normalizeMdx(fenced, 'mintlify')).toBe(fenced)
@@ -1182,6 +1199,25 @@ describe('esmTemplateLiteralRanges', () => {
 
   it('is empty when the page does not parse as MDX', () => {
     expect(spans('{unclosed\n\nexport const a = `x`\n')).toEqual([])
+  })
+
+  it('finds the ones in flow expressions, text expressions and JSX attribute expressions', () => {
+    const body = "{`\nimport a from 'b'\n`}\n\nText {`x`} more\n\n<CodeBlock code={`\nimport c from 'd'\n`} />\n"
+    expect(spans(body)).toEqual(["`\nimport a from 'b'\n`", '`x`', "`\nimport c from 'd'\n`"])
+  })
+
+  it('reads past a frontmatter value that holds braces', () => {
+    const body = '---\ntitle: T\ndescription: "Use {id?} here"\n---\n\nexport const c = () => `\nimport a from "b";\n`\n'
+    expect(spans(body)).toEqual(['`\nimport a from "b";\n`'])
+  })
+
+  it('finds them in the page\'s own offsets when a prose brace that acorn rejects stops the parse', () => {
+    const body = 'Path /{chainId?} and {a b}\n\nexport const c = () => `\nimport a from "b";\n`\n\nThen /{d?}\n'
+    expect(spans(body)).toEqual(['`\nimport a from "b";\n`'])
+  })
+
+  it('is still empty when the repaired page does not parse either', () => {
+    expect(spans('Path /{chainId?}\n\n<!-- note -->\n\nexport const c = `x`\n')).toEqual([])
   })
 })
 
@@ -1922,34 +1958,34 @@ describe('escapeUnmatchedClosingTags', () => {
     ].join('\n')
     expect(() => compiles(real)).toThrow(/Unexpected closing slash/)
     const out = escapeUnmatchedClosingTags(real)
-    expect(out.lines).toEqual([7])
+    expect(out.escaped).toEqual(['</Warning>'])
     expect(() => compiles(out.body)).not.toThrow()
     expect(out.body).toContain("You can't change `workspace_id` through the API.")
   })
 
   it('leaves balanced and nested same-name tags untouched', () => {
     const src = '<Note>\n<Note>\ninner\n</Note>\n</Note>\n'
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('ignores closers inside code fences and inline code', () => {
     const src = '```html\n</Warning>\n```\n\nUse `</Warning>` here.\n'
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('is linear on a long whitespace run inside an unfinished tag', () => {
     const src = `<a${' '.repeat(80_000)}x`
     const start = performance.now()
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
     expect(performance.now() - start).toBeLessThan(200)
   })
 
   it('counts an opener whose brace attribute contains angle brackets', () => {
     const src = '<Card icon={<Icon />}>\nbody\n</Card>\n</Card>\n'
     const out = escapeUnmatchedClosingTags(src)
-    expect(out.lines).toEqual([4])
+    expect(out.escaped).toEqual(['</Card>'])
     expect(out.body).toBe('<Card icon={<Icon />}>\nbody\n</Card>\n\\</Card>\n')
-    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', lines: [] })
+    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', escaped: [] })
   })
 
   it('is linear on adversarial input', () => {
@@ -1983,19 +2019,28 @@ describe('escapeUnparseableExpressions', () => {
     return found
   }
 
-  it('repairs the Particle bundler URL placeholder and keeps its text', () => {
-    const src = '## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n'
+  it('repairs a path placeholder and renders it as literal text under the runtime\'s remark-gfm', () => {
+    const src = '## Endpoint\n\nSend it to /{chainId?}\n'
     expect(() => compiles(src)).toThrow(/Could not parse expression/)
     const out = escapeUnparseableExpressions(src)
-    expect(out.lines).toEqual([3])
-    expect(out.body).toBe('## Endpoint\n\nhttps://bundler.particle.network/\\{chainId?}\n')
-    expect(String(compileSync(out.body, { outputFormat: 'program' }))).toContain('https://bundler.particle.network/{chainId?}')
+    expect(out.escaped).toEqual(['{chainId?}'])
+    expect(out.body).toBe('## Endpoint\n\nSend it to /\\{chainId?}\n')
+    const rendered = String(compileSync(out.body, { outputFormat: 'program', remarkPlugins: [remarkGfm] }))
+    expect(rendered).toContain('Send it to /{chainId?}')
+    expect(rendered).not.toContain('\\{')
+  })
+
+  it('does not repair a bare URL: the runtime\'s remark-gfm autolinks it, braces included', () => {
+    const src = '## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n'
+    expect(() => compiles(src)).toThrow(/Could not parse expression/)
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+    expect(String(compileSync(src, { outputFormat: 'program', remarkPlugins: [remarkGfm] }))).toContain('https://bundler.particle.network/{chainId?}')
   })
 
   it('repairs several broken expressions on different lines, one repair each', () => {
     const src = 'one {a?} two\n\nplain\n\nthree {b c}\n'
     const out = escapeUnparseableExpressions(src)
-    expect(out.lines).toEqual([1, 5])
+    expect(out.escaped).toEqual(['{a?}', '{b c}'])
     expect(out.body).toBe('one \\{a?} two\n\nplain\n\nthree \\{b c}\n')
     expect(() => compiles(out.body)).not.toThrow()
   })
@@ -2005,22 +2050,22 @@ describe('escapeUnparseableExpressions', () => {
     // Escaping only the outer brace compiles but leaves `{y}` evaluated at render (a ReferenceError).
     expect(liveExpressions('a \\{x {y} ?} b\n')).toEqual(['y'])
     const out = escapeUnparseableExpressions(src)
-    expect(out.lines).toEqual([1])
+    expect(out.escaped).toEqual(['{x {y} ?}'])
     expect(out.body).toBe('a \\{x \\{y} ?} b\n')
     expect(liveExpressions(out.body)).toEqual([])
     expect(String(compileSync(out.body, { outputFormat: 'program' }))).toContain('a {x {y} ?} b')
   })
 
   it('leaves a valid expression elsewhere on the page live', () => {
-    const out = escapeUnparseableExpressions('Total {1 + 1}\n\nhttps://x/{chainId?}\n\nThen {2 * 3}\n')
-    expect(out.lines).toEqual([3])
+    const out = escapeUnparseableExpressions('Total {1 + 1}\n\nsee /{chainId?}\n\nThen {2 * 3}\n')
+    expect(out.escaped).toEqual(['{chainId?}'])
     expect(liveExpressions(out.body)).toEqual(['1 + 1', '2 * 3'])
   })
 
   it('does not touch braces in code fences or inline code', () => {
     const src = '```js\n{x?}\n```\n\nUse `{x?}` and {y?} here.\n\n~~~\n{z?}\n~~~\n'
     const out = escapeUnparseableExpressions(src)
-    expect(out.lines).toEqual([5])
+    expect(out.escaped).toEqual(['{y?}'])
     expect(out.body).toBe('```js\n{x?}\n```\n\nUse `{x?}` and \\{y?} here.\n\n~~~\n{z?}\n~~~\n')
   })
 
@@ -2028,39 +2073,39 @@ describe('escapeUnparseableExpressions', () => {
     const src = 'a \\{b?} and a } alone and {c?}\n'
     const out = escapeUnparseableExpressions(src)
     expect(out.body).toBe('a \\{b?} and a } alone and \\{c?}\n')
-    expect(out.lines).toEqual([1])
+    expect(out.escaped).toEqual(['{c?}'])
   })
 
   it('gives up on an attribute expression, since escaping its brace is invalid JSX', () => {
     const src = '<Card title={a b}>\nbody\n</Card>\n'
-    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('gives up when a broken expression sits in a tag attribute even if prose ones were repairable', () => {
     const src = 'see {a?}\n\n<Card title={a b}>\nbody\n</Card>\n'
-    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('does not repair a broken export, and does not touch other braces once it gives up', () => {
     const src = 'export const x = ;\n\nsee {a?}\n'
-    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('gives up on an expression that never closes', () => {
-    expect(escapeUnparseableExpressions('{unclosed')).toEqual({ body: '{unclosed', lines: [] })
+    expect(escapeUnparseableExpressions('{unclosed')).toEqual({ body: '{unclosed', escaped: [] })
   })
 
   it('returns a page that already compiles unchanged', () => {
     const src = 'Total {1 + 1}\n'
-    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('stops after 50 repairs rather than looping', () => {
     const many = (count: number) => Array.from({ length: count }, (_unused, index) => `row ${index} {a?}`).join('\n\n')
     const ok = escapeUnparseableExpressions(many(50))
-    expect(ok.lines).toHaveLength(50)
+    expect(ok.escaped).toHaveLength(50)
     expect(() => compiles(ok.body)).not.toThrow()
-    expect(escapeUnparseableExpressions(many(51))).toEqual({ body: many(51), lines: [] })
+    expect(escapeUnparseableExpressions(many(51))).toEqual({ body: many(51), escaped: [] })
   })
 })
 

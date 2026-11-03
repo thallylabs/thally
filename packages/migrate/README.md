@@ -276,7 +276,8 @@ Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
 Mintlify sources also get `smartQuotes: true`, because Mintlify renders straight
 quotes in prose as curly ones; the setting leaves code, heading ids, Markdown and
-`llms.txt` as written.
+`llms.txt` as written, and so it does the destination of a Markdown link with its
+quoted title (a Docusaurus heading ends in `[](#id "Direct link to ...")`).
 
 Thally leaves out the sidebar heading of a group named after its tab or dropdown, because
 the collection already names it. Mintlify keeps that heading, so a source with such a group
@@ -607,6 +608,18 @@ rewritten to the root-absolute path the browser reaches from the page's own rout
 parent route), keeping any query and fragment, so Thally's cards render it and
 `thally check` validates it. A `href` that climbs above the site root stops at the
 root, as the browser does. Markdown links and code are left alone.
+A link to the source site's own host becomes root-relative when it reaches an
+imported page, and a leading mount path such as `/docs/` is dropped when what
+remains is an imported page: the host is
+`seo.metatags.canonical` when set, else the `integrations.plausible.domain` when its
+first label is `docs`, `developer` or `developers`, because Plausible is often set up
+for the marketing apex, whose pages are not docs pages. Another host, port or login,
+and a path that is no imported page, keep the absolute URL.
+Mintlify pages converted from Docusaurus keep `<Tabs values>` and `<TabItem>`: they
+become `<Tabs>` and `<Tab title>`, titled by the item's `label`, else the `values`
+label for its `value`, else the `value`. A
+`<TabItem>` outside any `<Tabs>` is mapped only when it has its own `</TabItem>`, so
+one named in prose is escaped as text and the page is kept.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
 For a copied client component that receives a simple page-authored JSX callback,
@@ -705,18 +718,24 @@ Other relative imports of a copied file are handled the same way: a namespace
 import (`import * as X from './comp.jsx'`) and a dynamic `import('./comp.jsx')`
 point at the copied module, and a relative side-effect import
 (`import './styles.css'`) is removed with a warning, like one from an npm
-package. An `import` line inside a template literal of an `export` (a code sample
-held in a string) is text, so it stays in the string and is not hoisted. A page is
-excluded only when the relative target is not copied (for
+package. An `import` line inside a template literal of the page's JavaScript (an
+`export`, an expression or a JSX attribute value: a code sample held in a string) is
+text, so it stays in the string and is not hoisted. That needs the page to parse as
+MDX at that point, with the frontmatter set aside and any prose brace acorn rejects
+escaped; a page that still does not parse (an HTML comment not yet converted, say)
+is hoisted as before. A page is excluded only when the relative target is not copied (for
 example a Next.js `./metadata` module, or an `export ... from` re-export), with
 a single warning naming it. An MDX expression that names an identifier the page
 never defines (`{missing}`) is removed with a warning, since it would throw at
 render; define the name or escape the braces as `\{ \}` to keep the text.
-Prose braces that are not a valid expression at all (a URL placeholder such as
+Prose braces that are not a valid expression at all (a path placeholder such as
 `/{chainId?}`) are escaped as literal text, which is how Mintlify shows them, and
-one warning per page names the lines. The page is kept only if it then compiles:
-a broken expression in a JSX attribute, a broken `export`, or a brace that never
-closes still excludes the page.
+one warning per page quotes up to three of the escaped spans (the same goes for
+unmatched closing tags). A bare URL needs no escape: the runtime compiles with
+remark-gfm, which autolinks it, braces included, and every check of whether a page
+compiles reads it that way. The page is kept only if it then compiles, and a page
+that needs more than 50 repairs is not repaired: a broken expression in a JSX
+attribute, a broken `export`, or a brace that never closes still excludes the page.
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
 number, boolean, `null`, or an object/array of those) or a self-contained

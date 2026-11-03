@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1367,9 +1367,19 @@ function readMintignoreMatcher(mintlifyRoot: string): IgnoreMatcher | null {
  * abort `scripts/build-runtime-sources.mts` for the whole project, so
  * migration excludes it up front instead and reports why.
  */
+/** The icon library a site that names none uses (`DEFAULT_ICON_LIBRARY` in the runtime's `src/lib/icon-library.ts`). */
+const RUNTIME_DEFAULT_ICON_LIBRARY = 'lucide'
+
+/** Up to three of `items` in backticks, each at most 60 characters, then how many more: a warning cannot give a line number, as the body is not the source file. */
+function quoted(items: ReadonlyArray<string>): string {
+  const unique = [...new Set(items.map((item) => item.replace(/\s+/g, ' ').trim()))]
+  const shown = unique.slice(0, 3).map((item) => `\`${item.length > 60 ? `${item.slice(0, 59)}…` : item}\``)
+  return `${shown.join(', ')}${unique.length > 3 ? `, and ${unique.length - 3} more` : ''}`
+}
+
 function invalidMdxReason(body: string): string | null {
   try {
-    compileSync(body, { outputFormat: 'program' })
+    compileSync(body, MDX_COMPILE_OPTIONS)
     return null
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
@@ -3345,8 +3355,20 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
 
 /** MDX imports from nested Markdown partials must live at page scope. */
 function hoistMdxImports(source: string): string {
-  const imports = new Set<string>()
-  // A template literal in an `export` can hold a code sample whose lines read as imports; it is set aside whole and put back.
+  const hoist = (text: string): { imports: Set<string>; rest: string } => {
+    const imports = new Set<string>()
+    const rest = replaceOutsideCode(text, (body) => body.replace(
+      /^[ \t]*import\s+(?:\{[^}\n]+\}|[A-Za-z_$][\w$]*)\s+from\s+(['"])[^'"\n]+\1[ \t]*;?/gm,
+      (statement: string) => {
+        imports.add(statement.trim().replace(/;?$/, ';'))
+        return ''
+      },
+    ))
+    return { imports, rest }
+  }
+  let { imports, rest } = hoist(source)
+  if (imports.size === 0) return source
+  // A template literal in the page's JavaScript can hold a code sample whose lines read as imports; each one is set aside whole and put back.
   const literals: Array<string> = []
   let protectedSource = ''
   let cursor = 0
@@ -3356,18 +3378,13 @@ function hoistMdxImports(source: string): string {
     protectedSource += `${source.slice(cursor, start)}\u0002${literals.length - 1}\u0002`
     cursor = end
   }
-  protectedSource += source.slice(cursor)
-  const withoutImports = replaceOutsideCode(protectedSource, (body) => body.replace(
-    /^[ \t]*import\s+(?:\{[^}\n]+\}|[A-Za-z_$][\w$]*)\s+from\s+(['"])[^'"\n]+\1[ \t]*;?/gm,
-    (statement: string) => {
-      imports.add(statement.trim().replace(/;?$/, ';'))
-      return ''
-    },
-  ))
-  if (imports.size === 0) return source
-  const frontmatter = withoutImports.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  if (literals.length > 0) {
+    ({ imports, rest } = hoist(protectedSource + source.slice(cursor)))
+    if (imports.size === 0) return source
+  }
+  const frontmatter = rest.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
   const prefix = frontmatter?.[0] ?? ''
-  return `${prefix}${[...imports].join('\n')}\n\n${withoutImports.slice(prefix.length).replace(/^(?:\r?\n)*/, '')}`
+  return `${prefix}${[...imports].join('\n')}\n\n${rest.slice(prefix.length).replace(/^(?:\r?\n)*/, '')}`
     .replace(/\u0002(\d+)\u0002/g, (marker, index: string) => literals[Number(index)] ?? marker)
 }
 
@@ -3448,7 +3465,9 @@ function stripFernBasePathFromLinks(body: string, basePath: string): string {
 
 /**
  * The host a Mintlify site is served from, read from its docs.json: `seo.metatags.canonical` when it is an http(s) URL, otherwise
- * `integrations.plausible.domain` when that names a single hostname (Plausible also takes a comma list, which names no one site).
+ * `integrations.plausible.domain` when that names a single hostname (Plausible also takes a comma list, which names no one site)
+ * whose first label is `docs`, `developer` or `developers`. Plausible is often set up for the marketing site's apex or another
+ * host, and a link there is not a docs page.
  */
 function mintlifySourceHost(config: Record<string, unknown> | null): string | undefined {
   const canonical = (config?.seo as { metatags?: { canonical?: unknown } } | undefined)?.metatags?.canonical
@@ -3459,14 +3478,14 @@ function mintlifySourceHost(config: Record<string, unknown> | null): string | un
     } catch { /* not a URL: the Plausible domain is next */ }
   }
   const domain = (config?.integrations as { plausible?: { domain?: unknown } } | undefined)?.plausible?.domain
-  return typeof domain === 'string' && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(domain.trim()) ? domain.trim().toLowerCase() : undefined
+  return typeof domain === 'string' && /^(?:docs|developers?)(?:\.[a-z0-9-]+)+$/i.test(domain.trim()) ? domain.trim().toLowerCase() : undefined
 }
 
 /**
  * Remove a published Mintlify mount path only when its destination is an imported page. A link to the source site's own host
  * (`sourceHost`) gets the same treatment and becomes root-relative only when that proves the route exists here.
  */
-function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>, sourceHost?: string): string {
+export function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>, sourceHost?: string): string {
   /** The root-relative route `target` reaches here, or undefined when it names no imported page. */
   const resolve = (target: string): string | undefined => {
     const suffixAt = target.search(/[?#]/)
@@ -3502,9 +3521,10 @@ function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>,
       return target
     }
   }
+  // A run that never ends would otherwise be rescanned from every opener, so a target is bounded (a longer one is left as written).
   return replaceOutsideCode(body, (text) => text
-    .replace(/(\]\()(\/[^\s)]+|https?:\/\/[^\s)]+)(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
-    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]+|https?:\/\/[^'"\n]+)\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
+    .replace(/(\]\()(\/[^\s)]{1,2048}|https?:\/\/[^\s)]{1,2048})(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
+    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]{1,2048}|https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
 /** Preserve source fragments that resolve to a unique heading or table row. */
@@ -5098,8 +5118,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return { locale, navigationId, id: isDefaultLocale ? navigationId : `${locale}/${navigationId}` }
   }
   const routeAliases: NonNullable<MigrationDocsConfig['redirects']> = []
-  const sourceIcons = mintlifyConfig?.icons
-  const sourceIconLibrary = sourceIcons && typeof sourceIcons === 'object' ? (sourceIcons as Record<string, unknown>).library : undefined
+  // The projected config names a library only for Mintlify (see `projectMintlifyNavigation`); every other site gets the runtime's default.
+  const siteIconLibrary = docsConfig.icons?.library ?? RUNTIME_DEFAULT_ICON_LIBRARY
   const pageFiles = [...files].sort((left, right) => {
     const leftOrder = referenceOrder.get(normalizedReferenceKey(left.relativePath)) ?? Number.MAX_SAFE_INTEGER
     const rightOrder = referenceOrder.get(normalizedReferenceKey(right.relativePath)) ?? Number.MAX_SAFE_INTEGER
@@ -5374,7 +5394,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       navigationId,
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
-      ...(typeof sourceIconLibrary === 'string' ? { siteIconLibrary: sourceIconLibrary } : {}),
+      siteIconLibrary,
       raw,
       platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
@@ -5489,23 +5509,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const closingTags = escapeUnmatchedClosingTags(page.body)
       const closingTagsWarning = {
         code: 'unsupported-config' as const,
-        message: `Escaped unmatched closing tag(s) on line ${closingTags.lines.join(', ')} so the page compiles; they render as literal text.`,
+        message: `Escaped unmatched closing tag(s) ${quoted(closingTags.escaped)} so the page compiles; they render as literal text.`,
         source: file.relativePath,
       }
-      if (closingTags.lines.length > 0 && invalidMdxReason(closingTags.body) === null) {
+      if (closingTags.escaped.length > 0 && invalidMdxReason(closingTags.body) === null) {
         page.body = closingTags.body
         mdxError = null
         warnings.push(closingTagsWarning)
       } else {
         // Runs on the closing-tag repair's output; `escapeUnparseableExpressions` keeps its result only if the page compiles.
         const braces = escapeUnparseableExpressions(closingTags.body)
-        if (braces.lines.length > 0) {
+        if (braces.escaped.length > 0) {
           page.body = braces.body
           mdxError = null
-          if (closingTags.lines.length > 0) warnings.push(closingTagsWarning)
+          if (closingTags.escaped.length > 0) warnings.push(closingTagsWarning)
           warnings.push({
             code: 'unsupported-config',
-            message: `Escaped \`{\` on line ${braces.lines.join(', ')} so the page compiles; the braces render as literal text.`,
+            message: `Escaped the braces of ${quoted(braces.escaped)} so the page compiles; they render as literal text.`,
             source: file.relativePath,
           })
         }
@@ -6430,7 +6450,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, '')),
     ])
     const sourceHost = mintlifySourceHost(mintlifyConfig)
-    for (const page of pages) page.body = rewriteMintlifyMountedLinks(page.body, reachablePaths, sourceHost)
+    for (const page of pages) {
+      // Page ids are final here, and an id is the route Mintlify served the page at. A relative href becomes root-absolute first, so it gets the same mount and extension handling.
+      page.body = rewriteMintlifyMountedLinks(rewriteRelativeJsxHrefs(page.body, page.id), reachablePaths, sourceHost)
+    }
   }
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
@@ -6666,10 +6689,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const source = sourcePath(page)
       if (source) page.body = rewriteFernRelativePageLinks(page.body, source, routes)
     }
-  }
-  if (platform === 'mintlify') {
-    // Page ids are final here, and an id is the route Mintlify served the page at.
-    for (const page of pages) page.body = rewriteRelativeJsxHrefs(page.body, page.id)
   }
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
   preserveLinkedAnchors(pages)

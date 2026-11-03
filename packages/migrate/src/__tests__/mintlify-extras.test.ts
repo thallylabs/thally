@@ -346,6 +346,15 @@ describe('config mapping', () => {
       expect(bundle.warnings.filter((warning) => /relative/i.test(warning.message))).toEqual([])
     })
 
+    it('gives ./a.mdx and ./a.md the same extension handling as /guides/a.mdx and /guides/a.md', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['guides/intro', 'guides/a'] } }),
+        'guides/intro.mdx': body('Intro', '<Card href="./a.mdx" />\n<Card href="./a.md" />\n<Card href="/guides/a.mdx" />\n<Card href="/guides/a.md" />'),
+        'guides/a.mdx': body('A', 'A.'),
+      })
+      expect(bodyOf(bundle, 'guides/intro')).toContain('<Card href="/guides/a" />\n<Card href="/guides/a.md" />\n<Card href="/guides/a" />\n<Card href="/guides/a.md" />')
+    })
+
     it('clamps a href that climbs above the site root at the root, silently, as the browser does', () => {
       const bundle = site({
         'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'a/b'] } }),
@@ -358,6 +367,13 @@ describe('config mapping', () => {
     })
   })
 
+  it('keeps a page that only names <TabItem> in prose', () => {
+    const bundle = site({ 'docs.json': JSON.stringify(nav), 'intro.mdx': '---\ntitle: Intro\n---\n\nThe <TabItem> tag is used.\n' })
+    expect(bundle.pages.map((candidate) => candidate.id)).toEqual(['intro'])
+    expect(bundle.pages[0].body).toContain('The &lt;TabItem&gt; tag is used.')
+    expect(codes(bundle, 'skipped-file')).toEqual([])
+  })
+
   describe('object-form page icon', () => {
     const icon = (library: string) => page('Intro', `icon:\n  name: rocket\n  style: solid\n  library: ${library}\n`)
 
@@ -367,6 +383,12 @@ describe('config mapping', () => {
         expect(bundle.pages[0]).toMatchObject({ icon: 'rocket', iconType: 'solid' })
         expect(bundle.warnings.filter((warning) => /icon library/.test(warning.message))).toEqual([])
       }
+    })
+
+    it('names the library the migrated site will use, not an unsupported docs.json value', () => {
+      const bundle = site({ 'docs.json': JSON.stringify({ ...nav, icons: { library: 'duotone' } }), 'intro.mdx': icon('fontawesome') })
+      expect(bundle.docsConfig.icons).toBeUndefined()
+      expect(bundle.warnings.find((warning) => /icon library/.test(warning.message))?.message).toMatch(/site uses "lucide"/)
     })
 
     it('warns, naming the page, when the page library differs from docs.json icons.library', () => {
