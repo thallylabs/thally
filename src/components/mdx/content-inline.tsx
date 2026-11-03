@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ArrowUpRight } from 'lucide-react'
+import { isSafeRootPath } from '@/lib/safe-root-path'
 import { cn } from '@/lib/utils'
 import { Icon } from '@/components/mdx/content-icon'
 
@@ -80,7 +81,7 @@ export interface TooltipProps {
 }
 
 function isSafeLink(href: string): boolean {
-  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(https?:|mailto:)/i.test(href)
+  return href.startsWith('#') || isSafeRootPath(href) || /^(https?:|mailto:)/i.test(href)
 }
 
 interface TooltipPosition {

@@ -40,10 +40,16 @@ describe('Video', () => {
   })
 
   it('does not embed a javascript: or data: source, and shows it as text instead', () => {
-    for (const src of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '//evil.example/x']) {
+    for (const src of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '//evil.example/x', '/\\evil.example', '/\t/evil.example', '/\n/evil.example', '/\r/evil.example']) {
       const html = renderToStaticMarkup(<Video src={src} />)
       expect(html).not.toContain('<iframe')
       expect(html).toContain('<code>')
+    }
+  })
+
+  it('drops a poster that is not a web URL or a plain site path', () => {
+    for (const poster of ['//evil.example/p.png', '/\\evil.example/p.png', '/\t/evil.example/p.png', '/\n/evil.example/p.png', '/\r/evil.example/p.png']) {
+      expect(renderToStaticMarkup(<Video src="/clip.mp4" poster={poster} />)).not.toContain('poster=')
     }
   })
 

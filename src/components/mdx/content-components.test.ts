@@ -14,6 +14,9 @@ import { Badge, Tooltip } from '@/components/mdx/content-inline'
 import { PageSlotsProvider } from '@/components/mdx/page-slots'
 import { Color, Update } from '@/components/mdx/content-metadata'
 
+/** Browsers drop tab, LF and CR inside a URL, so each of these reads as `//evil.com`. */
+const CONTROL_CHAR_PATHS = ['/\t/evil.com', '/\n/evil.com', '/\r/evil.com']
+
 describe('standalone rich-content primitives', () => {
   it('renders a joined accordion group with linkable items', () => {
     const markup = renderToStaticMarkup(
@@ -114,6 +117,28 @@ describe('standalone rich-content primitives', () => {
     expect(markup).toContain('stroke="#0ea5e9"')
     const unsafe = renderToStaticMarkup(createElement(Component, { title: 'Unsafe', href: 'javascript:alert(1)' }))
     expect(unsafe).not.toContain('href=')
+  })
+
+  it.each([Card, Tile])('refuses a root path that hides control characters in href and img', (Component) => {
+    for (const path of CONTROL_CHAR_PATHS) {
+      const markup = renderToStaticMarkup(createElement(Component, { title: 'Sneaky', href: path, img: path }, 'x'))
+      expect(markup).not.toContain('href=')
+      expect(markup).not.toContain('<img')
+    }
+  })
+
+  it('refuses a root path that hides control characters in an Icon source', () => {
+    for (const path of CONTROL_CHAR_PATHS) {
+      expect(renderToStaticMarkup(createElement(Icon, { src: path }))).toBe('')
+      expect(renderToStaticMarkup(createElement(Icon, { icon: path }))).toBe('')
+    }
+  })
+
+  it('refuses a root path that hides control characters in a Tooltip link', () => {
+    for (const path of CONTROL_CHAR_PATHS) {
+      const markup = renderToStaticMarkup(createElement(Tooltip, { tip: 'No link', cta: 'Run', href: path }, 'token'))
+      expect(markup).not.toContain('href=')
+    }
   })
 
   it('never nests anchors when a linked card body contains a link', () => {

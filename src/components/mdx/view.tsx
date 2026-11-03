@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { useEffect } from 'react'
 import { Icon } from '@/components/mdx/content-icon'
 import { usePageSlots } from '@/components/mdx/page-slots'
+import { isSafeRootPath } from '@/lib/safe-root-path'
 
 interface ViewProps {
   title: string
@@ -56,7 +57,7 @@ interface EmbedProps {
 }
 
 function isSafeEmbedSource(src: string): boolean {
-  return (src.startsWith('/') && !src.startsWith('//') && !src.includes('\\')) || /^https:\/\//i.test(src)
+  return isSafeRootPath(src) || /^https:\/\//i.test(src)
 }
 
 /**

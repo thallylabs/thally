@@ -37,6 +37,7 @@ import {
   iconLibraryAssetUrl,
   type IconStyle,
 } from '@/lib/icon-library'
+import { isSafeRootPath } from '@/lib/safe-root-path'
 import { cn } from '@/lib/utils'
 
 export type ContentIconTone = 'neutral' | 'accent'
@@ -108,7 +109,7 @@ export interface IconProps {
 }
 
 function safeIconSource(src: string): boolean {
-  return (src.startsWith('/') && !src.startsWith('//') && !src.includes('\\')) || /^https:\/\//i.test(src)
+  return isSafeRootPath(src) || /^https:\/\//i.test(src)
 }
 
 /** Strip Font Awesome class prefixes so `fa-solid fa-book` resolves like `book`. */

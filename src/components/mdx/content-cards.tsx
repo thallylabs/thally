@@ -6,6 +6,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { Icon, type ContentIconTone } from '@/components/mdx/content-icon'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
+import { isSafeRootPath } from '@/lib/safe-root-path'
 import { cn } from '@/lib/utils'
 
 type CardCallout = 'info' | 'success' | 'warning' | 'danger' | 'note' | 'tip' | 'check'
@@ -56,11 +57,11 @@ function isExternalLink(href: string): boolean {
 }
 
 function isSafeLink(href: string): boolean {
-  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(https?:|mailto:)/i.test(href)
+  return href.startsWith('#') || isSafeRootPath(href) || /^(https?:|mailto:)/i.test(href)
 }
 
 function isSafeImageSource(src: string): boolean {
-  return (src.startsWith('/') && !src.startsWith('//') && !src.includes('\\')) || /^https:\/\//i.test(src)
+  return isSafeRootPath(src) || /^https:\/\//i.test(src)
 }
 
 function isTone(value?: string): value is ContentIconTone {
