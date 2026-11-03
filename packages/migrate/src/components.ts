@@ -16,7 +16,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCode, replaceOutsideCodeAndComments, splitFrontmatterBlock } from './mdx.js'
 import { resolveWithin } from './path.js'
 import { hoistedVarNames, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
@@ -210,6 +210,20 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
 
 /** The start of the warning for a page this analysis could not parse; the repository adapter looks for it. */
 export const COMPONENT_ANALYSIS_FAILED = 'Custom component analysis could not parse this MDX'
+
+/**
+ * Whether `createComponentMigrator().transform` has anything to do on a page, outside code: an `import` or `export` line (components,
+ * unavailable packages, inline declarations), a JSX event handler (an interactive root moves to a client component) or an asset
+ * `require(` in an attribute. A page with none loses nothing when the analysis cannot read it.
+ */
+export function pageHasComponentWork(body: string): boolean {
+  let found = false
+  replaceOutsideCode(splitFrontmatterBlock(body).body, (text) => {
+    found = /^[ \t]*(?:import|export)\b|\bon[A-Z]\w*\s*=|\brequire\s*\(/m.test(text)
+    return text
+  })
+  return found
+}
 
 // remark-gfm, like the runtime's compile and `MDX_COMPILE_OPTIONS`: a page that compiles must also parse here.
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)

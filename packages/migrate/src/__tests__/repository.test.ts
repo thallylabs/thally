@@ -3162,6 +3162,35 @@ describe('Mintlify repository migration', () => {
       expect(bundle.warnings.some((warning) => warning.message.includes('Escaped the braces'))).toBe(false)
     })
 
+    it('keeps a page the analysis could not read, with a brace repair, when it has nothing for the analysis to do', () => {
+      // Only the later normalizing turns these placeholder tags into text, so the analysis never read the repaired page.
+      for (const prose of ['IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE', '<Feature> requires a Pro plan']) {
+        const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n${prose}\n\nCall /x/{chainId?}\n` })
+        const body = bundle.pages.find((page) => page.id === 'home')?.body ?? ''
+        expect(body, prose).toContain(prose.replaceAll('<', '&lt;').replaceAll('>', '&gt;'))
+        expect(body, prose).toContain('Call /x/\\{chainId?}')
+        expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file'), prose).toEqual([])
+      }
+    })
+
+    it('still excludes such a page when it has an import, an export or an event handler for the analysis to handle', () => {
+      const pages: Record<string, string> = {
+        imported: "import Foo from '/snippets/Foo.jsx'\n\n<Foo />",
+        handler: '<button onClick={() => window.alert(1)}>go</button>',
+      }
+      for (const [name, extra] of Object.entries(pages)) {
+        const root = mkdtempSync(join(tmpdir(), 'thally-migrate-braces-work-'))
+        mkdirSync(join(root, 'snippets'))
+        writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['home', 'fine'] } }))
+        writeFileSync(join(root, 'snippets', 'Foo.jsx'), 'export default function Foo() { return <div>foo</div> }\n')
+        writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n<Feature> requires a Pro plan\n\nCall /x/{chainId?}\n\n${extra}\n`)
+        writeFileSync(join(root, 'fine.mdx'), '---\ntitle: Fine\n---\n\nFine.\n')
+        const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+        expect(bundle.pages.map((page) => page.id), name).toEqual(['fine'])
+        expect(bundle.warnings, name).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'home.mdx', message: expect.stringContaining('does not compile as MDX') }))
+      }
+    })
+
     it('still excludes a page whose broken expression is a JSX attribute', () => {
       const bundle = migrateOne({ broken: '---\ntitle: Broken\n---\n\nsee {a?}\n\n<Card title={a b}>\nbody\n</Card>\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
       expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])

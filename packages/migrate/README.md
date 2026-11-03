@@ -740,8 +740,10 @@ that needs more than 50 repairs is not repaired: a broken expression in a JSX
 attribute, a broken `export`, or a brace that never closes still excludes the page.
 A page the component analysis could not parse is repaired first (its HTML comments
 converted for the read) and analysed again, so its inline components are still
-extracted; if the analysis still fails on it, a
-page that needed a brace repair is excluded as before.
+extracted. If the analysis still fails on a page that needed a brace repair, the page
+is excluded as before when it has an `import` or `export` line, an event handler or
+an asset `require(` outside code for the analysis to act on, and kept when it has
+none (a licence text with `<COPYRIGHT HOLDER>`, say).
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
 number, boolean, `null`, or an object/array of those) or a self-contained

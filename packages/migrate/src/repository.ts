@@ -33,7 +33,7 @@ import * as ts from 'typescript'
 
 import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
 import { isThallyBuiltinComponent } from './builtin-components.js'
-import { COMPONENT_ANALYSIS_FAILED, createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
+import { COMPONENT_ANALYSIS_FAILED, createComponentMigrator, pageHasComponentWork, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
@@ -5373,7 +5373,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     // Relative to `componentRoot`, like the component warnings for this page, so one page has one label.
     const pageWarningSource = relative(componentRoot, file.absolutePath).replace(/\\/g, '/')
-    let componentAnalysisFailed = false
+    // The analysis failed on this page and it had something to do: it must not be kept on a brace repair the analysis never read.
+    let componentAnalysisLeftWork = false
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
       const analysisFailed = (): boolean => warnings.slice(warningsBeforeTransform).some((warning) => warning.message.startsWith(COMPONENT_ANALYSIS_FAILED)
@@ -5398,7 +5399,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           }
         }
       }
-      componentAnalysisFailed = analysisFailed()
+      componentAnalysisLeftWork = analysisFailed() && pageHasComponentWork(beforeTransform)
       // `transform` excludes a page itself (pushing a 'skipped-file' warning
       // for it) when it references an unsupported npm import outside JSX —
       // keeping that import would fail `next build` for the whole site. Skip
@@ -5559,10 +5560,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
     if (mdxError) {
-      // Fail closed: only keep a repair that actually compiles. A page whose component analysis failed is left to the
-      // exclusion when a brace had to be escaped, as the analysis cannot be told to read the repaired page now.
+      // Fail closed: only keep a repair that actually compiles. A page whose component analysis failed and had work to do
+      // (an import, an export, an event handler: see `pageHasComponentWork`) is left to the exclusion when a brace had to be
+      // escaped, as the analysis cannot be told to read the repaired page now. One with nothing for it to do loses nothing.
       const repair = repairUncompilableMdx(page.body)
-      if (repair && (repair.braces.length === 0 || !componentAnalysisFailed)) {
+      if (repair && (repair.braces.length === 0 || !componentAnalysisLeftWork)) {
         page.body = repair.body
         mdxError = null
         warnings.push(...repairWarnings(repair, file.relativePath))

@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -1987,6 +1987,28 @@ describe('repository component migration', () => {
       message: expect.stringContaining("'date-fns'"),
     }))
     expect(warnings.find((warning) => warning.code === 'skipped-file')?.message).toContain('format')
+  })
+})
+
+describe('pageHasComponentWork', () => {
+  it('sees what the component analysis acts on: import and export lines, event handlers and asset require()', () => {
+    for (const page of [
+      "import X from './x.jsx'\n\n<X />",
+      'export const A = () => <b>a</b>\n\n<A />',
+      '  import X from "x"',
+      '<button onClick={() => go()}>go</button>',
+      '<img src={require("./a.png")} />',
+    ]) expect(pageHasComponentWork(page), page).toBe(true)
+  })
+
+  it('finds nothing in prose, other tags and expressions, or in code', () => {
+    for (const page of [
+      'Set <Feature> here and call /x/{chainId?}',
+      'We import data and export it; the important part is onclick, not onClickable',
+      '<Card title="T" href="/a" />',
+      '```jsx\nimport X from "x"\n<b onClick={go}>go</b>\n```\n\nUse `export const a = 1` and `require("x")`.',
+      '---\nimport: x\n---\n\ntext',
+    ]) expect(pageHasComponentWork(page), page).toBe(false)
   })
 })
 
