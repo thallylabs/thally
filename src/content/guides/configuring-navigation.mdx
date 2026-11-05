@@ -236,3 +236,16 @@ In `navigation.versions`, set `hidden: true` on an entry to remove it from the v
 ```json
 { "label": "v1", "prefix": "v1", "href": "/v1/introduction", "hidden": true }
 ```
+
+## Addresses with no page
+
+An address with no page shows the 404 page, which you can replace with `src/content/404.mdx`. To send it to the home page instead, as Mintlify's `errors` setting does, set `errors.404.redirect` at the top level of `docs.json`:
+
+```json
+{
+  "errors": { "404": { "redirect": true } },
+  "tabs": [...]
+}
+```
+
+A page the reader may not see, or one that is not published, is answered the same way, so the redirect does not show which addresses exist. The home page itself, the home page of a language and addresses that end in a file extension (a missing image, say) still answer 404, and API routes, `llms.txt` and the machine routes are not affected.

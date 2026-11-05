@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', descriptionPlacement: undefined as 'body' | 'operation' | undefined, header: vi.fn(), og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
+const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, redirect404: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', descriptionPlacement: undefined as 'body' | 'operation' | undefined, header: vi.fn(), og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
 
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => { throw new Error(`NEXT_REDIRECT:${path}`) },
@@ -35,6 +35,7 @@ vi.mock('@/data/docs', () => ({
   getEyebrowMode: () => fixtures.eyebrowMode,
   getSeoConfig: () => ({ titleSeparator: ' - ' }),
   isDocPublished: () => true,
+  getNotFoundRedirect: () => fixtures.redirect404,
   canReaderViewPage: async () => true,
   loadNavContext: async () => ({ group: 'Capacity', groupPath: ['Errors', 'Capacity'], breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
@@ -68,7 +69,7 @@ vi.mock('@/lib/json-ld', () => ({ buildDocPageJsonLd: (input: unknown) => fixtur
 
 import DocsPage, { generateMetadata } from './page'
 
-beforeEach(() => { fixtures.header.mockClear(); fixtures.descriptionPlacement = undefined; fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
+beforeEach(() => { fixtures.header.mockClear(); fixtures.descriptionPlacement = undefined; fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.redirect404 = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
 
 const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) }))
 
@@ -138,6 +139,47 @@ it('retains no-visible-document 404 and private-by-default login behavior', asyn
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_NOT_FOUND')
   fixtures.privateDefault = true
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_REDIRECT:/api/reader/login?redirect=%2F')
+})
+
+describe('docs.json errors.404.redirect', () => {
+  const visit = (slug: Array<string>) => DocsPage({ params: Promise.resolve({ slug }) })
+
+  it('sends an address with no page to the home page, and renders the 404 otherwise', async () => {
+    fixtures.missing = true
+    await expect(visit(['no', 'such-page'])).rejects.toThrow('NEXT_NOT_FOUND')
+    fixtures.redirect404 = true
+    await expect(visit(['no', 'such-page'])).rejects.toThrow('NEXT_REDIRECT:/')
+  })
+
+  it('keeps the home of a locale for an address under that locale', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true
+    await expect(visit(['fr', 'no-such-page'])).rejects.toThrow('NEXT_REDIRECT:/fr')
+  })
+
+  it('treats a page the reader may not see and an operation that is not published like an address with no page', async () => {
+    fixtures.redirect404 = true; fixtures.privateIntro = true
+    await expect(visit(['api-reference', 'endpoint', 'scrape'])).rejects.toThrow('NEXT_REDIRECT:/')
+    fixtures.privateIntro = false; fixtures.lookup = { node: null, reason: 'withheld' }
+    await expect(visit(['api-reference', 'endpoint', 'scrape'])).rejects.toThrow('NEXT_REDIRECT:/')
+  })
+
+  it('leaves the home page and a file name alone, so nothing can loop and an image stays a 404', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true
+    fixtures.root.mockResolvedValue(null)
+    await expect(visit([])).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(visit(['fr'])).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(visit(['images', 'missing.png'])).rejects.toThrow('NEXT_NOT_FOUND')
+  })
+
+  it('still sends an anonymous reader of a private site to sign in first', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true; fixtures.privateDefault = true
+    await expect(visit(['no-such-page'])).rejects.toThrow('NEXT_REDIRECT:/api/reader/login?redirect=%2Fno-such-page')
+  })
+
+  it('renders a page that exists as before', async () => {
+    fixtures.redirect404 = true
+    expect(await render()).toContain('Authored scrape body')
+  })
 })
 
 describe('a description with inline code', () => {

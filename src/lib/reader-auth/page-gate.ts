@@ -40,12 +40,16 @@ export function shouldOfferReaderSignIn(reader: ReaderContext): boolean {
   return config.isEnabled && !reader.isAuthenticated
 }
 
-/** Deny a document request without revealing whether the path exists. */
-export function denyDocumentAccess(reader: ReaderContext, requestedPath: string): never {
+/**
+ * Deny a document request without revealing whether the path exists. Where the site redirects an address with no
+ * page (`redirectTo`), a page the reader may not see goes there too, as an address with no page does.
+ */
+export function denyDocumentAccess(reader: ReaderContext, requestedPath: string, redirectTo?: string): never {
   const config = getReaderAuthConfig()
   if (config.isEnabled && !reader.isAuthenticated && config.defaultVisibility === 'private') {
     redirect(readerLoginPath(requestedPath))
   }
+  if (redirectTo) redirect(redirectTo)
   notFound()
 }
 

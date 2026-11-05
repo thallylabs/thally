@@ -343,6 +343,8 @@ export interface DocsJsonConfig {
     shortcuts?: Array<DocsNavigationShortcut>
   }
   redirects?: Array<DocsJsonRedirect>
+  /** Mintlify `errors`: with `404.redirect` an address that has no page goes to the home page instead of the 404 page. */
+  errors?: { '404'?: { redirect?: boolean } }
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
   /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`, `llms-full`, `mcp`, `cursor`, `vscode`) in display order. */
@@ -1691,6 +1693,11 @@ export function getFontsConfig(): DocsJsonFonts {
 
 export function getRedirectsConfig(): Array<DocsJsonRedirect> {
   return docsConfig().redirects ?? []
+}
+
+/** Whether docs.json sets `errors.404.redirect`: an address with no page goes to the home page instead of the 404 page. */
+export function getNotFoundRedirect(): boolean {
+  return docsConfig().errors?.['404']?.redirect === true
 }
 
 /** Raw, unvalidated `integrations` block; callers must run it through `resolveAnalyticsConfig`. */

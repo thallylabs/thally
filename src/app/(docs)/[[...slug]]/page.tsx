@@ -19,7 +19,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { lookupApiOperationForFrontmatter } from '@/data/api-reference'
-import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getEyebrowMode, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getEyebrowMode, getNotFoundRedirect, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { loadRootDocumentRedirect } from '@/lib/document-root-redirect'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
@@ -171,6 +171,16 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 }
 
+/**
+ * Where an address with no page goes when docs.json sets `errors.404.redirect`, as on Mintlify: the home page, or that
+ * of the locale. Not the home page itself, which has nowhere better to go (and could loop), nor a file name, which
+ * stays a 404 so a missing image or download is not answered with a page.
+ */
+function missingPageRedirect(docSlug: Array<string> | undefined, locale: string | undefined, defaultLocale: string): string | undefined {
+  if (!getNotFoundRedirect() || !docSlug?.length || /\.[a-z0-9]+$/i.test(docSlug[docSlug.length - 1])) return undefined
+  return locale ? localizedPath('/', locale, defaultLocale) : '/'
+}
+
 export default async function DocsPage({ params }: PageProps) {
   const routeParams = await params
   const i18n = await getEffectiveI18nConfig()
@@ -179,6 +189,8 @@ export default async function DocsPage({ params }: PageProps) {
   // the same path (and so reader-auth sites always render per request).
   const reader = await getReaderContext()
   const requestedPath = `/${(routeParams.slug ?? []).join('/')}`
+  // A page the reader may not see and one that is not published are answered like an address with no page.
+  const missingTarget = missingPageRedirect(route.docSlug, route.isLocaleRoute ? route.locale : undefined, i18n.defaultLocale)
   const doc = await getDocFromParams(
     route.docSlug,
     route.isLocaleRoute ? route.locale : undefined,
@@ -191,10 +203,10 @@ export default async function DocsPage({ params }: PageProps) {
       const target = await loadRootDocumentRedirect({ i18n, reader, locale: route.isLocaleRoute ? route.locale : undefined })
       if (target) redirect(target)
     }
-    denyDocumentAccess(reader, requestedPath)
+    denyDocumentAccess(reader, requestedPath, missingTarget)
   }
   if (!(await canReaderViewResolvedDoc(doc, reader, route.isLocaleRoute ? route.locale : undefined))) {
-    denyDocumentAccess(reader, requestedPath)
+    denyDocumentAccess(reader, requestedPath, missingTarget)
   }
 
   const siteUrl = getSiteUrl()
@@ -250,7 +262,10 @@ export default async function DocsPage({ params }: PageProps) {
     const lookup = await lookupApiOperationForFrontmatter(doc.openapi)
     // An excluded operation is withheld on purpose: 404 on every site. A hidden one is rendered, as on Mintlify.
     // Only a reference that cannot be resolved at all keeps the authored page, with a notice.
-    if (lookup.node === null && lookup.reason === 'withheld') notFound()
+    if (lookup.node === null && lookup.reason === 'withheld') {
+      if (missingTarget) redirect(missingTarget)
+      notFound()
+    }
     const operationNode = lookup.node
 
     if (!operationNode) {
