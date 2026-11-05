@@ -2917,10 +2917,12 @@ export function parseMarkdownPage(input: {
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
-  const heading = leadingPageHeading(body)
+  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
+  // Mintlify titles a page from its frontmatter, else from its file name, and keeps a leading H1 in the body as an ordinary heading.
+  // A page that names an operation keeps taking its heading as the title.
+  const heading = input.platform === 'mintlify' && !namesOperation ? undefined : leadingPageHeading(body)
   const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
   const title = authoredTitle ?? titleFromId(identity.navigationId)
-  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()

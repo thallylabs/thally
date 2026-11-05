@@ -95,6 +95,32 @@ describe('migration description fallback', () => {
   })
 })
 
+describe('a leading H1 on a page without a frontmatter title', () => {
+  const raw = '# Solidity API\n\nBody text.'
+  const id = 'references/vaults/contracts/RelayBridge'
+
+  it('titles a Mintlify page from its file name and keeps the H1 in the body, as Mintlify does', () => {
+    const page = parseMarkdownPage({ id, navigationId: id, platform: 'mintlify', raw, source: 'RelayBridge.mdx' })
+    expect(page?.title).toBe('RelayBridge')
+    expect(page?.headingTitle).toBeUndefined()
+    expect(page?.body).toBe('# Solidity API\n\nBody text.')
+  })
+
+  it('still takes the H1 as the title on other platforms, or when no platform is named', () => {
+    for (const platform of [undefined, 'docusaurus', 'fern'] as const) {
+      const page = parseMarkdownPage({ id, navigationId: id, platform, raw, source: 'RelayBridge.mdx' })
+      expect(page?.title, String(platform)).toBe('Solidity API')
+      expect(page?.body, String(platform)).toBe('Body text.')
+    }
+  })
+
+  it('leaves a Mintlify page with a frontmatter title as it was', () => {
+    const page = parseMarkdownPage({ id, navigationId: id, platform: 'mintlify', raw: `---\ntitle: Solidity API\n---\n\n${raw}`, source: 'RelayBridge.mdx' })
+    expect(page?.title).toBe('Solidity API')
+    expect(page?.body).toBe('Body text.')
+  })
+})
+
 describe('normalizeMdx', () => {
   it('pins Mintlify step titles to plain text unless the source sets titleSize', () => {
     expect(normalizeMdx('<Steps>\n<Step title="A">x</Step>\n</Steps>', 'mintlify')).toContain('<Steps titleSize="p">')

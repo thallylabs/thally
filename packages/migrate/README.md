@@ -756,6 +756,12 @@ alone on the next line, say) is read as Mintlify reads it, with each line break
 folded into a space, though strict YAML rejects it. A quote that is never
 closed, or text after the closing quote, is still reported as invalid YAML.
 
+A Mintlify page without a frontmatter `title` is titled from its file name
+(`RelayBridge.mdx` is "RelayBridge") and keeps a leading `# Heading` in its body
+as an ordinary heading, as Mintlify shows it; a page that names an OpenAPI
+operation still takes that heading as its title. Docusaurus and Fern pages take
+the leading heading as the title and drop it from the body.
+
 ### Access-restricted pages
 
 Restricted Mintlify pages migrate as real pages with normalized access
