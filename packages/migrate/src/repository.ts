@@ -82,7 +82,6 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
-  isMintlifyRootIndex,
   insertApiTab,
   mintlifyAllVersionPrefixes,
   mintlifyDefaultVersionPrefixes,
@@ -6376,13 +6375,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const aliases = routeAliases.filter((redirect) => !sources.has(redirect.source.toLowerCase()) && !served.has(literalRoute(redirect.source) ?? redirect.source))
     if (aliases.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...aliases] }
     docsConfig = addMintlifyHomepageRedirects(addMintlifyDirectoryRedirects(docsConfig, pages), pages)
-    // Mintlify gives a root `index.mdx` no sidebar entry unless docs.json lists it, so one it does not list stays out of the sidebar here too.
-    const listed = new Set<string>()
-    const collectListed = (nodes: Array<string | MigrationNavigationGroup>): void => {
-      for (const node of nodes) typeof node === 'string' ? listed.add(node) : collectListed(node.pages)
-    }
-    for (const tab of docsConfig.tabs) collectListed([...(tab.pages ?? []), ...(tab.groups ?? [])])
-    for (const page of pages) if (isMintlifyRootIndex(page, docsConfig.i18n?.defaultLocale) && !listed.has(page.navigationId)) page.hidden = true
     // `index.mdx` pages often publish at their parent route while source
     // prose still links to `/docs/<locale>/section/index`. Route aliases are
     // known only after the page loop, so include them in this final rewrite.

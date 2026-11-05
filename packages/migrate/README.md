@@ -376,9 +376,8 @@ page. A redirect for `/` that the source site wrote stays, and a warning says so
 
 A Mintlify root `index.mdx` is the page Mintlify serves at `/`, listed in
 docs.json or not, so the root is not redirected to the first navigation page
-for it (an `introduction.mdx` gets that redirect), and an `index.mdx` that
-docs.json does not list is marked `hidden` to stay out of the sidebar. A
-section path (`/guides`) is redirected to its `overview` or `introduction` page
+for it (an `introduction.mdx` gets that redirect). An `index.mdx` that docs.json
+does not list stays out of the navigation, as it is on Mintlify. A section path (`/guides`) is redirected to its `overview` or `introduction` page
 only when the navigation lists pages under that directory, which is when
 Mintlify redirects it too; with only unlisted pages under it Mintlify answers
 404, and so does the migrated site.

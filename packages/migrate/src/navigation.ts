@@ -181,7 +181,7 @@ export function addMintlifyDirectoryRedirects(
  * A root `index.mdx`: the page Mintlify serves at `/` itself, whether or not docs.json lists it. The runtime serves the page
  * that holds its `introduction` id at `/` too. An `introduction.mdx` is no evidence of that; Mintlify sends `/` to the first page then.
  */
-export function isMintlifyRootIndex(page: Pick<MigrationPage, 'id' | 'locale' | 'source'>, defaultLocale?: string): boolean {
+function isMintlifyRootIndex(page: Pick<MigrationPage, 'id' | 'locale' | 'source'>, defaultLocale?: string): boolean {
   return page.id === 'introduction' && (!page.locale || page.locale === defaultLocale) && /(?:^|[/#])index\.mdx?$/i.test(page.source)
 }
 

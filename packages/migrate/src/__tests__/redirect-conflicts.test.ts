@@ -318,19 +318,16 @@ describe('Mintlify root index page', () => {
   it('is not redirected either when docs.json lists it first', () => {
     const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['index', 'what'] }] } }, { index: home, what })
     expect(rootRedirect(bundle)).toEqual([])
-    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
   })
 
   it('stays out of the sidebar when docs.json does not list it, as on Mintlify', () => {
     const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
     expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('introduction')
-    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBe(true)
   })
 
   it('is not a reason to skip the root redirect for an introduction page that is not an index page', () => {
     const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { introduction: home, what, other: what })
     expect(rootRedirect(bundle)).toEqual([{ source: '/', destination: '/what', permanent: true }])
-    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
   })
 })
 
