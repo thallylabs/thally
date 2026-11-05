@@ -477,6 +477,15 @@ describe('Mintlify group named after its dropdown', () => {
     expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown', groupHeadings: 'all' })
   })
 
+  it('keeps the sidebar shortcuts when seven tabs switch the menu to a dropdown', () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    const bundle = bundleFor({
+      tabs: names.map((name) => ({ tab: name.toUpperCase(), groups: [{ group: 'Start', pages: [name] }] })),
+      global: { anchors: [{ anchor: 'Blog', href: 'https://example.com/blog', icon: 'newspaper' }] },
+    }, names)
+    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown', shortcuts: [{ label: 'Blog', href: 'https://example.com/blog', icon: 'newspaper' }] })
+  })
+
   it('leaves the navigation as it was when no group is named after its tab', () => {
     const bundle = bundleFor({ dropdowns: [{ dropdown: 'API reference', groups: [{ group: 'Overview', pages: ['overview'] }] }] }, ['overview'])
     expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown' })
