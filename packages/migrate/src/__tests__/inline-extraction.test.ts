@@ -2,7 +2,10 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { createElement } from 'react'
+import { renderToString } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import ts from 'typescript'
@@ -297,6 +300,78 @@ describe('a dependency that cannot move safely keeps the whole component in plac
     expect(new Set(modules.map((file) => file.path)).size).toBe(2)
     expect(modules.map((file) => String(file.content)).join('').match(/<em>one<\/em>/g)).toHaveLength(1)
     expect(modules.map((file) => String(file.content)).join('').match(/<em>two<\/em>/g)).toHaveLength(1)
+  })
+})
+
+const WALLET_LIST = [
+  'export const WalletList = () => {',
+  '  let wallets = []',
+  '  if (typeof document !== "undefined") {',
+  '    fetch("https://example.com/wallets").then((response) => response.json()).then((data) => {',
+  '      wallets = data.listings',
+  '      document.querySelector(".wallet-card-container").innerHTML = String(wallets.length)',
+  '    })',
+  '  }',
+  '  return <div className="wallet-card-container" />',
+  '}',
+].join('\n')
+
+describe('a component that reads a browser global', () => {
+  it('moves into the client module and renders only after mount', () => {
+    const { body, client, warnings } = extract(`${WALLET_LIST}\n\n<WalletList />\n`)
+    expect(warnings).toEqual([])
+    expect(client).toMatch(/^'use client';/)
+    expect(client).toContain('export const WalletList = renderAfterMount(() => {')
+    expect(client).toMatch(/import \{ useEffect, useState \} from 'react';/)
+    expect(body).not.toContain('WalletList = ')
+    expect(body).toMatch(/<Migrated[a-f0-9]+ \/>/)
+  })
+
+  it('renders nothing on the server, where `document` does not exist', () => {
+    const { client } = extract('export const Title = () => <h1>{document.title}</h1>\n\n<Title />\n')
+    const exports: Record<string, unknown> = {}
+    const { outputText } = ts.transpileModule(client!, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } })
+    new Function('require', 'exports', outputText)(createRequire(import.meta.url), exports)
+    expect(typeof document).toBe('undefined')
+    expect(renderToString(createElement(exports.Title as () => null))).toBe('')
+  })
+
+  it('wraps a function declaration and a component that is the dependency of a hook component', () => {
+    const chart = 'export function Chart() {\n  if (typeof window === "undefined") return null\n  return <b>{window.innerWidth}</b>\n}'
+    const counter = 'export const Counter = () => {\n  const [n] = useState(0)\n  return <div>{n}<Chart /></div>\n}'
+    const { client, warnings } = extract(`${chart}\n\n${counter}\n\n<Counter />\n`)
+    expect(warnings).toEqual([])
+    expect(client).toContain('export const Chart = renderAfterMount(function Chart() {')
+    expect(client).toContain('export const Counter = () => {')
+    expect(client).not.toContain('Counter = renderAfterMount')
+  })
+
+  it('leaves a component with no browser global as it was', () => {
+    const { body, client } = extract('export const Plain = () => <i>plain</i>\n\n<Plain />\n')
+    expect(client).toBeUndefined()
+    expect(body).toContain('export const Plain')
+  })
+
+  it('does not gate a component that only has event handlers and a window call inside one', () => {
+    const { client } = extract('export const Open = () => <button onClick={() => window.open("/x")}>x</button>\n\n<Open />\n')
+    expect(client ?? '').not.toContain('renderAfterMount')
+  })
+
+  it('does not mistake a page-declared component named like a browser global for the global', () => {
+    const { client } = extract('export const Image = () => <i>img</i>\n\nexport const Gallery = () => <div>{[Image].length}</div>\n\n<Gallery />\n')
+    expect(client).toBeUndefined()
+  })
+
+  it('warns, naming the browser global, when a dependency keeps it in the page', () => {
+    const source = `export const Chart = () => {\n  if (typeof window === "undefined") return null\n  return <Mystery />\n}\n\n<Chart />\n`
+    const { body, client, warnings } = extract(source)
+    expect(client).toBeUndefined()
+    expect(body).toBe(source)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('"Chart"')
+    expect(warnings[0].message).toContain('`window`')
+    expect(warnings[0].message).toContain('Mystery')
+    expect(warnings[0].message).not.toContain('React hook')
   })
 })
 

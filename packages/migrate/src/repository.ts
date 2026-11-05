@@ -5507,7 +5507,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (declarationsReferenceBrowserGlobal(page.body)) {
       warnings.push({
         code: 'unsupported-config',
-        message: "This page defines a component that uses `document`/`window`, which isn't available when pages "
+        message: "This page still defines code that uses `document`/`window`, which isn't available when pages "
           + 'are rendered on the server. Move that code into a client component or edit the page manually.',
         source: file.relativePath,
       })

@@ -30,6 +30,8 @@ interface Unit {
   hooks: boolean
   /** Handlers, browser globals: cannot render in a Server Component. */
   clientOnly: boolean
+  /** Has a JSX event handler (`onClick={...}`). */
+  handlers: boolean
   componentLike: boolean
   blockers: Array<string>
 }
@@ -45,11 +47,13 @@ export interface InlineTree {
 
 export interface InlinePlan {
   /** Blocked roots, each with the reason it was left in the page. */
-  blocked: Array<{ name: string; reason: string }>
+  blocked: Array<{ name: string; reason: string; browser: boolean }>
   /** Declarations deleted from the page (declaration indexes). */
   moved: Array<number>
   /** Declarations the page keeps and the client module also receives. */
   copied: Array<number>
+  /** Moved components that read a browser global: the module renders them only after mount (see `gateOnMount`). */
+  gated: Array<number>
   /** Names of every moved declaration. */
   movedNames: Array<string>
   /** Import statements the client module needs, in source order. */
@@ -330,7 +334,7 @@ function analyzeUnit(index: number, source: string, reactGlobals: ReadonlySet<st
   const statement = sf.statements[0]
   const blockers: Array<string> = []
   if (!statement || sf.statements.length !== 1) {
-    return { index, source, names: [], refs: [], assigned: [], hooks: false, clientOnly: false, componentLike: false, blockers: ['is not a single declaration'] }
+    return { index, source, names: [], refs: [], assigned: [], hooks: false, clientOnly: false, handlers: false, componentLike: false, blockers: ['is not a single declaration'] }
   }
   const { names, componentLike, defaultExport } = declaredNames(statement)
   if (defaultExport) blockers.push('is a default export')
@@ -361,6 +365,7 @@ function analyzeUnit(index: number, source: string, reactGlobals: ReadonlySet<st
     assigned,
     hooks: refs.some(({ name }) => reactGlobals.has(name)) || /\bReact\.(?:use[A-Z]\w*|createContext|forwardRef|memo)\b/.test(source),
     clientOnly: handlers || refs.some(({ name }) => BROWSER_IDENTIFIERS.has(name)),
+    handlers,
     componentLike,
     blockers: [...new Set(blockers)],
   }
@@ -417,6 +422,47 @@ function bodyReferences(tree: InlineTree): { mdastTags: Set<string>; refs: Array
   }
   visit(tree)
   return { mdastTags, refs }
+}
+
+/**
+ * Wraps a single `const Name = <function>` or `function Name` declaration so the
+ * component renders nothing until the client has mounted. `helper` is the name
+ * `mountGateHelper` declares. Returns undefined for any other shape.
+ */
+export function gateOnMount(source: string, helper: string): string | undefined {
+  const sf = parse(source)
+  const [statement] = sf.statements
+  if (sf.statements.length !== 1) return undefined
+  if (ts.isVariableStatement(statement)) {
+    const [declaration, ...others] = statement.declarationList.declarations
+    const value = declaration.initializer && unwrap(declaration.initializer)
+    if (others.length > 0 || !ts.isIdentifier(declaration.name) || !declaration.initializer || !value
+      || !(ts.isArrowFunction(value) || ts.isFunctionExpression(value))) return undefined
+    const start = declaration.initializer.getStart(sf)
+    return `${source.slice(0, start)}${helper}(${source.slice(start, declaration.initializer.end)})${source.slice(declaration.initializer.end)}`
+  }
+  if (ts.isFunctionDeclaration(statement) && statement.name && statement.body && !statement.asteriskToken) {
+    const start = statement.getStart(sf)
+    const header = /^(export\s+)?function\b/.exec(source.slice(start))
+    if (!header) return undefined
+    const keyword = start + (header[1]?.length ?? 0)
+    return `${source.slice(0, keyword)}const ${statement.name.text} = ${helper}(${source.slice(keyword, statement.end)});${source.slice(statement.end)}`
+  }
+  return undefined
+}
+
+/** The wrapper `gateOnMount` calls, as a declaration for the client module. */
+export function mountGateHelper(name: string): string {
+  return [
+    '// Renders nothing on the server or on the first client render, so a component that reads a browser global never disagrees with the server HTML.',
+    `function ${name}(Component) {`,
+    '  return function AfterMount(props) {',
+    '    const [mounted, setMounted] = useState(false)',
+    '    useEffect(() => { setMounted(true) }, [])',
+    '    return mounted ? <Component {...props} /> : null',
+    '  }',
+    '}',
+  ].join('\n')
 }
 
 export function planInlineExtraction(input: {
@@ -483,15 +529,31 @@ export function planInlineExtraction(input: {
     return undefined
   }
 
+  /**
+   * A component that reads `window`, `document` or another browser global and
+   * has no hooks: the server cannot run it, and what the browser would draw
+   * differs from what the server did. It moves to the client module like a hook
+   * component and renders only after mount. A handler component is left to the
+   * interactive-root pass, and a name the page declares or imports is no global.
+   */
+  const readsBrowserGlobal = (unit: Unit): boolean => unit.componentLike && !unit.hooks && !unit.handlers
+    && unit.refs.some(({ name, kind }) => BROWSER_IDENTIFIERS.has(name) && kind !== 'tag' && kind !== 'member'
+      && !owner.has(name) && !importByLocal.has(name) && !helperByName.has(name))
+    && gateOnMount(unit.source, 'gate') !== undefined
+
   const roots = units
-    .filter((unit) => unit.hooks && unit.names.some((name) => /^[A-Z]/.test(name)))
+    .filter((unit) => (unit.hooks || readsBrowserGlobal(unit)) && unit.names.some((name) => /^[A-Z]/.test(name)))
     .map((unit) => unit.index)
-  const blocked: Array<{ name: string; reason: string }> = []
+  const blocked: InlinePlan['blocked'] = []
   const active = new Set(roots)
 
   const block = (rootIndex: number, reason: string): void => {
     active.delete(rootIndex)
-    blocked.push({ name: units[rootIndex].names.find((name) => /^[A-Z]/.test(name)) ?? units[rootIndex].names[0], reason })
+    blocked.push({
+      name: units[rootIndex].names.find((name) => /^[A-Z]/.test(name)) ?? units[rootIndex].names[0],
+      reason,
+      browser: readsBrowserGlobal(units[rootIndex]),
+    })
   }
   for (const rootIndex of roots) {
     for (const member of closureOf(rootIndex)) {
@@ -590,6 +652,7 @@ export function planInlineExtraction(input: {
     }
 
     const movedNames = [...moved].flatMap((index) => units[index].names)
+    const gated = [...moved].filter((index) => readsBrowserGlobal(units[index])).sort((a, b) => a - b)
     const registryNames = movedNames.filter((name) => body.mdastTags.has(name))
     const importNames = movedNames.filter((name) => pageRefs.some((ref) => ref.name === name))
     const moduleMembers = [...inModule].sort((a, b) => a - b)
@@ -612,6 +675,7 @@ export function planInlineExtraction(input: {
       blocked,
       moved: [...moved].sort((a, b) => a - b),
       copied: [...kept].sort((a, b) => a - b),
+      gated,
       movedNames,
       moduleImports: usedImports,
       moduleHelpers: usedHelpers,
@@ -621,7 +685,7 @@ export function planInlineExtraction(input: {
       pageReferences,
     }
   }
-  return { blocked, moved: [], copied: [], movedNames: [], moduleImports: [], moduleHelpers: [], registryNames: [], pageImportNames: [], moduleNames: new Set(), pageReferences: new Set() }
+  return { blocked, moved: [], copied: [], gated: [], movedNames: [], moduleImports: [], moduleHelpers: [], registryNames: [], pageImportNames: [], moduleNames: new Set(), pageReferences: new Set() }
 }
 
 /** JSX tag names (capitalized, unbound) a module's source uses, for built-in lookup. */

@@ -17,7 +17,7 @@ import { unified } from 'unified'
 import { parseFrontmatter } from './frontmatter.js'
 import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
 import { resolveWithin } from './path.js'
-import { hoistedVarNames, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
+import { gateOnMount, hoistedVarNames, mountGateHelper, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
 interface MdxNode {
@@ -1715,7 +1715,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // Extract a page's own inline component that calls a React hook (Mintlify
     // treats hooks as pre-injected globals for such components, but Thally's
     // page module is a Server Component and cannot import a hook itself) into
-    // a client module, together with every page-local declaration it uses.
+    // a client module, together with every page-local declaration it uses. A
+    // component that reads a browser global moves the same way and renders
+    // only after mount, since it draws nothing the server could draw.
     // `planInlineExtraction` decides what moves, what the page keeps a copy
     // of, and whether the move is safe at all; an unsafe one is left in place
     // and reported. Whatever the page still renders is wired back as a
@@ -1730,13 +1732,23 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         unavailableImports: unsupportedImports,
         reactGlobals: REACT_GLOBALS,
       })
-      for (const { name, reason } of plan.blocked) {
+      for (const { name, reason, browser } of plan.blocked) {
         refusedInlineComponents.add(name)
-        warn(`Inline component "${name}" calls a React hook but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
+        warn(`Inline component "${name}" ${browser ? 'uses `window` or `document`, which only exist in the browser,' : 'calls a React hook'} but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
+      }
+      // A component that reads a browser global renders after mount only; the
+      // wrapper's name must not collide with anything the module spells.
+      const moduleIndexes = [...plan.moved, ...plan.copied].sort((a, b) => a - b)
+      const gated = new Set(plan.gated)
+      let gate = 'renderAfterMount'
+      if (gated.size > 0) {
+        const spelled = identifierNames(sourceFile([...plan.moduleImports, ...plan.moduleHelpers, ...moduleIndexes.map((index) => declarations[index].source)].join('\n'), 'inline.jsx'))
+        for (let suffix = 2; spelled.has(gate); suffix += 1) gate = `renderAfterMount${suffix}`
       }
       const moduleSource = plan.moved.length === 0 ? '' : [
         ...plan.moduleImports, ...plan.moduleHelpers,
-        ...[...plan.moved, ...plan.copied].sort((a, b) => a - b).map((index) => declarations[index].source),
+        ...moduleIndexes.map((index) => (gated.has(index) ? gateOnMount(declarations[index].source, gate) : undefined) ?? declarations[index].source),
+        ...(gated.size > 0 ? [mountGateHelper(gate)] : []),
       ].join('\n\n')
       if (plan.moved.length > 0
         && (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(moduleSource) > MAX_FILE_BYTES

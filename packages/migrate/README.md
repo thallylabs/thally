@@ -651,6 +651,12 @@ over a same-named built-in. If any dependency cannot run in a client module
 (server-only APIs such as `process` or `await`, an undeclared name, a package
 the migration removed, a dynamic `import()`), the component is left where it
 is and a warning names it and the blocker.
+A component that reads `window`, `document` or another browser global while it
+renders (`if (typeof window === "undefined") return null`, a `fetch` that fills
+the DOM by hand) is moved the same way, and its module renders it only after the
+client has mounted, so the server HTML and the first client render agree; the
+list or table it builds appears once the page has loaded. A component with JSX event
+handlers is left to the interactive-block extraction above.
 `<Snippet file="...">` accepts the documented `snippets/`-relative path as well
 as a `/snippets/...` or page-relative one. A multi-line snippet keeps the
 indentation of the tag it replaces on every line (aligned with the item text
