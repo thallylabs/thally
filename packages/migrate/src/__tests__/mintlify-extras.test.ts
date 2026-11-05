@@ -311,6 +311,28 @@ describe('config mapping', () => {
     expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
   })
 
+  it('carries errors.404.redirect into docs.json and says which other errors settings were not carried', () => {
+    const errors = (value: unknown) => site({ 'docs.json': JSON.stringify({ ...nav, errors: value }), ...intro })
+    const carried = errors({ '404': { redirect: true } })
+    expect(carried.docsConfig.errors).toEqual({ '404': { redirect: true } })
+    expect(carried.warnings.filter((warning) => /errors/.test(warning.message))).toEqual([])
+    const config = JSON.parse(renderMigrationFiles(carried).find((file) => file.path === 'docs.json')!.content.toString())
+    expect(config.errors).toEqual({ '404': { redirect: true } })
+
+    const partly = errors({ '404': { redirect: true, title: 'Gone', description: 'Nothing here' }, '500': { redirect: true } })
+    expect(partly.docsConfig.errors).toEqual({ '404': { redirect: true } })
+    expect(partly.warnings.filter((warning) => /errors/.test(warning.message)).map((warning) => warning.message)).toEqual([
+      'docs.json errors.404.title, errors.404.description, errors.500 were not carried over: Thally carries only errors.404.redirect (true or false).',
+    ])
+
+    const notBoolean = errors({ '404': { redirect: 'yes' } })
+    expect(notBoolean.docsConfig.errors).toBeUndefined()
+    expect(notBoolean.warnings.filter((warning) => /errors/.test(warning.message)).map((warning) => warning.message)).toEqual([
+      'docs.json errors.404.redirect was not carried over: Thally carries only errors.404.redirect (true or false).',
+    ])
+    expect(errors(undefined).docsConfig.errors).toBeUndefined()
+  })
+
   it('redirects / to the introduction page like Mintlify does', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'guide'] } }), 'introduction.mdx': page('Intro'), 'guide.mdx': page('Guide') })
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: true })

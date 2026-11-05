@@ -1332,6 +1332,32 @@ function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
 }
 
 /**
+ * Mintlify `errors`: only `404.redirect` (a boolean) is carried. Every other setting under `errors` is named in one warning.
+ */
+function projectedErrors(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['errors'] {
+  const errors = objectValue(value)
+  if (!errors) return undefined
+  const notCarried: Array<string> = []
+  let redirect: boolean | undefined
+  const named = (path: string): string => path.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 60)
+  for (const [status, entry] of Object.entries(errors)) {
+    const settings = status === '404' ? objectValue(entry) : null
+    if (!settings) {
+      notCarried.push(named(`errors.${status}`))
+      continue
+    }
+    for (const [key, setting] of Object.entries(settings)) {
+      if (key === 'redirect' && typeof setting === 'boolean') redirect = setting
+      else notCarried.push(named(`errors.404.${key}`))
+    }
+  }
+  if (notCarried.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: `docs.json ${notCarried.slice(0, 10).join(', ')}${notCarried.length > 10 ? ', ...' : ''} ${notCarried.length === 1 ? 'was' : 'were'} not carried over: Thally carries only errors.404.redirect (true or false).`, source: 'docs.json' })
+  }
+  return redirect === undefined ? undefined : { '404': { redirect } }
+}
+
+/**
  * Mintlify `colors`: `primary` is the brand colour in light mode, `light` the
  * one used in dark mode and `dark` the button fill. Three-digit hex is
  * expanded because the renderer only accepts six digits.
@@ -1540,6 +1566,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   }
   const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
   const projectedColorsValue = projectedColors(config.colors, warnings)
+  const errors = projectedErrors(config.errors, warnings)
   const iconLibrary = objectValue(config.icons)?.library
   // Mintlify's default icon library is Font Awesome when docs.json names none.
   const projectedIconLibrary = iconLibrary === undefined
@@ -1584,6 +1611,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     // `styling.eyebrows: "breadcrumbs"` shows the whole group path; "section" (the default) shows the nearest group.
     ...(objectValue(config.styling)?.eyebrows === 'breadcrumbs' ? { eyebrow: 'path' as const } : {}),
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(errors ? { errors } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
     ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),
     ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),

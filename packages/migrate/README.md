@@ -890,6 +890,9 @@ Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 (`showToggle: false`), and legacy `modeToggle.default` / `isHidden` map to
 `appearance`; invalid values are skipped with a warning. Mintlify sources set
 `markdown.enabled: true`, matching Mintlify's default Markdown mirrors.
+`errors.404.redirect` (a boolean) is written to `docs.json` as
+`"errors": { "404": { "redirect": true } }`; one warning names every other
+setting under `errors`, which is not carried.
 
 ## Branding
 
