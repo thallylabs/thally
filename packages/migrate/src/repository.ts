@@ -2054,7 +2054,7 @@ interface OpenApiOperationForLinking {
 /** `x-hidden: true` and `x-excluded: true` (or the string `"true"`), as the renderer reads them. */
 const flagged = (value: unknown): boolean => value === true || value === 'true'
 
-/** Whether the renderer withholds a path item or an operation, so that it has no endpoint page to link or redirect to. */
+/** Whether the renderer withholds a path item or an operation from generated pages, so that it has no endpoint page to link or redirect to. A page that names an `x-hidden` operation still renders it. */
 export const isWithheld = (node: Record<string, unknown>): boolean => flagged(node['x-hidden']) || flagged(node['x-excluded'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -2093,9 +2093,9 @@ function viewSpecPathItem(document: unknown, entry: Record<string, unknown>): { 
 
 /**
  * Read just enough of an OpenAPI document to match Mintlify's auto-generated
- * operation pages. An operation the renderer withholds (`x-hidden`,
- * `x-excluded`, on it or on its path item, whether the path item is inline or a
- * local `$ref`) has no endpoint page to link or redirect to. Malformed input
+ * operation pages. An operation the renderer withholds from generated pages
+ * (`x-hidden`, `x-excluded`, on it or on its path item, whether the path item is
+ * inline or a local `$ref`) has no endpoint page to link or redirect to. Malformed input
  * yields no operations rather than throwing.
  */
 export function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {

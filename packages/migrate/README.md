@@ -236,10 +236,12 @@ is bound once per spec file in a hidden tab (`OpenAPI: <spec>`, the same as for 
 spec only a page names), which is what the pages' `openapi:` frontmatter resolves
 against; the renderer serves no `/api/` page, sitemap entry or search record for it. A remote spec's pages
 and tab are made by `hydrateRemoteApiSpecs` once it is downloaded; a download
-that fails leaves no tab and no page, as before. An operation the spec withholds
-(`x-hidden`, `x-excluded`) gets no page, nor does one listed only under a
+that fails leaves no tab and no page, as before. An operation the spec marks
+`x-hidden` or `x-excluded` gets no generated page, nor does one listed only under a
 `hidden` group or an access-restricted container (such groups are left out of
-the tab, as above). Of two operations with the same tag and
+the tab, as above). A page the source wrote that names an `x-hidden` operation
+(`openapi: post /quote`) still renders it, without Try it, as on Mintlify; a page
+that names an `x-excluded` operation is not served. Of two operations with the same tag and
 summary the first listed keeps the URL and one warning names the others; an
 authored page at that URL keeps it. Nothing is redirected from these URLs and a
 link to one stays as written; a link to a tag folder or to an address under the
