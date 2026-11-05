@@ -838,7 +838,9 @@ page. Those files are copied to `public/` (tooling config such as
 output, dot-directories, and `node_modules` are not) under the normal asset
 size limits. Scripts are added to `docs.json` `customScripts` (URL-encoded),
 except modules that pages import as components, which are copied as components
-instead. Thally loads a local stylesheet that `docs.json` lists under
+instead. A script that loads or names a known tracker (PostHog, Intercom,
+Segment, Hotjar, Google Tag Manager or Analytics, Mixpanel, Amplitude) is still
+carried, with one warning for that file naming the trackers. Thally loads a local stylesheet that `docs.json` lists under
 `stylesheets`, but the migrator does not list the `.css` files it copies, since
 their rules likely target Mintlify's DOM: each is preserved with a warning that it
 is not applied. Fonts named by

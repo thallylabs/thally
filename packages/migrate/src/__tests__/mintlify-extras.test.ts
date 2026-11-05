@@ -919,6 +919,40 @@ describe('script hardening', () => {
   })
 })
 
+describe('tracking scripts carried over from the content directory', () => {
+  const trackers = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => /tracks visitors/.test(warning.message))
+  const withScripts = (scripts: Record<string, string>) => site({ 'docs.json': JSON.stringify({ navigation: { pages: ['intro'] } }), 'intro.mdx': page('Intro'), ...scripts })
+
+  it('warns once per script that loads or names a known tracker, naming the trackers, and still carries the script', () => {
+    const bundle = withScripts({
+      'posthog.js': '!function(t,e){e.posthog=e}(document,window);posthog.init("phc_x",{api_host:"https://us.i.posthog.com"})',
+      'content/intercom-opener.js': 'window.Intercom("show")',
+      'analytics.js': 'var s=document.createElement("script");s.src="https://www.googletagmanager.com/gtag/js?id=G-X";window.mixpanel=1',
+      'plain.js': 'document.querySelector(".segment").remove()',
+    })
+    expect(bundle.docsConfig.customScripts?.map((script) => script.src).sort()).toEqual(['/analytics.js', '/content/intercom-opener.js', '/plain.js', '/posthog.js'])
+    expect(trackers(bundle).map((warning) => warning.message).sort()).toEqual([
+      'Script analytics.js loads or names Google Tag Manager/Analytics, Mixpanel, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+      'Script content/intercom-opener.js loads or names Intercom, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+      'Script posthog.js loads or names PostHog, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+    ])
+    expect(trackers(bundle).every((warning) => warning.code === 'unsupported-config')).toBe(true)
+  })
+
+  it.each([
+    ['Segment', 'analytics.load("x");var u="https://cdn.segment.com/analytics.js/v1/x/analytics.min.js"'],
+    ['Hotjar', 'h._hjSettings={hjid:1};a.src="https://static.hotjar.com/c/hotjar-1.js"'],
+    ['Amplitude', 'amplitude.getInstance().init("k")'],
+    ['Google Tag Manager/Analytics', 'window.dataLayer=[];function gtag(){}gtag("js",new Date())'],
+  ])('knows %s', (name, source) => {
+    expect(trackers(withScripts({ 'site.js': source })).map((warning) => warning.message)).toEqual([expect.stringContaining(`loads or names ${name},`)])
+  })
+
+  it('says nothing about a script that names no tracker', () => {
+    expect(trackers(withScripts({ 'site.js': 'console.log(1)' }))).toEqual([])
+  })
+})
+
 describe('assets used only by withheld pages', () => {
   const png = Buffer.from('PNGDATA')
   const withheldSite = () => site({

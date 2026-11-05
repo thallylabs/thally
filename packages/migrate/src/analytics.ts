@@ -24,6 +24,22 @@ const SUPPORTED = ['ga4', 'gtm', 'posthog', 'plausible'] as const
 /** Legacy mint.json spelling of GA4; same `measurementId` field. */
 const LEGACY_GA4_ALIAS = 'googleAnalytics'
 
+/** Scripts that track visitors: the name a warning uses, and what a script that loads or names one contains. */
+const KNOWN_TRACKERS: ReadonlyArray<readonly [name: string, pattern: RegExp]> = [
+  ['PostHog', /posthog/i],
+  ['Intercom', /intercom/i],
+  ['Segment', /segment\.(?:com|io)/i],
+  ['Hotjar', /hotjar|_hjSettings/i],
+  ['Google Tag Manager/Analytics', /googletagmanager|google-analytics\.com|\bgtag\s*\(|\bdataLayer\b/i],
+  ['Mixpanel', /mixpanel/i],
+  ['Amplitude', /amplitude/i],
+]
+
+/** The known trackers that a script's source loads or names. */
+export function trackersIn(source: string): Array<string> {
+  return KNOWN_TRACKERS.filter(([, pattern]) => pattern.test(source)).map(([name]) => name)
+}
+
 function own(record: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined
 }

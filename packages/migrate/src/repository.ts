@@ -94,7 +94,7 @@ import {
   type MintlifyApiSpecReference,
   type MintlifyNavigationResult,
 } from './navigation.js'
-import { projectMintlifyIntegrations } from './analytics.js'
+import { projectMintlifyIntegrations, trackersIn } from './analytics.js'
 import {
   normalizeAssetPath,
   mintlifyLocalizedReference,
@@ -5817,6 +5817,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         code: 'unsupported-config',
         message: `${scripts.length} script(s) from the content directory (${scripts.map((entry) => entry.path).join(', ')}) now load on every page via docs.json customScripts, as they did on Mintlify. They may target Mintlify's page structure; review them.`,
       })
+      for (const entry of scripts) {
+        const content = assets.find((asset) => asset.path === entry.path)?.content
+        const trackers = content === undefined ? [] : trackersIn(Buffer.from(content).toString('utf8'))
+        if (trackers.length > 0) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Script ${stripControlCharacters(entry.path)} loads or names ${trackers.join(', ')}, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.`,
+            source: entry.path,
+          })
+        }
+      }
     }
     for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
       warnings.push({
