@@ -75,3 +75,25 @@ describe('unclosed fences in inlined snippets', () => {
     expect(body).toContain(`<CodeGroup>\n${snippet}\n</CodeGroup>`)
   })
 })
+
+describe('a line that starts with three backticks but is inline code', () => {
+  // CommonMark: a backtick fence's info string cannot hold a backtick, so these lines open nothing.
+  const inline = '<CodeGroup>\n  ```bash npm npm install x ``` ```bash Yarn yarn add\n  y ``` ```bash Bun bun add z ```\n</CodeGroup>'
+
+  it('does not hide a snippet tag that follows it', () => {
+    const body = migrate(
+      `import Banner from '/snippets/banner.mdx'\n\n${inline}\n\n<Banner />\n`,
+      { 'snippets/banner.mdx': '<Note>Banner text</Note>\n' },
+    )
+    expect(body).toContain('<Note>Banner text</Note>')
+    expect(body).not.toContain('<Banner')
+  })
+
+  it('still treats a backtick fence without one in its info string as a fence', () => {
+    const body = migrate(
+      "import Banner from '/snippets/banner.mdx'\n\n```bash npm\n<Banner />\n```\n",
+      { 'snippets/banner.mdx': '<Note>Banner text</Note>\n' },
+    )
+    expect(body).toContain('```bash npm\n<Banner />\n```')
+  })
+})

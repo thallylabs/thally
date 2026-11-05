@@ -1605,7 +1605,10 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
       }
       continue
     }
-    if (fenceMatch) {
+    // A backtick fence's info string cannot hold a backtick (CommonMark):
+    // "```bash npm install x ```" is inline code, and opening a fence on it
+    // would hide the rest of the page from every rename.
+    if (fenceMatch && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
       codeFence = fenceMatch[1]
       fenceBuffer = [line]
       continue
