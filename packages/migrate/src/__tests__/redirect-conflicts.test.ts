@@ -338,9 +338,11 @@ describe('Mintlify root index page', () => {
     expect(rootRedirect(bundle)).toEqual([])
   })
 
-  it('stays out of the sidebar when docs.json does not list it, as on Mintlify', () => {
+  it('is written as the introduction page, which the runtime serves at /, and is not hidden when docs.json does not list it', () => {
     const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
-    expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('introduction')
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
+    expect(renderMigrationFiles(bundle).map((file) => file.path)).toContain('src/content/introduction.mdx')
+    expect(rootRedirect(bundle)).toEqual([])
   })
 
   it('is not a reason to skip the root redirect for an introduction page that is not an index page', () => {
