@@ -920,8 +920,9 @@ Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 `markdown.enabled: true`, matching Mintlify's default Markdown mirrors.
 `errors.404.redirect` (a boolean) is written to `docs.json` as
 `"errors": { "404": { "redirect": true } }`; one warning names every other
-setting under `errors`, which is not carried. A `theme` other than `mint` and
-`maple` is mapped to the closest Thally theme, and a warning says so.
+setting under `errors`, which is not carried. `theme: "maple"` keeps its name and
+`"mint"` becomes Thally's `default` theme; any other `theme` is mapped to the
+closest Thally theme, and a warning says so.
 
 ## Branding
 

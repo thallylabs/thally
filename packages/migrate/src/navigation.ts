@@ -1323,6 +1323,11 @@ function convertContainerToTabs(
     : []
 }
 
+/** A name from the source config, without control characters and cut to a length a warning can hold. */
+function named(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 60)
+}
+
 function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
   // Aspen rounds its sidebar highlight (12px) and search box like Maple, not like Sharp's 3px corners.
   if (value === 'maple' || value === 'aspen') return 'maple'
@@ -1332,13 +1337,13 @@ function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
 }
 
 /**
- * Mintlify's theme by name. `mint` and `maple` are Thally themes of the same name; every other theme is the closest one, and the
- * warning says so.
+ * Mintlify's theme by name. `maple` is a Thally theme of the same name and `mint` is Thally's `default`; every other theme is the
+ * closest one, and the warning says so.
  */
 function projectedThemeWithWarning(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['theme'] {
   const theme = projectedTheme(value)
   if (theme && value !== theme && value !== 'mint') {
-    warnings.push({ code: 'unsupported-config', message: `theme ${JSON.stringify(value)} has no exact Thally equivalent, so ${JSON.stringify(theme)} was used, which is the closest. Compare the look of the migrated site with the live one.`, source: 'docs.json' })
+    warnings.push({ code: 'unsupported-config', message: `theme ${JSON.stringify(named(String(value)))} has no exact Thally equivalent, so ${JSON.stringify(theme)} was used, which is the closest. Compare the look of the migrated site with the live one.`, source: 'docs.json' })
   }
   return theme
 }
@@ -1351,7 +1356,6 @@ function projectedErrors(value: unknown, warnings: Array<MigrationWarning>): Mig
   if (!errors) return undefined
   const notCarried: Array<string> = []
   let redirect: boolean | undefined
-  const named = (path: string): string => path.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 60)
   for (const [status, entry] of Object.entries(errors)) {
     const settings = status === '404' ? objectValue(entry) : null
     if (!settings) {

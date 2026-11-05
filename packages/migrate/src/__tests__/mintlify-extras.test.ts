@@ -321,6 +321,11 @@ describe('config mapping', () => {
     expect(themeWarnings('mint')).toEqual([])
   })
 
+  it('cuts a long theme name in the warning', () => {
+    const [warning] = site({ 'docs.json': JSON.stringify({ ...nav, theme: 'x'.repeat(500) }), ...intro }).warnings.filter((entry) => /theme/.test(entry.message))
+    expect(warning.message).toContain(`theme "${'x'.repeat(60)}" has no exact`)
+  })
+
   it('carries errors.404.redirect into docs.json and says which other errors settings were not carried', () => {
     const errors = (value: unknown) => site({ 'docs.json': JSON.stringify({ ...nav, errors: value }), ...intro })
     const carried = errors({ '404': { redirect: true } })
