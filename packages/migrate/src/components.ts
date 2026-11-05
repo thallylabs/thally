@@ -1456,12 +1456,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
+            // `React`, a hook and any other name count as used where an
+            // expression reads them or a JSX tag is one (`<Fragment>`).
             const isUnusedReactHookImport = specifier === 'react' && bindings.length > 0
-              && bindings.every((binding) => REACT_GLOBALS.has(binding.imported))
-              && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)))
+              && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)), { includeDirectTags: true })
             if (!isUnusedReactHookImport) moduleImports.push(statement.getText(ast))
             // A shared React import is normally retained in server MDX. An
-            // unused hook import belongs only to a fenced example and would
+            // unused one (`import React, { useState } from 'react'` above a
+            // fenced example) would make the server page import a hook and
             // cause Next's server-component build to reject the whole page.
             if (isUnusedReactHookImport) edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
             else sharedImportEdits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })

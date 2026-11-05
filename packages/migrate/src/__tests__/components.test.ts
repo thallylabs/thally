@@ -1354,6 +1354,30 @@ describe('repository component migration', () => {
     expect(body).toContain('const [count] = useState(0)')
   })
 
+  it.each([
+    "import React, { useState, useEffect } from 'react'",
+    "import React from 'react'",
+    "import { Fragment, useState } from 'react'",
+  ])('removes an unused react import that has a default or a non-hook name: %s', (statement) => {
+    const root = fixture({})
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const body = migrator.transform(`${statement}\n\nHello\n`, join(root, 'index.mdx'))
+    expect(body).not.toContain('react')
+    expect(body).toContain('Hello')
+  })
+
+  it.each([
+    ["import React, { useState } from 'react'\n\n{React.version}", '{React.version}'],
+    ["import { Fragment, useState } from 'react'\n\n<Fragment>x</Fragment>", '<Fragment>x</Fragment>'],
+    ["import React from 'react'\n\nexport const V = () => React.version\n\n{V()}", 'React.version'],
+  ])('keeps a react import the page uses: %s', (source, used) => {
+    const root = fixture({})
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).toContain("from 'react'")
+    expect(body).toContain(used)
+  })
+
   it('keeps imports inside an indented JSX code fence as part of the example', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
