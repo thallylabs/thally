@@ -5,6 +5,19 @@ import { isRemoteContentSource } from '@/lib/content-source'
 import { getCloudSiteConfig } from './client'
 
 /**
+ * Whether this deployment is linked to Thally Cloud. An unlinked self-host has no Cloud settings to read and must stay
+ * statically renderable: resolving its origin (`getRequestOrigin`) can touch request headers.
+ */
+export function hasCloudConnection(): boolean {
+  return Boolean(
+    process.env.THALLY_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.DOX_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+    process.env.DOX_CLOUD_SITE_CONFIG?.trim(),
+  )
+}
+
+/**
  * Resolve the canonical request origin without trusting a browser-supplied URL
  * body.
  *
