@@ -63,6 +63,8 @@ const config: Config = {
       './src/app/**/*.{ts,tsx,mdx}',
       './src/components/**/*.{ts,tsx,mdx}',
       './src/content/**/*.{mdx,md}',
+      // Client modules the migrator extracts from a site's MDX (`src/mdx/migrated/`, in the extension the source had) and `src/mdx/custom-components.tsx`.
+      './src/mdx/**/*.{js,mjs,jsx,ts,tsx}',
       './src/data/**/*.{ts,tsx}',
       './src/config/**/*.{ts,tsx}',
       './mdx-components.tsx',
