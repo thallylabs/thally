@@ -3,7 +3,8 @@
 import { ContentStack } from '@/components/layout/sections'
 import { Feedback } from '@/components/docs/feedback'
 import { getFeedbackConfig } from '@/data/docs'
-import { getRequestCloudSiteConfig, getRequestOrigin, hasCloudConnection } from '@/lib/cloud-link/request'
+import { isCloudAccessConfiguredEdge } from '@/lib/cloud-link/edge'
+import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
 import { resolveSiteConfig } from '@/lib/site-config'
 
 interface ApiLayoutProps {
@@ -13,7 +14,7 @@ interface ApiLayoutProps {
 export async function ApiLayout({ children }: ApiLayoutProps) {
   // Without a Cloud link there are no live settings to read, and the origin would be read from request headers, which no
   // prerendered page may do (the page would be left out of the build and answer 500).
-  const linked = hasCloudConnection()
+  const linked = isCloudAccessConfiguredEdge()
   const origin = linked ? await getRequestOrigin() : undefined
   const [cloud, effectiveSite] = await Promise.all([
     linked ? getRequestCloudSiteConfig() : null,
