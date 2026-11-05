@@ -218,7 +218,12 @@ describe('applyCodeNotation edge cases', () => {
     expect(applyCodeNotation(line)).toBeNull()
     const trailing = 'x // [!code ++]' + ' '.repeat(200_000) + 'y'
     expect(applyCodeNotation(trailing)!.code).toBe('x // y')
+    expect(performance.now() - start).toBeLessThan(50)
+  })
+
+  it('is linear on many stacked markers (ReDoS guard)', () => {
     const stacked = 'x // ' + '[!code ++] '.repeat(20_000)
+    const start = performance.now()
     expect(applyCodeNotation(stacked)!.code).toBe('x')
     expect(performance.now() - start).toBeLessThan(50)
   })
