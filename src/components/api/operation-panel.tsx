@@ -14,7 +14,7 @@ import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
-import { flattenSchema, unionVariants, type SchemaVariant } from '@/lib/openapi/schema-variants'
+import { allowsNull, flattenSchema, unionVariants, type SchemaVariant } from '@/lib/openapi/schema-variants'
 import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
 import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
 import { authDescription } from '@/lib/openapi/auth'
@@ -226,7 +226,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    if (variants) return <SchemaVariants variants={variants} depth={0} />
+    if (variants) return <SchemaVariants variants={variants} depth={0} nullable={allowsNull(flat)} />
     return (
       <ParamField name="(body)" type={resolveSchemaType(flat)}>
         {typeof flat.description === 'string' ? <Markdown>{flat.description}</Markdown> : null}
@@ -353,7 +353,7 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    return variants ? <SchemaVariants variants={variants} depth={depth} /> : null
+    return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(flat)} /> : null
   }
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
@@ -407,10 +407,10 @@ function unionType(variants: Array<SchemaVariant>): string {
 function NestedFields({ schema, depth }: { schema: Record<string, unknown>; depth: number }) {
   const nested = getNestedSchema(schema)
   const variants = unionVariants(nested)
-  return variants ? <SchemaVariants variants={variants} depth={depth} /> : <SchemaAsResponseFields schema={nested} depth={depth} />
+  return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(nested)} /> : <SchemaAsResponseFields schema={nested} depth={depth} />
 }
 
-function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; depth: number }) {
+function SchemaVariants({ variants, depth, nullable = false }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean }) {
   const t = useApiLabels()
   const [active, setActive] = useState(0)
   const current = variants[active] ?? variants[0]
@@ -443,7 +443,7 @@ function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; d
         <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} />
       ) : (
         <p className="text-xs text-foreground/60">
-          {t('type')}: <code>{resolveSchemaType(current.schema) ?? 'any'}</code>
+          {t('type')}: <code>{nullable && variants.length === 1 ? 'null | ' : ''}{resolveSchemaType(current.schema) ?? 'any'}</code>
         </p>
       )}
     </div>
@@ -460,7 +460,7 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
     const parts = schema.$ref.split('/')
     return parts[parts.length - 1]
   }
-  const variants = schema.type === undefined ? unionVariants(schema) : null
+  const variants = schema.type === undefined ? unionVariants(schema, true) : null
   if (variants) return unionType(variants)
   if (Array.isArray(schema.type)) {
     return (schema.type as string[]).join(' | ')
@@ -469,7 +469,7 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
     if (schema.type === 'array' && schema.items && typeof schema.items === 'object') {
       const items = flattenSchema(schema.items as Record<string, unknown>)
       const itemType = resolveSchemaType(items)
-      const several = (unionVariants(items)?.length ?? 0) > 1
+      const several = (unionVariants(items, true)?.length ?? 0) > 1
       return itemType ? `${several ? `(${itemType})` : itemType}[]` : 'array'
     }
     if (Array.isArray(schema.enum)) return `enum<${schema.type}>`
@@ -497,7 +497,7 @@ function enumOptions(schema?: Record<string, unknown>): Array<string> | null {
   if (Array.isArray(flat.enum)) return flat.enum.map(String)
   if (flat.type === 'array' && flat.items && typeof flat.items === 'object') return enumOptions(flat.items as Record<string, unknown>)
   const values = new Set<unknown>()
-  for (const { schema: member } of unionVariants(flat) ?? []) {
+  for (const { schema: member } of unionVariants(flat, true) ?? []) {
     if (Array.isArray(member.enum)) member.enum.forEach((value) => values.add(value))
     else if (member.type === 'null') values.add(null)
     else return null

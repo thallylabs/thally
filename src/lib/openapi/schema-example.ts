@@ -32,10 +32,11 @@ export function buildSchemaExample(schema: RawObject | undefined, resolveRef: (r
       return buildSchemaExample(resolved, resolveRef, seen, placeholders)
     }
   }
-  // A union is sampled by its first variant, as the live docs do.
+  // A union is sampled by its first variant that is not null, as the live docs do.
   const variants = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : undefined
-  if (variants?.length && variants[0] && typeof variants[0] === 'object') {
-    return buildSchemaExample(variants[0] as RawObject, resolveRef, new Set(seen), placeholders)
+  const first = variants?.find((variant) => variant && typeof variant === 'object' && variant.type !== 'null')
+  if (first) {
+    return buildSchemaExample(first as RawObject, resolveRef, new Set(seen), placeholders)
   }
   if (Array.isArray(schema.allOf)) {
     return schema.allOf.reduce<unknown>((acc, fragment) => {
@@ -50,7 +51,8 @@ export function buildSchemaExample(schema: RawObject | undefined, resolveRef: (r
     }, {})
   }
 
-  const type = typeof schema.type === 'string' ? schema.type : undefined
+  // OpenAPI 3.1 lists a nullable type as `[type, "null"]`.
+  const type = typeof schema.type === 'string' ? schema.type : Array.isArray(schema.type) ? schema.type.find((entry) => entry !== 'null') : undefined
   if (type === 'object' || schema.properties) {
     const properties = schema.properties && typeof schema.properties === 'object' ? (schema.properties as Record<string, RawObject>) : {}
     const result: Record<string, unknown> = {}

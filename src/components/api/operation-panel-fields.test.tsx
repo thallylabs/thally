@@ -101,6 +101,37 @@ describe('body field rows', () => {
   })
 })
 
+describe('a union with null', () => {
+  const nullOr = (schema: Record<string, unknown>) => ({ anyOf: [{ type: 'null' }, schema] })
+  const response = (schema: Record<string, unknown>) =>
+    render({ responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { item: schema } } } } } } })
+
+  it('lists the fields of the other member and no option tabs', () => {
+    const html = response(nullOr({ type: 'object', properties: { name: { type: 'string' } } }))
+    expect(html).toContain('>name<')
+    expect(html).not.toContain('Option 1')
+    expect(html).not.toContain('aria-label="Variants"')
+  })
+
+  it('shows the field type as nullable', () => {
+    expect(response(nullOr({ type: 'object', properties: { name: { type: 'string' } } }))).toContain('null | object')
+    expect(response({ anyOf: [{ type: 'string' }, { type: 'null' }] })).toContain('string | null')
+  })
+
+  it('keeps one tab per member that is not null', () => {
+    const html = response({ oneOf: [{ type: 'null' }, { type: 'object', title: 'A', properties: { a: { type: 'string' } } }, { type: 'object', title: 'B', properties: { b: { type: 'string' } } }] })
+    expect(html).toContain('>A<')
+    expect(html).toContain('>B<')
+    expect(html).not.toContain('Option 1')
+  })
+
+  it('shows a body that is a nullable primitive as one type line', () => {
+    const html = render({ requestBody: { content: { 'application/json': { schema: nullOr({ type: 'string' }) } } } })
+    expect(html).toContain('null | string')
+    expect(html).not.toContain('Option 1')
+  })
+})
+
 describe('map fields (additionalProperties)', () => {
   const response = (schema: Record<string, unknown>) =>
     render({ responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { locations: schema } } } } } } })
