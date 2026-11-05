@@ -676,8 +676,8 @@ function estreeChildren(node: EstreeNode): Array<EstreeNode> {
     .filter((entry): entry is EstreeNode => Boolean(entry) && typeof entry === 'object' && typeof entry.type === 'string')
 }
 
-/** What a fully static expression comes to: a primitive, or the JSX element or fragment it selects. */
-type StaticValue = string | number | boolean | null | { jsx: EstreeNode }
+/** What a fully static expression comes to: a primitive (`undefined` for a prop the call left out), or the JSX element or fragment it selects. */
+type StaticValue = string | number | boolean | null | undefined | { jsx: EstreeNode }
 
 interface SourceEdit { start: number; end: number; value: string }
 
@@ -692,8 +692,8 @@ function applyEdits(text: string, edits: ReadonlyArray<SourceEdit>, offset = 0):
  * carried as the value an operator selects and never looked into. Both sides of an operator must be static even when one would
  * decide the result alone: a part that cannot be read is not guessed at.
  */
-function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string>): { value: StaticValue } | undefined {
-  const primitive = (child: EstreeNode | undefined): { value: string | number | boolean | null } | undefined => {
+function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string | undefined>): { value: StaticValue } | undefined {
+  const primitive = (child: EstreeNode | undefined): { value: string | number | boolean | null | undefined } | undefined => {
     const folded = child && foldStatic(child, literals)
     return folded && (typeof folded.value !== 'object' || folded.value === null) ? { value: folded.value } : undefined
   }
@@ -706,8 +706,8 @@ function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string>): { 
     }
     case 'Identifier':
     case 'MemberExpression': {
-      const bound = literals.get(`${node.start}:${node.end}`)
-      return bound === undefined ? undefined : { value: bound }
+      const span = `${node.start}:${node.end}`
+      return literals.has(span) ? { value: literals.get(span) } : undefined
     }
     case 'JSXElement':
     case 'JSXFragment':
@@ -764,9 +764,12 @@ const PLAIN_TEXT = /^\p{L}(?:[\p{L}\p{N} ,.;'?%$=+-]*[\p{L}\p{N}.])?$/u
  * `{children}` always becomes the children as written, inside an expression as well. Text no
  * expression covers (inline code, a link destination) has its `{name}` replaced as it always was,
  * except inside a fenced code block.
+ *
+ * `unset` names the props the snippet declares and the call leaves out. They are `undefined` where
+ * they are free, as in the component, so `{imgDark || img}` is decided and `{model && ...}` leaves nothing.
  */
-export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
-  if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
+export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>, unset: ReadonlySet<string> = new Set()): string {
+  if ((properties.size === 0 && unset.size === 0) || (!body.includes('props') && ![...properties.keys(), ...unset].some((name) => body.includes(name)))) return body
   const isJsx = /<[A-Za-z][A-Za-z0-9]*/.test(body)
   let tree: unknown
   try { tree = descriptionParser.parse(body) } catch { tree = undefined }
@@ -783,7 +786,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   }
   collectModuleNames(tree)
   /** Bind the props `program` reads without declaring them. A page's ESM binds only `props.name`: its own names are its own. */
-  const bindFreeReferences = (program: acorn.Program, variables: boolean, literals: Map<string, string>): void => {
+  const bindFreeReferences = (program: acorn.Program, variables: boolean, literals: Map<string, string | undefined>): void => {
     const parents = new Map<unknown, EstreeNode>()
     const link = (node: EstreeNode): void => {
       for (const child of estreeChildren(node)) { parents.set(child, node); link(child) }
@@ -806,6 +809,15 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         }
       }
       const bound = properties.get(name)
+      if (variables && bound === undefined && unset.has(name)) {
+        // `{ prop }` keeps its key; every other reference is replaced where it stands.
+        if (parent?.type === 'Property' && parent.shorthand) edits.push({ start: parent.start, end: parent.end, value: `${name}: undefined` })
+        else {
+          edits.push({ start, end, value: 'undefined' })
+          literals.set(`${start}:${end}`, undefined)
+        }
+        continue
+      }
       if (!variables || bound === undefined) continue
       if (name !== 'children') {
         // `{ mode }` keeps its key; every other reference is replaced where it stands.
@@ -848,7 +860,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
    * `jsx` as MDX content, bound. An expression in it that the binding made static (a child or an attribute, as in the page itself)
    * is decided in turn, and one that still has something to run, or that the page wrote static itself, stays as bound.
    */
-  const keepJsx = (jsx: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>): string => {
+  const keepJsx = (jsx: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>): string => {
     const folds: Array<SourceEdit> = []
     const within = (edit: SourceEdit, [from, to]: [number, number]): boolean => edit.start >= from && edit.end <= to
     const walk = (node: EstreeNode, inAttribute: boolean): void => {
@@ -871,17 +883,17 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
    * anything in it is still left to run. A text expression becomes the JSX it selects as MDX content, plain text, or nothing; an
    * attribute's expression becomes a literal and is left alone when it selects JSX. A `flow` expression stays a block.
    */
-  const foldExpression = (expression: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+  const foldExpression = (expression: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
     const folded = foldStatic(expression, literals)
     if (!folded) return undefined
     const { value } = folded
     const place = (text: string): SourceEdit => flow ? asBlock(text, start, end) : { start, end, value: text }
     if (typeof value === 'object' && value !== null) return inAttribute ? undefined : place(keepJsx(value.jsx, bound, literals))
-    if (inAttribute) return { start, end, value: `{${JSON.stringify(value)}}` }
-    if (typeof value === 'boolean' || value === null || value === '') return place('')
+    if (inAttribute) return { start, end, value: `{${value === undefined ? 'undefined' : JSON.stringify(value)}}` }
+    if (typeof value === 'boolean' || value === null || value === undefined || value === '') return place('')
     return place(typeof value === 'string' && PLAIN_TEXT.test(value) ? value : `{${JSON.stringify(value)}}`)
   }
-  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, span: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>, span: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
     const [statement] = program.body
     return program.body.length === 1 && statement.type === 'ExpressionStatement'
       ? foldExpression(statement.expression as unknown as EstreeNode, bound, literals, span, inAttribute, flow) : undefined
@@ -900,13 +912,14 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         ? statement.expression : undefined
       if (lone) {
         const bound = moduleNames.has(lone.name) ? undefined : properties.get(lone.name)
-        if (bound === undefined) {
+        const missing = bound === undefined && !moduleNames.has(lone.name) && unset.has(lone.name)
+        if (bound === undefined && !missing) {
           // Not a prop of this call, or the snippet's own name: it stays an expression.
-        } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
-        else if (start !== undefined && end !== undefined) edits.push(node.type === 'mdxFlowExpression' ? asBlock(bound, start, end) : { start, end, value: bound })
+        } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: missing ? 'undefined' : JSON.stringify(bound) })
+        else if (start !== undefined && end !== undefined) edits.push(node.type === 'mdxFlowExpression' ? asBlock(bound ?? '', start, end) : { start, end, value: bound ?? '' })
       } else {
         const first = edits.length
-        const literals = new Map<string, string>()
+        const literals = new Map<string, string | undefined>()
         bindFreeReferences(program, node.type !== 'mdxjsEsm', literals)
         // An expression the binding has made static is its value; one that still has something to run stays as bound.
         const folded = node.type !== 'mdxjsEsm' && edits.length > first && start !== undefined && end !== undefined

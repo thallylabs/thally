@@ -3202,10 +3202,32 @@ function staticSnippetProperties(attributes: string): Map<string, string> {
   return properties
 }
 
-function interpolateSnippet(snippet: string, attributes: string, children?: string): string {
+/** The attribute names a snippet call writes, or undefined when it spreads props or cannot be read: then what it passes is not known. */
+function passedAttributeNames(attributes: string): Set<string> | undefined {
+  const tree = ts.createSourceFile('snippet.tsx', `const snippet = <Snippet ${attributes.replace(/\/\s*$/, '')} />`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const statement = tree.statements[0]
+  const element = statement && ts.isVariableStatement(statement) ? statement.declarationList.declarations[0]?.initializer : undefined
+  if (!element || !ts.isJsxSelfClosingElement(element)) return undefined
+  const names = new Set<string>()
+  for (const attribute of element.attributes.properties) {
+    if (!ts.isJsxAttribute(attribute)) return undefined
+    names.add(attribute.name.getText(tree))
+  }
+  return names
+}
+
+function interpolateSnippet(snippet: string, attributes: string, children?: string, parameters: ReadonlyArray<SnippetParameter> = []): string {
   const properties = staticSnippetProperties(attributes)
   if (children !== undefined) properties.set('children', children.trim())
-  return bindSnippetProps(snippet, properties)
+  // A prop the component destructures and the call leaves out is its default, or undefined without one.
+  const unset = new Set<string>()
+  const passed = parameters.length > 0 ? passedAttributeNames(attributes) : undefined
+  for (const { name, fallback } of passed ? parameters : []) {
+    if (name === 'children' || passed!.has(name)) continue
+    if (fallback === undefined) unset.add(name)
+    else properties.set(name, fallback)
+  }
+  return bindSnippetProps(snippet, properties, unset)
 }
 
 /**
@@ -3229,6 +3251,29 @@ function alignToTag(snippet: string, source: string, start: number): string {
   const before = source.slice(source.lastIndexOf('\n', start - 1) + 1, start)
   const indent = /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?$/.test(before) ? before.replace(/\S/g, ' ') : before.match(/^[ \t]*/)![0]
   return indentSnippetLines(snippet, indent)
+}
+
+/** A prop a snippet component destructures: `fallback` is its string default, and a default of any other kind leaves the prop out of the list. */
+interface SnippetParameter { name: string; fallback?: string }
+
+/** The props a statically declared snippet component destructures from its argument, `({ img, size = "md" }) => ...`. */
+function snippetParameters(source: string, componentName: string): Array<SnippetParameter> {
+  const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  for (const statement of parsed.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== componentName) continue
+      const pattern = declaration.initializer && ts.isArrowFunction(declaration.initializer) ? declaration.initializer.parameters[0]?.name : undefined
+      if (!pattern || !ts.isObjectBindingPattern(pattern)) return []
+      return pattern.elements.flatMap((element): Array<SnippetParameter> => {
+        // `{ a: b }` passes `a` and reads `b`: the call's attribute is not the name the body reads.
+        if (element.dotDotDotToken || element.propertyName || !ts.isIdentifier(element.name)) return []
+        if (!element.initializer) return [{ name: element.name.text }]
+        return ts.isStringLiteralLike(element.initializer) ? [{ name: element.name.text, fallback: element.initializer.text }] : []
+      })
+    }
+  }
+  return []
 }
 
 /** Extract JSX from a statically declared snippet component before inlining it. */
@@ -4013,6 +4058,8 @@ function inlineMdxSnippets(
   // imports, disappear from the example, and can break the server build.
   raw = normalizeIndentedFences(raw)
   const snippets = new Map<string, string>()
+  /** The props each component snippet destructures, for the ones a call leaves out. */
+  const snippetProps = new Map<string, Array<SnippetParameter>>()
   const preservedDeclarations = new Map<string, string>()
   // Fail closed: a restricted, oversized or unclassifiable file is never
   // inlined, whatever its directory. One warning per occurrence; the returned
@@ -4126,7 +4173,10 @@ function inlineMdxSnippets(
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
-        else snippets.set(componentName, snippetComponentBody(nested, componentName))
+        else {
+          snippets.set(componentName, snippetComponentBody(nested, componentName))
+          snippetProps.set(componentName, snippetParameters(nested, componentName))
+        }
         return ''
       } catch (error) {
         if (error instanceof Error && error.message.includes('escapes its root')) {
@@ -4219,6 +4269,7 @@ function inlineMdxSnippets(
             continue
           }
           components.push([binding!.local, body])
+          if (/^[A-Z]/.test(binding!.exported)) snippetProps.set(binding!.local, snippetParameters(snippetSource, binding!.exported))
         }
         for (const [name, body] of components) snippets.set(name, body)
         return exportBlock(declarations, statement, sourcePath)
@@ -4265,7 +4316,10 @@ function inlineMdxSnippets(
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
-    else snippets.set(componentName, snippetComponentBody(nested, componentName))
+    else {
+      snippets.set(componentName, snippetComponentBody(nested, componentName))
+      snippetProps.set(componentName, snippetParameters(nested, componentName))
+    }
   }
   // Usages inside code or an existing comment stay literal: splicing a snippet
   // (or a missing-snippet comment) there would nest or corrupt the outer block.
@@ -4273,10 +4327,10 @@ function inlineMdxSnippets(
     for (const [componentName, snippet] of snippets) {
       segment = segment
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (tag: string, attributes: string, offset: number, source: string) => {
-          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes)), source, offset), source, offset, offset + tag.length)
+          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes, undefined, snippetProps.get(componentName))), source, offset), source, offset, offset + tag.length)
         })
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (tag: string, attributes: string, children: string, offset: number, source: string) => {
-          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset), source, offset, offset + tag.length)
+          return isolateFences(alignToTag(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children, snippetProps.get(componentName))), source, offset), source, offset, offset + tag.length)
         })
     }
     const tagLabel = (filePath: string): string => platform === 'fern' ? `Included file ${filePath}` : `Snippet file="${filePath}"`
