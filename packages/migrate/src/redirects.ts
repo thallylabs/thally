@@ -154,12 +154,13 @@ export function pageEntryRoutes(page: Pick<MigrationPage, 'id'>): Array<string> 
 }
 
 /**
- * The pages a literal redirect in `redirects` starts from, comparing addresses as written (a trailing slash aside). The introduction
- * page is left out: it is also the home page, which a redirect from `/introduction` does not reach.
+ * The pages a literal redirect in `redirects` starts from, comparing addresses as written (a trailing slash aside). A home page is left
+ * out, the root one and each language's (`fr/introduction`): a redirect from its `introduction` address does not reach what a visitor
+ * opens, the home address.
  */
-export function pagesRedirectedFrom<T extends Pick<MigrationPage, 'id'>>(redirects: ReadonlyArray<{ source: string }>, pages: ReadonlyArray<T>): Array<T> {
+export function pagesRedirectedFrom<T extends Pick<MigrationPage, 'id' | 'locale'>>(redirects: ReadonlyArray<{ source: string }>, pages: ReadonlyArray<T>): Array<T> {
   const sources = new Set(redirects.flatMap(({ source }) => exactRoute(source) ?? []))
-  return pages.filter((page) => page.id !== 'introduction' && pageRoutes([page]).some((route) => sources.has(route)))
+  return pages.filter((page) => page.id !== 'introduction' && !(page.locale && page.id === `${page.locale}/introduction`) && pageRoutes([page]).some((route) => sources.has(route)))
 }
 
 /** One warning for the pages that stand in for a redirect from their own address; null when there are none. */
@@ -168,7 +169,7 @@ export function redirectsOverPagesWarning(routes: ReadonlyArray<string>): Migrat
   const one = routes.length === 1
   return {
     code: 'unsupported-config',
-    message: `Kept ${routes.length} redirect${one ? '' : 's'} from ${list([...routes])}: ${one ? 'that URL is' : 'those URLs are'} also ${one ? 'a page' : 'pages'} in this site. Mintlify follows a redirect and never shows the page, so the ${one ? 'page was' : 'pages were'} marked noindex and ${one ? 'its file stays' : 'their files stay'}. Delete ${one ? 'the page' : 'a page'} if you do not need it.`,
+    message: `Kept ${routes.length} redirect${one ? '' : 's'} from ${list([...routes])}: ${one ? 'that URL is' : 'those URLs are'} also ${one ? 'a page' : 'pages'} in this site. Mintlify follows a redirect and never shows the page, so the ${one ? 'page was' : 'pages were'} marked noindex and ${one ? 'its file stays' : 'their files stay'}. Delete ${one ? 'the page' : 'a page'} and its navigation entry if you do not need it.`,
   }
 }
 

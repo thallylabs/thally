@@ -264,7 +264,7 @@ describe('Mintlify redirects whose source is also a page', () => {
     expect(bundle.pages.find((page) => page.id === 'section')?.noindex).toBe(true)
     expect(bundle.pages.find((page) => page.id === 'guide')?.noindex).toBeUndefined()
     expect(JSON.stringify(bundle.docsConfig.tabs)).toContain('"section"')
-    expect(messages(bundle)).toContain('Kept 2 redirects from /old, /section: those URLs are also pages in this site. Mintlify follows a redirect and never shows the page, so the pages were marked noindex and their files stay. Delete a page if you do not need it.')
+    expect(messages(bundle)).toContain('Kept 2 redirects from /old, /section: those URLs are also pages in this site. Mintlify follows a redirect and never shows the page, so the pages were marked noindex and their files stay. Delete a page and its navigation entry if you do not need it.')
     expect(messages(bundle)).not.toMatch(/Skipped/)
     const rendered = renderMigrationFiles(bundle).find((file) => file.path === 'src/content/old.mdx')?.content.toString() ?? ''
     expect(rendered).toContain('noindex: true')
@@ -273,7 +273,7 @@ describe('Mintlify redirects whose source is also a page', () => {
   it('says so in the singular for one page', () => {
     const bundle = mintlify({ redirects: [{ source: '/old/', destination: '/guide' }], navigation }, pages)
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
-    expect(messages(bundle)).toContain('Kept 1 redirect from /old: that URL is also a page in this site. Mintlify follows a redirect and never shows the page, so the page was marked noindex and its file stays. Delete the page if you do not need it.')
+    expect(messages(bundle)).toContain('Kept 1 redirect from /old: that URL is also a page in this site. Mintlify follows a redirect and never shows the page, so the page was marked noindex and its file stays. Delete the page and its navigation entry if you do not need it.')
   })
 
   it('leaves a page alone when its redirect is dropped for closing a loop', () => {
@@ -291,6 +291,24 @@ describe('Mintlify redirects whose source is also a page', () => {
     expect((bundle.docsConfig.redirects ?? []).some((redirect) => redirect.source === '/introduction')).toBe(false)
     expect(bundle.pages.find((page) => page.id === 'introduction')?.noindex).toBeUndefined()
     expect(messages(bundle)).toContain('Skipped 1 redirect from /introduction: that URL is also a page in this site')
+  })
+
+  it('also drops a redirect from the home page of another language, which is not a page Mintlify serves there', () => {
+    const bundle = mintlify({
+      redirects: [{ source: '/fr/introduction', destination: '/fr/guide' }],
+      navigation: { languages: [
+        { language: 'en', groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+        { language: 'fr', groups: [{ group: 'Start', pages: ['fr/index', 'fr/guide'] }] },
+      ] },
+    }, {
+      index: pages.index,
+      guide: pages.guide,
+      'fr/index': '---\ntitle: Accueil\n---\n\nBienvenue.',
+      'fr/guide': '---\ntitle: Guide fr\n---\n\nCorps.',
+    })
+    expect((bundle.docsConfig.redirects ?? []).some((redirect) => redirect.source === '/fr/introduction')).toBe(false)
+    expect(bundle.pages.find((page) => page.id === 'fr/introduction')?.noindex).toBeUndefined()
+    expect(messages(bundle)).toContain('Skipped 1 redirect from /fr/introduction: that URL is also a page in this site')
   })
 
   it('does not turn a page into a stub for a redirect the migrator added itself', () => {

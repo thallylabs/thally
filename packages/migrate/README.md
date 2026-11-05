@@ -340,8 +340,9 @@ lists the first ten of each kind; the earlier redirect of a loop is kept. A
 Mintlify redirect from the source's own config is the exception: Mintlify
 follows it even when a page has that address, so the redirect is kept, the page
 is marked `noindex` and stays as a stub (its navigation entry follows the
-redirect), and a warning lists the first ten. The home page, and an address that
-differs from a page only in letter case, are still left out. A
+redirect), and a warning lists the first ten and says to delete the page and its
+navigation entry if it is not needed. The home page (each language's too), and an
+address that differs from a page only in letter case, are still left out. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still
 reachable there. These checks ignore letter case, because a site can run on
