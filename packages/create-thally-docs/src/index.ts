@@ -142,6 +142,7 @@ Options:
 
 // Build positionals by skipping values consumed by named flags (e.g. --locale es)
 const positional: Array<string> = []
+const positionalIndexes: Array<number> = []
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('-')) {
     // Only named value flags consume the next token. Boolean flags such as
@@ -151,6 +152,7 @@ for (let i = 0; i < args.length; i++) {
     }
   } else {
     positional.push(args[i])
+    positionalIndexes.push(i)
   }
 }
 
@@ -280,6 +282,10 @@ async function runMigrateCommand(): Promise<void> {
     yes,
     skipValidation: flags.includes('--skip-validation'),
     sourceRefs,
+    // The report never names a private checkout path (see its `sourceUrl`), so
+    // a local source is masked in the recorded command line too. Every other
+    // argument, including output paths, is recorded as typed.
+    argv: sourceDirectory ? args.map((arg, i) => (i === positionalIndexes[1] ? 'local-directory' : arg)) : args,
   })
   terminal.section('Migration summary', [
     `${result.pagesWritten} pages · ${result.assetsWritten} assets · ${result.platform}`,
