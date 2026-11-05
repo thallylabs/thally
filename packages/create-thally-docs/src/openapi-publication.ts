@@ -1,7 +1,7 @@
 /**
  * Whether the operation an MDX page documents (`openapi: "[<spec>] GET /path"`) is
- * published. A page bound to a hidden or excluded operation 404s in the site,
- * so `thally check` reports it. Mirrors the site's path-item rules
+ * published. A page bound to an excluded operation 404s in the site, so
+ * `thally check` reports it; a hidden operation is rendered by the page that names it. Mirrors the site's path-item rules
  * (src/lib/openapi/path-items.ts, publication.ts); a parity test keeps the
  * two in step.
  */

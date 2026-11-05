@@ -107,7 +107,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     route.isLocaleRoute ? route.locale : undefined,
   )
   if (!doc) return {}
-  // The page 404s when its documented operation is hidden or excluded; give it no title, canonical or social preview.
+  // The page 404s when its documented operation is excluded; give it no title, canonical or social preview.
   await ensureDocPublication()
   if (!isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) return {}
   // A page this reader may not see gets no title, description or preview image.
@@ -248,7 +248,7 @@ export default async function DocsPage({ params }: PageProps) {
   const playground = resolvePlaygroundDisplay(doc.playground, getApiPlaygroundDisplay())
   if (doc.openapi) {
     const lookup = await lookupApiOperationForFrontmatter(doc.openapi)
-    // A hidden or excluded operation is withheld on purpose: 404 on every site.
+    // An excluded operation is withheld on purpose: 404 on every site. A hidden one is rendered, as on Mintlify.
     // Only a reference that cannot be resolved at all keeps the authored page, with a notice.
     if (lookup.node === null && lookup.reason === 'withheld') notFound()
     const operationNode = lookup.node
@@ -283,7 +283,7 @@ export default async function DocsPage({ params }: PageProps) {
             <DocHeader doc={doc} eyebrow={getEyebrowMode() === 'path' ? nav.groupPath : nav.group} showDescription={doc.descriptionPlacement !== 'operation'} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} showDescription={!doc.description || doc.descriptionPlacement === 'operation'} playground={playground} locale={contentLocale}>
+            <OperationPanel operation={operationNode.operation} showDescription={!doc.description || doc.descriptionPlacement === 'operation'} playground={'revealed' in lookup && playground === 'interactive' ? 'simple' : playground} locale={contentLocale}>
               <Body />
             </OperationPanel>
           </ApiLayout>

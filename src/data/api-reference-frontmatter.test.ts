@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const docs = vi.hoisted(() => ({
-  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} }, '/hidden': { get: { 'x-hidden': true } }, '/excluded': { get: { 'x-excluded': true } } }, webhooks: { orderUpdated: { post: {} } } },
+  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} }, '/hidden': { get: { 'x-hidden': true } }, '/excluded': { get: { 'x-excluded': true } } }, webhooks: { orderUpdated: { post: {} }, quietHook: { post: { 'x-hidden': true } }, privateHook: { post: { 'x-excluded': true } } } },
   b: { openapi: '3.0.0', paths: { '/widgets/{id}': { get: { summary: 'B widget' } }, '/dup': { get: {} } } },
   c: { openapi: '3.0.0', paths: { '/dup': { get: {} }, '/only-c': { get: {} } } },
 }))
@@ -28,7 +28,7 @@ vi.mock('@/lib/openapi/fetch', () => ({
   loadAuthoredSpecDocument: async (config: { id: string }) => (config.id === 'default' ? docs.a : config.id === 'b' ? docs.b : docs.c),
 }))
 
-import { getApiOperationForFrontmatter, lookupApiOperationForFrontmatter } from '@/data/api-reference'
+import { getAllApiOperationNodes, getApiOperationForFrontmatter, lookupApiOperationForFrontmatter } from '@/data/api-reference'
 import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
 
 async function resolve(value: string) {
@@ -74,10 +74,23 @@ describe('lookupApiOperationForFrontmatter', () => {
     expect((await lookup('POST /things')).node?.operation.specId).toBe('default')
   })
 
-  it('reports a hidden or excluded operation as withheld', async () => {
-    expect(await lookup('GET /hidden')).toEqual({ node: null, reason: 'withheld' })
+  it('reports an excluded operation as withheld', async () => {
     expect(await lookup('GET /excluded')).toEqual({ node: null, reason: 'withheld' })
     expect(await lookup('openapi-a.json GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+    expect(await lookup('webhook privateHook')).toEqual({ node: null, reason: 'withheld' })
+  })
+
+  it('renders a hidden operation for a page that names it, and only for that page', async () => {
+    for (const value of ['GET /hidden', 'openapi-a.json GET /hidden']) {
+      const { node } = await lookup(value)
+      expect(node?.operation).toMatchObject({ method: 'GET', path: '/hidden', hidden: false })
+    }
+    expect(await lookup('GET /hidden')).toMatchObject({ revealed: true })
+    expect(await lookup('POST /things')).not.toHaveProperty('revealed')
+    expect((await lookup('webhook quietHook')).node?.operation).toMatchObject({ isWebhook: true, path: 'quietHook' })
+    // The generated lookups and listings keep hiding it.
+    expect(await resolve('GET /hidden')).toBeNull()
+    expect((await getAllApiOperationNodes()).map((node) => node.operation.path)).not.toContain('/hidden')
   })
 
   it('reports an unknown spec or operation as unresolved', async () => {

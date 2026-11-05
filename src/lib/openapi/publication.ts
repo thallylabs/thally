@@ -1,9 +1,11 @@
 /**
  * Whether one OpenAPI operation is published, judged on the authored document
  * with the same path-item rules the normalizer and sanitizer use. A page bound
- * to a hidden or excluded operation is not published (its route 404s), so
- * the build records which pages it withholds (`pageReferenceState`), and
- * `isDocPublished` in `@/data/docs` is the one predicate every listing consults.
+ * to an excluded operation is not published (its route 404s), so the build
+ * records which pages it withholds (`pageReferenceState`), and `isDocPublished`
+ * in `@/data/docs` is the one predicate every listing consults. A hidden
+ * operation only stays out of generated navigation and pages, so a page that
+ * names it still renders it (`hiddenOperationSpec`, `revealedOperations`).
  */
 
 import { HTTP_METHODS, buildOperationKey } from './operation-keys'
@@ -56,6 +58,18 @@ export interface RoutedSpec {
   document?: unknown
 }
 
+const referenceState = (ref: OpenApiFrontmatterRef, spec: RoutedSpec): OperationPublicationState => spec.document === undefined
+  ? 'unknown'
+  : ref.webhook
+    ? webhookPublicationState(spec.document, ref.path, spec.config.operationOverrides)
+    : operationPublicationState(spec.document, ref.method, ref.path, spec.config.operationOverrides)
+
+/** The spec a reference's prefix pins, if it names one of `specs`. */
+function pinnedSpec(ref: OpenApiFrontmatterRef, specs: ReadonlyArray<RoutedSpec>): RoutedSpec | undefined {
+  const config = ref.specRef ? findSpecForRef(specs.map((spec) => spec.config), ref.specRef) : null
+  return config ? specs.find((entry) => entry.config === config) : undefined
+}
+
 /**
  * Whether the docs route renders the operation a page's `openapi:` names,
  * following `getApiOperationForFrontmatter` in `@/data/api-reference`:
@@ -65,14 +79,9 @@ export interface RoutedSpec {
  * cannot be read is `unknown`, which is never withheld.
  */
 export function pageReferenceState(ref: OpenApiFrontmatterRef, specs: ReadonlyArray<RoutedSpec>): OperationPublicationState {
-  const judge = (spec: RoutedSpec): OperationPublicationState => spec.document === undefined
-    ? 'unknown'
-    : ref.webhook
-      ? webhookPublicationState(spec.document, ref.path, spec.config.operationOverrides)
-      : operationPublicationState(spec.document, ref.method, ref.path, spec.config.operationOverrides)
+  const judge = (spec: RoutedSpec) => referenceState(ref, spec)
   if (ref.specRef) {
-    const config = findSpecForRef(specs.map((spec) => spec.config), ref.specRef)
-    const spec = config ? specs.find((entry) => entry.config === config) : undefined
+    const spec = pinnedSpec(ref, specs)
     return spec ? judge(spec) : 'unknown'
   }
   const states = specs.map(judge)
@@ -80,6 +89,23 @@ export function pageReferenceState(ref: OpenApiFrontmatterRef, specs: ReadonlyAr
   // A spec the build cannot read may still serve it.
   if (specs.some((spec) => spec.document === undefined)) return 'unknown'
   return states.find((state) => state === 'hidden' || state === 'excluded') ?? 'unknown'
+}
+
+/**
+ * The spec whose hidden operation a page naming `ref` renders: the pinned one, else the first, in route order, that hides
+ * it. Undefined when the page's state (`pageReferenceState`) is anything but `hidden`, so an excluded operation is
+ * never returned.
+ */
+export function hiddenOperationSpec(ref: OpenApiFrontmatterRef, specs: ReadonlyArray<RoutedSpec>): RoutedSpec | undefined {
+  if (pageReferenceState(ref, specs) !== 'hidden') return undefined
+  const pinned = pinnedSpec(ref, specs)
+  return (pinned ? [pinned] : specs).find((spec) => referenceState(ref, spec) === 'hidden')
+}
+
+/** Overrides that show the operation a page names (every method of a webhook), for the page that renders it. */
+export function revealedOperations(ref: OpenApiFrontmatterRef): Record<string, OperationOverride> {
+  const methods = ref.webhook ? HTTP_METHODS : [ref.method]
+  return Object.fromEntries(methods.map((method) => [buildOperationKey(method, ref.path, ref.webhook), { hidden: false }]))
 }
 
 /** Runtime-source file holding the build's list of unpublished page ids (see `pageReferenceState`). */

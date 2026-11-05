@@ -214,7 +214,7 @@ describe('findUnpublishedOpenApiPages', () => {
   }
   const page = (operation: string) => `---\ntitle: T\nopenapi: "${operation}"\n---\nBody`
 
-  it('names each page bound to a hidden or excluded operation, and only those', () => {
+  it('names each page bound to an excluded operation, and only those: a hidden one is rendered', () => {
     const projectRoot = project({
       'src/content/hidden-endpoint.mdx': page('GET /h'),
       'src/content/sub/excluded.mdx': page('GET /e'),
@@ -223,17 +223,16 @@ describe('findUnpublishedOpenApiPages', () => {
       'src/content/plain.mdx': '---\ntitle: P\n---\nText',
     })
     expect(findUnpublishedOpenApiPages(projectRoot)).toEqual([
-      { file: 'src/content/hidden-endpoint.mdx', id: 'hidden-endpoint', operation: 'GET /h', state: 'hidden' },
       { file: 'src/content/sub/excluded.mdx', id: 'sub/excluded', operation: 'GET /e', state: 'excluded' },
     ])
   })
 
   it('judges spec-prefixed references against the spec they name, like the docs route', () => {
     const projectRoot = project({
-      'openapi/admin.yaml': 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /v:\n    get: { x-hidden: true, responses: {} }\n  /h:\n    get: { responses: {} }\n',
+      'openapi/admin.yaml': 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /v:\n    get: { x-excluded: true, responses: {} }\n  /h:\n    get: { responses: {} }\n',
       'src/content/admin/index.mdx': page("'openapi/admin.yaml' GET /v"),
       'src/content/by-name.mdx': page('admin.yaml GET /v'),
-      'src/content/main-prefixed.mdx': page('openapi/api.json GET /h'),
+      'src/content/main-prefixed.mdx': page('openapi/api.json GET /e'),
       'src/content/admin-visible.mdx': page('admin.yaml GET /h'),
       'src/content/bare-fallback.mdx': page('GET /h'),
       'src/content/unknown-spec.mdx': page('other.yaml GET /h'),
@@ -241,17 +240,88 @@ describe('findUnpublishedOpenApiPages', () => {
     const docsJson = { tabs: [{ tab: 'API', api: { source: 'openapi/api.json' } }, { tab: 'Admin', api: { source: 'openapi/admin.yaml' } }, { tab: 'Old', hidden: true, api: { source: 'openapi/admin.yaml' } }] }
     writeFileSync(path.join(projectRoot, 'docs.json'), JSON.stringify(docsJson))
     expect(findUnpublishedOpenApiPages(projectRoot)).toEqual([
-      { file: 'src/content/admin/index.mdx', id: 'admin', operation: 'openapi/admin.yaml GET /v', state: 'hidden' },
-      { file: 'src/content/by-name.mdx', id: 'by-name', operation: 'admin.yaml GET /v', state: 'hidden' },
-      { file: 'src/content/main-prefixed.mdx', id: 'main-prefixed', operation: 'openapi/api.json GET /h', state: 'hidden' },
+      { file: 'src/content/admin/index.mdx', id: 'admin', operation: 'openapi/admin.yaml GET /v', state: 'excluded' },
+      { file: 'src/content/by-name.mdx', id: 'by-name', operation: 'admin.yaml GET /v', state: 'excluded' },
+      { file: 'src/content/main-prefixed.mdx', id: 'main-prefixed', operation: 'openapi/api.json GET /e', state: 'excluded' },
     ])
     expect(JSON.parse(collectRuntimeContentFiles(projectRoot)['thally-unpublished-pages.json'].content)).toEqual(['admin', 'by-name', 'main-prefixed'])
   })
 
-  it('honours docs.json overrides and stays quiet for a remote or missing spec', () => {
-    const files = { 'src/content/hidden-endpoint.mdx': page('GET /h') }
-    expect(findUnpublishedOpenApiPages(project(files, { source: 'openapi/api.json', overrides: { 'GET /h': { hidden: false } } }))).toEqual([])
+  it('lets no override show an excluded operation, and stays quiet for a remote or missing spec', () => {
+    const files = { 'src/content/excluded-endpoint.mdx': page('GET /e') }
+    expect(findUnpublishedOpenApiPages(project(files, { source: 'openapi/api.json', overrides: { 'GET /e': { hidden: false } } }))).toHaveLength(1)
     expect(findUnpublishedOpenApiPages(project(files, { source: 'https://example.com/spec.json' }))).toEqual([])
     expect(findUnpublishedOpenApiPages(project(files, { source: 'openapi/missing.json' }))).toEqual([])
+  })
+
+  describe('the spec copy a hidden operation is rendered from', () => {
+    const copy = (projectRoot: string, file = 'openapi/api.json') => JSON.parse(collectRuntimeContentFiles(projectRoot)[file]!.content) as { paths: Record<string, Record<string, Record<string, unknown>>> }
+    const runtimeSees = (document: object, overrides?: Record<string, { hidden: boolean }>) =>
+      Object.keys((sanitizeSpecForPublication(document as never, { overrides }).paths ?? {}) as object).sort()
+
+    it('keeps the hidden operations pages name, and no other hidden or excluded one', () => {
+      const projectRoot = project({
+        'openapi/api.json': JSON.stringify({
+          openapi: '3.1.0', info: { title: 'T', version: '1' },
+          paths: { '/h': { get: { 'x-hidden': true, ...ok } }, '/h2': { get: { 'x-hidden': true, ...ok } }, '/e': { get: { 'x-excluded': true, ...ok } }, '/v': { get: ok } },
+        }),
+        'src/content/hidden-endpoint.mdx': page('GET /h'),
+        'src/content/excluded-endpoint.mdx': page('GET /e'),
+      })
+      const embedded = copy(projectRoot)
+      expect(Object.keys(embedded.paths)).toEqual(['/h', '/v'])
+      // The route reads the copy through the same filter as before, so generated pages still do not have it.
+      expect(runtimeSees(embedded)).toEqual(['/v'])
+    })
+
+    it('judges a spec prefix and a hidden tab like the route', () => {
+      const hiddenOp = (path: string) => ({ [path]: { get: { 'x-hidden': true, ...ok } } })
+      const spec = (paths: object) => JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths })
+      const projectRoot = project({
+        'openapi/api.json': spec({ ...hiddenOp('/shared'), '/main-only': { get: ok } }),
+        'openapi/admin.yaml': spec({ ...hiddenOp('/shared'), ...hiddenOp('/admin-only') }),
+        'openapi/page-only.json': spec({ ...hiddenOp('/quote'), ...hiddenOp('/not-named') }),
+        'src/content/a.mdx': page('admin.yaml GET /shared'),
+        'src/content/b.mdx': page('GET /quote'),
+      })
+      writeFileSync(path.join(projectRoot, 'docs.json'), JSON.stringify({ tabs: [
+        { tab: 'API', api: { source: 'openapi/api.json' } },
+        { tab: 'Admin', api: { source: 'openapi/admin.yaml' } },
+        { tab: 'Quote', hidden: true, api: { source: 'openapi/page-only.json' } },
+      ] }))
+      const sources = collectRuntimeContentFiles(projectRoot)
+      const paths = (file: string) => Object.keys((parseYaml(sources[file]!.content) as { paths: object }).paths)
+      expect(paths('openapi/api.json')).toEqual(['/main-only'])
+      expect(paths('openapi/admin.yaml')).toEqual(['/shared'])
+      expect(paths('openapi/page-only.json')).toEqual(['/quote'])
+    })
+
+    it('keeps the operation hidden for the route when its flag sat on a path item shared with others', () => {
+      const projectRoot = project({
+        'openapi/api.json': JSON.stringify({
+          openapi: '3.1.0', info: { title: 'T', version: '1' },
+          paths: { '/pair': { 'x-hidden': true, get: ok, post: ok } },
+        }),
+        'src/content/pair.mdx': page('GET /pair'),
+      })
+      const embedded = copy(projectRoot)
+      expect(Object.keys(embedded.paths['/pair'])).toContain('get')
+      expect(Object.keys(embedded.paths['/pair'])).not.toContain('post')
+      expect(runtimeSees(embedded)).toEqual([])
+    })
+
+    it('keeps a webhook a page names, and the hidden operation no docs.json override shows', () => {
+      const projectRoot = project({
+        'openapi/api.json': JSON.stringify({
+          openapi: '3.1.0', info: { title: 'T', version: '1' },
+          paths: { '/o': { get: { 'x-hidden': true, ...ok } } },
+          webhooks: { paid: { post: { 'x-hidden': true, ...ok } }, other: { post: { 'x-hidden': true, ...ok } } },
+        }),
+        'src/content/paid.mdx': '---\ntitle: T\nopenapi: "webhook paid"\n---\nBody',
+      })
+      const embedded = JSON.parse(collectRuntimeContentFiles(projectRoot)['openapi/api.json']!.content) as { paths: object; webhooks: object }
+      expect(Object.keys(embedded.webhooks)).toEqual(['paid'])
+      expect(embedded.paths).toEqual({})
+    })
   })
 })

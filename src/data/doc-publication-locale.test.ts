@@ -12,15 +12,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { collectRuntimeContentFiles } from '../../scripts/lib/runtime-content-files'
 
 const ok = { responses: { 200: { description: 'ok' } } }
-const HIDDEN = 'openapi: "GET /hidden"'
+const EXCLUDED = 'openapi: "GET /excluded"'
 const SHOWN = 'openapi: "GET /shown"'
 // [primary frontmatter, French frontmatter or null for no translation]
 const PAGES: Record<string, [string, string | null]> = {
   plain: ['', ''],
-  both: [HIDDEN, HIDDEN],
-  'fr-only': [SHOWN, HIDDEN],
-  'primary-only': [HIDDEN, ''],
-  'no-fr': [HIDDEN, null],
+  both: [EXCLUDED, EXCLUDED],
+  'fr-only': [SHOWN, EXCLUDED],
+  'primary-only': [EXCLUDED, ''],
+  'no-fr': [EXCLUDED, null],
   'shown-everywhere': [SHOWN, SHOWN],
 }
 const ids = Object.keys(PAGES)
@@ -61,7 +61,7 @@ beforeEach(() => {
   writeFileSync(path.join(root, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source: 'openapi/x.json' } }] }))
   writeFileSync(path.join(root, 'openapi/x.json'), JSON.stringify({
     openapi: '3.1.0', info: { title: 'T', version: '1' },
-    paths: { '/hidden': { get: { 'x-hidden': true, ...ok } }, '/shown': { get: ok } },
+    paths: { '/excluded': { get: { 'x-excluded': true, ...ok } }, '/shown': { get: ok } },
   }))
   mkdirSync(path.join(root, 'src/content/fr'), { recursive: true })
   for (const [id, [primary, french]] of Object.entries(PAGES)) {

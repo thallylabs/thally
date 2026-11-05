@@ -713,10 +713,11 @@ function checkTabApiGroups(projectDir: string, tab: ApiGroupsTab, locale: string
 }
 
 /**
- * A page whose `openapi:` frontmatter names a hidden or excluded operation of
- * the site's default spec (the first visible API tab's, which is what the
- * route consults) 404s and is left out of every listing. Unknown operations
- * are not reported, and remote specs cannot be judged here.
+ * A page whose `openapi:` frontmatter names an excluded operation of the
+ * site's default spec (the first visible API tab's, which is what the route
+ * consults) 404s and is left out of every listing. A hidden operation is
+ * rendered by a page that names it, so that page is not reported. Unknown
+ * operations are not reported, and remote specs cannot be judged here.
  *
  * A page with no description of its own is described by its operation, so it
  * is reported as missing one only when the operation has none either, or cannot
@@ -741,14 +742,14 @@ function checkOperationPages(
   const described = pages.some((page) => !page.hasDescription) ? [...specs, ...load(true)] : specs
   for (const { file, reference, hasDescription } of pages) {
     const state = specs.length > 0 ? pageState(reference, specs) : 'unknown'
-    if (state === 'hidden' || state === 'excluded') {
+    if (state === 'excluded') {
       const operation = `${reference.specRef ? `${reference.specRef} ` : ''}${reference.method} ${reference.path}`
       issues.push({
         severity: 'warning',
         file,
         message: `page ${file} points at ${state} operation ${operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
       })
-    } else if (!hasDescription && operationDescription(reference, described) === undefined) {
+    } else if (state !== 'hidden' && !hasDescription && operationDescription(reference, described) === undefined) {
       issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file })
     }
   }

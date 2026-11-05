@@ -821,8 +821,8 @@ let _allEntries: Array<DocEntry> | null = null
 // ---------------------------------------------------------------------------
 
 /**
- * A page whose `openapi:` frontmatter resolves only to hidden or excluded
- * operations 404s (see the docs page route), so no listing may offer it. The
+ * A page whose `openapi:` frontmatter resolves only to excluded operations
+ * 404s (see the docs page route), so no listing may offer it. The
  * build decides this with the route's own lookup, spec prefixes included, and
  * records the withheld page ids (see `UNPUBLISHED_PAGES_FILE`). Self-hosted
  * builds read that record synchronously from the embedded sources, so the
@@ -853,7 +853,7 @@ function recordedUnpublishedPages(): ReadonlySet<string> {
 }
 
 /**
- * False for a page whose documented operation is hidden or excluded. A
+ * False for a page whose documented operation is excluded. A
  * secondary-locale route renders its own translation when one exists (the
  * build records it as `<locale>/<id>`) and the primary page otherwise, so
  * `locale` judges the file that route would render.

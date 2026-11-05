@@ -44,8 +44,8 @@ vi.mock('@/components/docs/doc-header', () => ({ DocHeader: ({ eyebrow, showDesc
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 vi.mock('@/components/api/operation-panel', async () => {
   const { Markdown } = await import('@/components/mdx/markdown')
-  return { OperationPanel: ({ children, operation, showDescription = true }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean }) => (
-    <section>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
+  return { OperationPanel: ({ children, operation, showDescription = true, playground }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean; playground?: string }) => (
+    <section data-playground={playground}>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
   ) }
 })
 vi.mock('@/components/api/manual-api-endpoint', () => ({ ManualApiEndpoint: () => null }))
@@ -83,7 +83,7 @@ describe('docs page with an unresolved openapi spec', () => {
   it('renders the page body inside the operation panel when the operation resolves', async () => {
     fixtures.lookup = { node: { operation: {} } }
     const html = await render()
-    expect(html).toContain('<section><p>Authored scrape body</p></section>')
+    expect(html).toContain('<p>Authored scrape body</p></section>')
     expect(html).not.toContain('role="note"')
     expect(html).toContain('Previous page')
   })
@@ -95,9 +95,18 @@ describe('docs page with an unresolved openapi spec', () => {
     expect(await render()).toContain('data-eyebrow="[&quot;Errors&quot;,&quot;Capacity&quot;]"')
   })
 
-  it('404s a hidden or excluded operation even when the page is listed as published', async () => {
+  it('404s an excluded operation even when the page is listed as published', async () => {
     fixtures.lookup = { node: null, reason: 'withheld' }
     await expect(render()).rejects.toThrow('NEXT_NOT_FOUND')
+  })
+
+  it('renders a hidden operation without the playground, which only forwards requests to listed operations', async () => {
+    fixtures.lookup = { node: { operation: {} } }
+    expect(await render()).toContain('data-playground="interactive"')
+    fixtures.lookup = { node: { operation: {} }, revealed: true }
+    const html = await render()
+    expect(html).toContain('data-playground="simple"')
+    expect(html).toContain('<p>Authored scrape body</p>')
   })
 })
 
