@@ -15,7 +15,7 @@ import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { readDocsJson, writeDocsJson, type DocsJsonConfig } from './docs-json.js'
-import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
+import { API_GROUPS_MAX_DEPTH, groupKeyState, hiddenOperationDescription, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { parseMdxTree } from '@thallylabs/core/markdown'
@@ -741,12 +741,13 @@ function checkTabApiGroups(projectDir: string, tab: ApiGroupsTab, locale: string
  * A page whose `openapi:` frontmatter names an excluded operation of the
  * site's default spec (the first visible API tab's, which is what the route
  * consults) 404s and is left out of every listing. A hidden operation is
- * rendered by a page that names it, so that page is not reported. Unknown
- * operations are not reported, and remote specs cannot be judged here.
+ * rendered by a page that names it, so that page is not reported as unpublished.
+ * Unknown operations are not reported, and remote specs cannot be judged here.
  *
  * A page with no description of its own is described by its operation, so it
  * is reported as missing one only when the operation has none either, or cannot
- * be read here. The site resolves a page's reference against the specs of hidden
+ * be read here. For a hidden operation that is the operation as the page
+ * renders it. The site resolves a page's reference against the specs of hidden
  * tabs too (after the visible ones), and so does that lookup.
  */
 function checkOperationPages(
@@ -774,7 +775,7 @@ function checkOperationPages(
         file,
         message: `page ${file} points at ${state} operation ${operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
       })
-    } else if (state !== 'hidden' && !hasDescription && operationDescription(reference, described) === undefined) {
+    } else if (!hasDescription && operationDescription(reference, described) === undefined && hiddenOperationDescription(reference, described) === undefined) {
       issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file })
     }
   }

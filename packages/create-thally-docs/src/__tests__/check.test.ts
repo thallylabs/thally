@@ -339,11 +339,13 @@ describe('thally check pages bound to unpublished operations', () => {
       openapi: '3.1.0', info: { title: 'T', version: '1' },
       paths: {
         '/hidden': { get: { 'x-hidden': true, ...ok } },
+        '/hidden-described': { get: { 'x-hidden': true, description: 'Shown text.', ...ok } },
         '/excluded': { $ref: '#/components/pathItems/E' },
         '/visible': { get: ok },
       },
       webhooks: {
         orderUpdated: { post: { 'x-hidden': true, ...ok } },
+        hookDescribed: { post: { 'x-hidden': true, summary: 'Shown summary.', ...ok } },
         refunded: { $ref: '#/components/pathItems/E' },
         shipped: { post: ok },
       },
@@ -367,10 +369,19 @@ describe('thally check pages bound to unpublished operations', () => {
     expect(output).toContain('page src/content/excluded-endpoint.mdx points at excluded operation GET /excluded and is not published')
     // A hidden operation is rendered by the page that names it, with the description the check does not read.
     expect(output).not.toContain('hidden-endpoint.mdx points')
-    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, undefined, '')).not.toContain('Missing description')
     expect(output).not.toContain('visible-endpoint.mdx points')
     expect(output).not.toContain('typo-endpoint.mdx points')
     expect(output).toContain('0 error(s)')
+  })
+
+  it('reads the description of a page bound to a hidden operation from the operation the site renders', async () => {
+    const missing = 'Missing "description" in frontmatter'
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, undefined, '')).toContain(missing)
+    expect(await run({ 'hook-hidden': 'webhook orderUpdated' }, undefined, undefined, '')).toContain(missing)
+    expect(await run({ 'hidden-described': 'GET /hidden-described' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hook-described': 'webhook hookDescribed' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hidden-endpoint': 'openapi/api.json GET /hidden-described' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' })).not.toContain(missing)
   })
 
   it('warns for pages bound to excluded webhooks, and not for hidden ones, bare or spec-prefixed', async () => {
