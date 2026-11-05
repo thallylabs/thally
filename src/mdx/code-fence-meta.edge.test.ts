@@ -220,7 +220,22 @@ describe('applyCodeNotation edge cases', () => {
     expect(applyCodeNotation(trailing)!.code).toBe('x // y')
     const stacked = 'x // ' + '[!code ++] '.repeat(20_000)
     expect(applyCodeNotation(stacked)!.code).toBe('x')
+    expect(performance.now() - start).toBeLessThan(50)
+  })
+
+  it('stays fast with many markers on one line', () => {
+    // Each marker's range is capped, and a repeated range is added once, so this is not markers x range.
+    const ranges = 'x // ' + '[!code ++:999999] '.repeat(20_000)
+    let start = performance.now()
+    const r = applyCodeNotation(ranges)!
+    expect(r.code).toBe('x')
+    expect(r.marks.add.size).toBe(1_000)
     expect(performance.now() - start).toBeLessThan(100)
+    // Every trailing marker is stripped in turn: the search for the next one must not rescan the whole line.
+    const trailing = 'x ' + '// [!code ++] '.repeat(16_000)
+    start = performance.now()
+    expect(applyCodeNotation(trailing)!.code).toBe('x')
+    expect(performance.now() - start).toBeLessThan(500)
   })
 })
 
@@ -308,6 +323,40 @@ describe('applyCodeNotation with a marker among comment text', () => {
 
   it('keeps a quote that escapes inside a string', () => {
     expect(applyCodeNotation('const s = "a \\" // [!code ++] b"')).toBeNull()
+  })
+
+  it('reads the comment that holds the marker, not a `#` or `--` that is code', () => {
+    const curl = applyCodeNotation("curl https://x \\\n  --header 'a' # old [!code --]\n  --data x")!
+    expect(curl.code).toBe("curl https://x \\\n  --header 'a' # old\n  --data x")
+    expect([...curl.marks.remove]).toEqual([2])
+    const include = applyCodeNotation('#include <stdio.h> // old [!code --]\nint main() {}')!
+    expect(include.code).toBe('#include <stdio.h> // old\nint main() {}')
+    expect([...include.marks.remove]).toEqual([1])
+    const css = applyCodeNotation('#main { color: red } /* new [!code ++] */\nnext')!
+    expect(css.code).toBe('#main { color: red } /* new */\nnext')
+    expect([...css.marks.add]).toEqual([1])
+    const flag = applyCodeNotation('--verbose  // note [!code ++]\nnext')!
+    expect([...flag.marks.add]).toEqual([1])
+    const shebang = applyCodeNotation('#!/bin/bash # note [!code ++]\nnext')!
+    expect([...shebang.marks.add]).toEqual([1])
+    const npm = applyCodeNotation('npm i \\\n  --save-dev x # new [!code ++]\nnext')!
+    expect([...npm.marks.add]).toEqual([2])
+  })
+
+  it('does not read a `#` or `--` inside comment text as the start of the comment', () => {
+    // A comment-only line stays unmarked and marks the line below, as before.
+    const issue = applyCodeNotation('// see issue #12 [!code ++]\nnext')!
+    expect(issue.code).toBe('// see issue #12\nnext')
+    expect([...issue.marks.add]).toEqual([2])
+    const flag = applyCodeNotation('# run with --verbose [!code ++]\nnext')!
+    expect([...flag.marks.add]).toEqual([2])
+  })
+
+  it('keeps a comment that holds an apostrophe or a quote', () => {
+    const r = applyCodeNotation("x = 1 // it's [!code ++]\ny // \"quoted\" [!code --]")!
+    expect(r.code).toBe("x = 1 // it's\ny // \"quoted\"")
+    expect([...r.marks.add]).toEqual([1])
+    expect([...r.marks.remove]).toEqual([2])
   })
 
   it('preserves CRLF endings', () => {

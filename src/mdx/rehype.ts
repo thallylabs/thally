@@ -386,45 +386,68 @@ const NOTATION_MARKER = /\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\]/g
 // What a comment is once its markers are taken out and nothing else is left.
 const EMPTY_COMMENT = /^(?:\/\/|#|--|\/\*\s*\*\/|<!--\s*-->)$/
 
+/** Whether a comment opener (`//`, `/*`, `<!--`, `#`, `--`) starts at `index`. */
+function isCommentOpener(line: string, index: number): boolean {
+  const char = line[index]
+  if (char === '/') return line[index + 1] === '/' || line[index + 1] === '*'
+  if (char === '<') return line.startsWith('<!--', index)
+  if (char !== '#' && !line.startsWith('--', index)) return false
+  // `#include`, `#main`, `--header`, `x--` are code as often as comments: a `#` or `--` is
+  // one only after whitespace and before whitespace (`# note`, `-- note`).
+  const before = line[index - 1]
+  const after = line[index + (char === '#' ? 1 : 2)]
+  return (before === undefined || before === ' ' || before === '\t') && (after === undefined || after === ' ' || after === '\t')
+}
+
 /**
- * Where the first comment on a line starts (`//`, `#`, `--`, `/*`, `<!--`), or
- * -1. An opener inside a string literal is not one: `"https://x.test"` holds no
- * comment. A single pass, so a hostile line costs no more than its length.
+ * Where the comment that holds a line's first marker starts, or -1: the nearest
+ * opener before that marker, not the first one on the line, which can be code
+ * (`#include <a.h> // old [!code --]`). An opener inside a string literal is not
+ * one: `"https://x.test"` holds no comment. A single pass, so a hostile line
+ * costs no more than its length.
  */
-function commentStart(line: string): number {
+function commentStart(line: string, markers: Array<RegExpMatchArray>): number {
   let quote = ''
-  for (let index = 0; index < line.length; index += 1) {
+  let opener = -1
+  let next = 0
+  for (let index = 0; index < line.length && next < markers.length; index += 1) {
+    if (index >= markers[next].index!) {
+      // A marker with no comment before it sits in a string or in code: look at the next.
+      if (opener >= 0) return opener
+      next += 1
+    }
     const char = line[index]
     if (quote) {
       if (char === '\\') index += 1
       else if (char === quote) quote = ''
     } else if (char === '"' || char === "'" || char === '`') {
       quote = char
-    } else if (char === '#' || line.startsWith('//', index) || line.startsWith('--', index) || line.startsWith('/*', index) || line.startsWith('<!--', index)) {
-      return index
+    } else if (isCommentOpener(line, index)) {
+      opener = index
     }
   }
   return -1
 }
 
 /**
- * Take every marker out of the first comment on a line, wherever the marker
- * sits in it, and keep the comment's other text (`x // [!code --] v1` becomes
- * `x // v1`). Null when the line has no comment outside a string, or no marker
- * in it. `commentOnly` is true when nothing but the comment is on the line, as
- * Shiki reads it, whatever the comment says: such a marker marks the line below.
+ * Take every marker out of the comment that holds the first marker on a line,
+ * wherever the marker sits in it, and keep the comment's other text
+ * (`x // [!code --] v1` becomes `x // v1`). Null when the line has no comment
+ * outside a string, or no marker in it. `commentOnly` is true when nothing but
+ * the comment is on the line, as Shiki reads it, whatever the comment says:
+ * such a marker marks the line below.
  */
 function stripCommentMarkers(line: string): { text: string; markers: Array<RegExpMatchArray>; commentOnly: boolean } | null {
-  const start = commentStart(line)
+  const found = [...line.matchAll(NOTATION_MARKER)]
+  const start = commentStart(line, found)
   if (start < 0) return null
   const comment = line.slice(start)
-  const markers = [...comment.matchAll(NOTATION_MARKER)]
-  if (markers.length === 0) return null
+  const markers = found.filter((marker) => marker.index! >= start)
   let kept = ''
   let last = 0
   for (const marker of markers) {
-    kept += comment.slice(last, marker.index)
-    last = marker.index! + marker[0].length
+    kept += comment.slice(last, marker.index! - start)
+    last = marker.index! - start + marker[0].length
     // `// [!code ++] note` leaves one space, not two.
     if (kept.endsWith(' ') || kept.endsWith('\t')) while (comment[last] === ' ' || comment[last] === '\t') last += 1
   }
@@ -435,6 +458,24 @@ function stripCommentMarkers(line: string): { text: string; markers: Array<RegEx
     markers,
     commentOnly: ['', '{'].includes(before.trim()),
   }
+}
+
+/**
+ * Where a trailing marker's comment can start, so `CODE_NOTATION` need not scan the
+ * whole line for each of many markers: the last `[!code` is in it, with its opener
+ * and whitespace just before. Starts a little early, never late. Past the end when
+ * the line has no marker.
+ */
+function trailingSearchStart(line: string): number {
+  let at = line.lastIndexOf('[!code')
+  if (at < 0) return line.length
+  const skipSpaces = () => {
+    while (at > 0 && (line[at - 1] === ' ' || line[at - 1] === '\t')) at -= 1
+  }
+  skipSpaces()
+  at = Math.max(0, at - 4) // `<!--`
+  skipSpaces()
+  return Math.max(0, at - 1) // the `{` of `{/*`
 }
 
 /**
@@ -464,15 +505,24 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
     // Strip every trailing marker (`a // [!code ++] // [!code focus]`).
     // The current rendered line number is `out.length + 1`; when the line is
     // marker-only it is dropped, so that same number is the next line's.
+    // Ranges are added once per line below, so a line of many markers costs no more than its length.
+    const ranges = new Map<string, { target: Set<number>; from: number; count: number }>()
+    const mark = (kind: keyof typeof kinds, from: number, count: string | undefined) => {
+      const key = `${kind}@${from}`
+      const length = Math.min(Number(count ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
+      const range = ranges.get(key)
+      if (!range) ranges.set(key, { target: kinds[kind], from, count: length })
+      else if (length > range.count) range.count = length
+    }
     let rest = line
     let carriageReturn = ''
-    for (let match = CODE_NOTATION.exec(rest); match; match = CODE_NOTATION.exec(rest)) {
+    for (let from = trailingSearchStart(rest); from < rest.length; from = trailingSearchStart(rest)) {
+      const match = CODE_NOTATION.exec(rest.slice(from))
+      if (!match) break
       found = true
       if (rest === line) carriageReturn = match[3]
-      const count = Math.min(Number(match[2] ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
-      const target = kinds[match[1] as keyof typeof kinds]
-      for (let offset = 0; offset < count; offset += 1) target.add(out.length + 1 + offset)
-      let end = match.index
+      mark(match[1] as keyof typeof kinds, out.length + 1, match[2])
+      let end = from + match.index
       while (end > 0 && (rest[end - 1] === ' ' || rest[end - 1] === '\t')) end -= 1
       rest = rest.slice(0, end)
     }
@@ -486,12 +536,12 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
         if (!carriageReturn) carriageReturn = body === rest ? '' : '\r'
         // A comment-only line stays when it has text, so the line below it is two ahead; with none left it is dropped, and the line below takes its place.
         const target = out.length + 1 + (stripped.commentOnly && stripped.text.trim() !== '' ? 1 : 0)
-        for (const marker of stripped.markers) {
-          const count = Math.min(Number(marker[2] ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
-          for (let offset = 0; offset < count; offset += 1) kinds[marker[1] as keyof typeof kinds].add(target + offset)
-        }
+        for (const marker of stripped.markers) mark(marker[1] as keyof typeof kinds, target, marker[2])
         rest = stripped.text
       }
+    }
+    for (const { target, from, count } of ranges.values()) {
+      for (let offset = 0; offset < count; offset += 1) target.add(from + offset)
     }
     if (rest === line) out.push(line)
     else if (rest !== '') out.push(rest + carriageReturn)
