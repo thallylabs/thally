@@ -351,8 +351,24 @@ interface PageIds {
   headings: Array<{ base: string; explicit: boolean }>
   /** The anchor base of each `<ParamField>` and `<ResponseField>` that has a literal name and no `id` of its own, in document order. */
   fieldBases: Array<string>
+  /** The id base (slug of the title) of each `<Tab>` that has a literal title and no `id` of its own, in document order. */
+  tabBases: Array<string>
   /** Every `id` an author wrote on a JSX element, and each one a component makes from its text. */
   reserved: Set<string>
+}
+
+/**
+ * The ids of a page's `<Tab>`s: the slug of the title, `-2`, `-3` for a repeat,
+ * skipping the ids in `used`. Must stay identical to `numberTabIds` in the
+ * runtime (src/lib/field-anchor.ts), which gives each tab its id.
+ */
+export function numberTabIds(bases: Iterable<string>, used: Set<string>): Array<string> {
+  return [...bases].map((base) => {
+    let id = base
+    for (let occurrence = 2; used.has(id); occurrence++) id = `${base}-${occurrence}`
+    used.add(id)
+    return id
+  })
 }
 
 /**
@@ -378,7 +394,7 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
     if (!footnotes.has(identifier)) footnotes.set(identifier, footnotes.size + 1)
     return footnotes.get(identifier)!
   }
-  const page: PageIds = { headings: [], fieldBases: [], reserved: new Set() }
+  const page: PageIds = { headings: [], fieldBases: [], tabBases: [], reserved: new Set() }
   const visit = (node: MdxNode, stepSize: string | undefined, inNote: boolean): void => {
     let childSize = stepSize
     if (node.type === 'footnoteReference' && !inNote) footnoteNumber(node.identifier ?? '')
@@ -413,6 +429,11 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
         // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
         if (base && constantAttribute(node, 'id') === undefined) page.fieldBases.push(base)
       }
+      if (node.name === 'Tab') {
+        const title = constantAttribute(node, 'title')
+        const base = title ? slugify(plainInlineText(title)) : ''
+        if (base && constantAttribute(node, 'id') === undefined) page.tabBases.push(base)
+      }
     }
     for (const child of node.children ?? []) visit(child, childSize, inNote || node.type === 'footnoteDefinition')
   }
@@ -423,8 +444,8 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
 /**
  * Every id a rendered page exposes as a link target: its headings, numbered as
  * the renderer numbers them (`numberHeadingIds`), then its fields (`numberFieldIds`,
- * which skips every id an author wrote and every one a component makes), the ids
- * authored on JSX elements and made by components, and any element in the text
+ * which skips every id an author wrote and every one a component makes), then its
+ * tabs (`numberTabIds`), the ids authored on JSX elements and made by components, and any element in the text
  * with a literal `id` attribute or legacy `<a name>`. Read from the syntax tree
  * like the renderer, so a heading's level, form and place agree with the page.
  */
@@ -446,6 +467,7 @@ export function extractHeadingAnchors(content: string, parsed: MdxPage = parseMd
   const { ids, used } = numberHeadingIds(page.headings)
   for (const id of ids) if (id) anchors.add(id)
   for (const id of numberFieldIds(page.fieldBases, used, page.reserved)) anchors.add(id)
+  for (const id of numberTabIds(page.tabBases, used)) anchors.add(id)
   for (const id of page.reserved) anchors.add(id)
   return anchors
 }

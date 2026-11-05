@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds } from '../lib/field-anchor'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, numberTabIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -844,11 +844,18 @@ interface HeadingTarget {
  * field, a Step whose title is plain text, a Card, an HTML element) and every one
  * a component makes from its text (an Accordion, an Update: `componentIds`) is
  * skipped, so a generated field id never repeats one.
+ *
+ * A `<Tab>` is given the id Mintlify serves for it, the slug of its title
+ * (`#bitcoin`), which the tab bar uses to select it. Tabs are numbered last
+ * (`numberTabIds`), after every heading and field and skipping every authored
+ * id, so a tab never takes an id another element has and shifts none. A tab
+ * with an `id` of its own keeps it.
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
     const targets: Array<HeadingTarget> = []
     const fields: Array<{ base: string; assign: (id: string) => void }> = []
+    const tabs: Array<{ base: string; assign: (id: string) => void }> = []
     const authoredIds = new Set<string>()
     const componentGeneratedIds = new Set<string>()
     const text = (node: Element): string => node.children.map((child) =>
@@ -903,6 +910,11 @@ function rehypeUniqueHeadingIds() {
           // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
           if (base && jsxConstantAttribute(jsx, 'id') === undefined) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
         }
+        if (jsx.name === 'Tab') {
+          const title = jsxConstantAttribute(jsx, 'title')
+          const base = title ? slugify(plainInlineText(title)) : ''
+          if (base && jsxConstantAttribute(jsx, 'id') === undefined) tabs.push({ base, assign: (id) => setJsxId(jsx, id) })
+        }
       }
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)
     }
@@ -915,6 +927,8 @@ function rehypeUniqueHeadingIds() {
     // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote or a component makes.
     const ids = numberFieldIds(fields.map((field) => field.base), usedIds, [...authoredIds, ...componentGeneratedIds])
     fields.forEach((field, index) => field.assign(ids[index]))
+    const tabIds = numberTabIds(tabs.map((tab) => tab.base), usedIds)
+    tabs.forEach((tab, index) => tab.assign(tabIds[index]))
   }
 }
 
