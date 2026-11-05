@@ -854,6 +854,8 @@ describe('Mintlify heading ids from the live Trigger.dev docs', () => {
     ['### `No loader is configured for ".node" files`', 'no-loader-is-configured-for--node-files'],
     ['### `Failed to index deployment` with `Column must be greater than or equal to 0, got -1`', 'failed-to-index-deployment-with-column-must-be-greater-than-or-equal-to-0-got-1'],
     ['### Comparison: =, !=, &lt;, >, &lt;=, >=', 'comparison-=-=-<->-<=->='],
+    // Reown: a `)` glued to the closing `.` makes a dash only a later word could keep, so the id does not end in one; a dash a space makes (`{ name }` above) stays.
+    ['#### Then, on Flutter side we create an `EventChannel` where links are going to be received and passed to `dispatchEnvelope()`.', 'then-on-flutter-side-we-create-an-eventchannel-where-links-are-going-to-be-received-and-passed-to-dispatchenvelope'],
     // Turso: what a code span holds is text, not a tag, even when it reads as one (`Option<T>`).
     ['#### `kv.get<T: DeserializeOwned>(key: &str) -> Option<T>`', 'kv-get<t-deserializeowned>-key-&str->-option<t>'],
     ['#### `fs.read_file(path: &str) -> Vec<u8>`', 'fs-read_file-path-&str->-vec<u8>'],
@@ -875,6 +877,16 @@ describe('Mintlify heading ids from the live Trigger.dev docs', () => {
     expect(mintlifyHeadingSlug('@trigger.dev/sdk/v3')).toBe('@trigger-dev/sdk/v3')
     expect(mintlifyHeadingSlug('sessions.start(body, requestOptions?)')).toBe('sessions-start-body-requestoptions')
     expect(mintlifyHeadingSlug('out.writer({ execute, ... })')).toBe('out-writer--execute-')
+  })
+
+  it('leaves no trailing dash for one a `.`, `(` or `)` made when nothing that writes to the id follows it', () => {
+    expect(mintlifyHeadingSlug('passed to dispatchEnvelope().')).toBe('passed-to-dispatchenvelope')
+    expect(mintlifyHeadingSlug('call run().:')).toBe('call-run')
+    // A word after it keeps the dash, and so does a space before characters that write nothing.
+    expect(mintlifyHeadingSlug('run().x')).toBe('run-x')
+    expect(mintlifyHeadingSlug('run(). x')).toBe('run-x')
+    expect(mintlifyHeadingSlug('run(). \u{1F4C3}')).toBe('run-')
+    expect(mintlifyHeadingSlug('loadSkill({ name })')).toBe('loadskill--name-')
   })
 })
 

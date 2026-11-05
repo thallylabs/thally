@@ -411,7 +411,9 @@ const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@%=<>|\u2019\u201c\u201d\u2014\u201
  * punctuation and emoji are dropped, and repeats are numbered `-2`, `-3`, ...
  * by the renderer. Read from other sites' ids: a `.` before a `,` makes a dash
  * (`e.g., x` is `e-g--x`), and `(s)` after a word is the plural (`domain(s)` is
- * `domains`).
+ * `domains`). A dash a space or `-` makes stays at the end of the id, after
+ * what writes nothing (`loadSkill({ name })` is `loadskill--name-`); one a `.`,
+ * `(` or `)` made does not (`dispatchEnvelope().` is `dispatchenvelope`).
  */
 export function mintlifyHeadingSlug(text: string): string {
   const chars = [...text.replace(/[\u200b*]/g, '').replace(/(?<=[\p{L}\p{M}\p{N}_])\(s\)(?![\p{L}\p{M}\p{N}_])/gu, 's').normalize('NFC').trim().toLowerCase()]
@@ -419,6 +421,8 @@ export function mintlifyHeadingSlug(text: string): string {
   let id = ''
   let afterDash = false
   let endsWithDash = false
+  // The id ends in a dash only a `.`, `(` or `)` made, and nothing has been written since.
+  let softDash = false
   chars.forEach((char, index) => {
     const before = chars[index - 1]
     const after = chars[index + 1]
@@ -426,12 +430,14 @@ export function mintlifyHeadingSlug(text: string): string {
     if (isWord(char)) {
       id += char
       afterDash = false
+      softDash = false
     } else if (
       /[\s-]/.test(char)
       || (char === '.' && (isWord(after) || after === ','))
       || (char === '(' && isWord(before) && (isWord(after) || after === '{'))
       || (char === ')' && after !== undefined && !/\s/.test(after))
     ) {
+      softDash = /[\s-]/.test(char) ? false : (id !== '' && !afterDash) || softDash
       if (id && !afterDash) id += '-'
       afterDash = true
       endsWithDash = true
@@ -439,7 +445,7 @@ export function mintlifyHeadingSlug(text: string): string {
       afterDash = false
     }
   })
-  return endsWithDash ? id.replace(/-$/, '') : id
+  return endsWithDash || softDash ? id.replace(/-$/, '') : id
 }
 
 /** Thally's own heading slug (`slugify` in `@thallylabs/core`), used to tell which headings already match. */
