@@ -1332,6 +1332,18 @@ function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
 }
 
 /**
+ * Mintlify's theme by name. `mint` and `maple` are Thally themes of the same name; every other theme is the closest one, and the
+ * warning says so.
+ */
+function projectedThemeWithWarning(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['theme'] {
+  const theme = projectedTheme(value)
+  if (theme && value !== theme && value !== 'mint') {
+    warnings.push({ code: 'unsupported-config', message: `theme ${JSON.stringify(value)} has no exact Thally equivalent, so ${JSON.stringify(theme)} was used, which is the closest. Compare the look of the migrated site with the live one.`, source: 'docs.json' })
+  }
+  return theme
+}
+
+/**
  * Mintlify `errors`: only `404.redirect` (a boolean) is carried. Every other setting under `errors` is named in one warning.
  */
 function projectedErrors(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['errors'] {
@@ -1566,6 +1578,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   }
   const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
   const projectedColorsValue = projectedColors(config.colors, warnings)
+  const theme = projectedThemeWithWarning(config.theme, warnings)
   const errors = projectedErrors(config.errors, warnings)
   const iconLibrary = objectValue(config.icons)?.library
   // Mintlify's default icon library is Font Awesome when docs.json names none.
@@ -1610,7 +1623,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     smartQuotes: true,
     // `styling.eyebrows: "breadcrumbs"` shows the whole group path; "section" (the default) shows the nearest group.
     ...(objectValue(config.styling)?.eyebrows === 'breadcrumbs' ? { eyebrow: 'path' as const } : {}),
-    ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(theme ? { theme } : {}),
     ...(errors ? { errors } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
     ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),

@@ -311,6 +311,16 @@ describe('config mapping', () => {
     expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
   })
 
+  it('says when a Mintlify theme has no exact Thally equivalent, and stays quiet for the two that do', () => {
+    const themeWarnings = (name: string) => site({ 'docs.json': JSON.stringify({ ...nav, theme: name }), ...intro }).warnings.filter((warning) => /theme/.test(warning.message))
+    expect(themeWarnings('aspen').map((warning) => warning.message)).toEqual([
+      'theme "aspen" has no exact Thally equivalent, so "maple" was used, which is the closest. Compare the look of the migrated site with the live one.',
+    ])
+    expect(themeWarnings('luma')).toHaveLength(1)
+    expect(themeWarnings('maple')).toEqual([])
+    expect(themeWarnings('mint')).toEqual([])
+  })
+
   it('carries errors.404.redirect into docs.json and says which other errors settings were not carried', () => {
     const errors = (value: unknown) => site({ 'docs.json': JSON.stringify({ ...nav, errors: value }), ...intro })
     const carried = errors({ '404': { redirect: true } })
