@@ -153,6 +153,25 @@ export function pageEntryRoutes(page: Pick<MigrationPage, 'id'>): Array<string> 
   return [...new Set([...pageRoutes([page]), ...(page.id === 'introduction' ? ['/'] : [])])]
 }
 
+/**
+ * The pages a literal redirect in `redirects` starts from, comparing addresses as written (a trailing slash aside). The introduction
+ * page is left out: it is also the home page, which a redirect from `/introduction` does not reach.
+ */
+export function pagesRedirectedFrom<T extends Pick<MigrationPage, 'id'>>(redirects: ReadonlyArray<{ source: string }>, pages: ReadonlyArray<T>): Array<T> {
+  const sources = new Set(redirects.flatMap(({ source }) => exactRoute(source) ?? []))
+  return pages.filter((page) => page.id !== 'introduction' && pageRoutes([page]).some((route) => sources.has(route)))
+}
+
+/** One warning for the pages that stand in for a redirect from their own address; null when there are none. */
+export function redirectsOverPagesWarning(routes: ReadonlyArray<string>): MigrationWarning | null {
+  if (routes.length === 0) return null
+  const one = routes.length === 1
+  return {
+    code: 'unsupported-config',
+    message: `Kept ${routes.length} redirect${one ? '' : 's'} from ${list([...routes])}: ${one ? 'that URL is' : 'those URLs are'} also ${one ? 'a page' : 'pages'} in this site. Mintlify follows a redirect and never shows the page, so the ${one ? 'page was' : 'pages were'} marked noindex and ${one ? 'its file stays' : 'their files stay'}. Delete ${one ? 'the page' : 'a page'} if you do not need it.`,
+  }
+}
+
 /** The literal routes a site's pages are served at, as `literalRoute` writes them. */
 export function servedRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Set<string> {
   return new Set(pageRoutes(pages).map((route) => route.toLowerCase()))

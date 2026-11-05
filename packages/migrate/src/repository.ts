@@ -105,7 +105,7 @@ import {
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
-import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, pagesRedirectedFrom, redirectsOverPagesWarning, servedRoutes } from './redirects.js'
 import type {
   MigrationApiGroup,
   MigrationAsset,
@@ -4551,6 +4551,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let mintlifyApiTabSlots: MintlifyNavigationResult['apiTabSlots'] = []
   /** Groups whose `directory` setting has their root page list the group's pages as cards. */
   let mintlifyDirectories: MintlifyNavigationResult['directories'] = []
+  /** The redirects the source's own config lists, before the migrator adds any: only these can take a page's address from it. */
+  let mintlifyAuthoredRedirects: NonNullable<MigrationDocsConfig['redirects']> = []
   /** Access each navigation appearance of a Mintlify page imposes, keyed like page references. */
   const mintlifyNavigationAccess = new Map<string, Array<NavigationAccess>>()
   let fernRawConfig: Record<string, unknown> | null = null
@@ -4603,6 +4605,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         mintlifyApiTabSlots = projected.apiTabSlots
         mintlifyDirectories = projected.directories
+        mintlifyAuthoredRedirects = projected.docsConfig.redirects ?? []
         warnings.push(...projected.warnings)
         for (const repo of projected.gatedSourceRefs) gatedSourceRepos.add(repo.toLowerCase())
         for (const appearance of projected.referenceAccess) {
@@ -6621,13 +6624,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   if (docsConfig.redirects) {
     // Every platform's redirects meet here: none may fail the build, hide a page or loop.
-    docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), [...pages, ...sourceRefPages], warnings)
+    // Mintlify answers a redirect from its own config before it looks for a page, so there the redirect wins over a page at its source:
+    // the page is left out of this check, and stays as a noindex stub when its redirect survives it.
+    const allPages = [...pages, ...sourceRefPages]
+    const takenOver = platform === 'mintlify' ? pagesRedirectedFrom(mintlifyAuthoredRedirects, allPages) : []
+    docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), takenOver.length > 0 ? allPages.filter((page) => !takenOver.includes(page)) : allPages, warnings)
+    const standIns = pagesRedirectedFrom(docsConfig.redirects ?? [], takenOver)
+    for (const page of standIns) page.noindex = true
+    const standInWarning = redirectsOverPagesWarning(standIns.map((page) => `/${page.id}`))
+    if (standInWarning) warnings.push(standInWarning)
   }
   // A Mintlify page whose frontmatter `url` is another address is a link in the sidebar. Its entry stays in
   // the navigation and every address that opens it redirects there (the home page is served at `/` as well as
   // `/introduction`); the redirect hides the page on purpose, so it skips the pass above. A sourceRef page
-  // redirects from its mounted path. A redirect the source site already has for one of those addresses (only
-  // `/` can: the pass above drops any other) keeps its place, and a warning says so.
+  // redirects from its mounted path. A redirect the source site already has for one of those addresses keeps
+  // its place, and a warning says so.
   const redirectSources = new Map((docsConfig.redirects ?? []).map((redirect) => [(redirect.source.replace(/\/+$/, '') || '/').toLowerCase(), redirect.destination]))
   const linkRedirects: Array<{ source: string; destination: string; permanent: false }> = []
   for (const page of [...pages, ...sourceRefPages]) {

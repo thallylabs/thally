@@ -335,6 +335,11 @@ without regard to a trailing slash, so a redirect whose source is a page of the
 migrated site would hide that page, and two redirects that send a visit back to
 each other never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
+Mintlify redirect from the source's own config is the exception: Mintlify
+follows it even when a page has that address, so the redirect is kept, the page
+is marked `noindex` and stays as a stub (its navigation entry follows the
+redirect), and a warning lists the first ten. The home page, and an address that
+differs from a page only in letter case, are still left out. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still
 reachable there. These checks ignore letter case, because a site can run on

@@ -990,6 +990,27 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     expect(result.warnings.filter((warning) => warning.message.includes('/github'))).toEqual([])
   })
 
+  it('keeps a source redirect that stands in for a page after the download, as the repository migration wrote it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-endpoint-standins-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      redirects: [{ source: '/old', destination: '/guide' }],
+      navigation: { tabs: [
+        { tab: 'Guides', pages: ['guide', 'old'] },
+        { tab: 'API reference', openapi: UNKEY_URL, groups: [{ group: 'Keys', pages: ['POST /v2/keys.createKey'] }] },
+      ] },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'old.mdx'), '---\ntitle: Old\n---\n\nThe page that was moved.')
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(migrated.pages.find((page) => page.id === 'old')?.noindex).toBe(true)
+
+    const result = await hydrateRemoteApiSpecs(migrated, download)
+
+    expect(result.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
+    expect(result.pages.find((page) => page.id === 'old')?.noindex).toBe(true)
+    expect(result.warnings.filter((warning) => /would hide/.test(warning.message))).toEqual([])
+  })
+
   it('puts each product\'s API tab back in its place with a page per operation, and binds the spec once in a hidden tab', async () => {
     const migrated = unkey()
     // Before the download only the tabs with pages of their own exist: nothing is listed that cannot be a page yet.
