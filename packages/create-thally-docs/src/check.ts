@@ -339,6 +339,9 @@ function headingText(node: MdxNode, components: boolean, footnoteNumber: (identi
   return (node.children ?? []).map((child) => headingText(child, components, footnoteNumber)).join('')
 }
 
+/** The ids the site gives the rows of a page that documents an operation (`parameter-<name>`, `body-<path>`, `response-<path>`). */
+const GENERATED_FIELD_ID = /^(?:parameter|body|response)-/
+
 /** Step title sizes that render a heading; `p` is plain text. */
 const STEP_HEADING_SIZES = ['h2', 'h3', 'h4']
 
@@ -872,6 +875,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const operationPages: Array<{ file: string; reference: DocReference; hasDescription: boolean }> = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
+  // The pages that document an operation: the site gives their parameters, body and response fields ids that are not in the MDX.
+  const operationPaths = new Set<string>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
   // The pages that are only a stub for a redirect, with the notices about their empty body held until every page is known.
   const linkStubs: Array<{ file: string; path: string; issues: LintIssue[] }> = []
@@ -922,7 +927,11 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     }
     if (isLinkStub) linkStubs.push({ file: rel2, path, issues: notices })
 
-    if (reference) operationPages.push({ file: rel2, reference, hasDescription: Boolean(data.description) })
+    if (reference) {
+      operationPages.push({ file: rel2, reference, hasDescription: Boolean(data.description) })
+      operationPaths.add(path)
+      operationPaths.add(`/${pageId}`)
+    }
     for (const message of manualApiProblems(rel2, data, Boolean(reference), content, (config as { api?: unknown }).api)) {
       issues.push({ severity: 'warning', file: rel2, message })
     }
@@ -989,7 +998,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   // Broken internal link + anchor detection (after all valid paths are known).
   const externalLinks: Array<ExternalLinkReference> = []
-  for (const { file, anchors, links, offset } of linksByFile) {
+  // Not checked against the spec: the id of a field depends on how the renderer lists the schema (src/lib/openapi/field-ids.ts).
+  const isGeneratedFieldId = (path: string, fragment: string): boolean => operationPaths.has(path) && GENERATED_FIELD_ID.test(fragment)
+  for (const { file, path: pagePath, anchors, links, offset } of linksByFile) {
     for (const { target, line: contentLine } of links) {
       const line = contentLine + offset
       if (/^(https?:|mailto:|tel:)/i.test(target)) {
@@ -999,7 +1010,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       }
       if (target.startsWith('#')) {
         const anchor = target.slice(1)
-        if (anchor && !anchors.has(decodedFragment(anchor))) {
+        if (anchor && !anchors.has(decodedFragment(anchor)) && !isGeneratedFieldId(pagePath, decodedFragment(anchor))) {
           issues.push({ severity: 'warning', message: `Broken anchor: "${target}" not found on this page`, file, line })
         }
         continue
@@ -1010,7 +1021,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (!cycle && isGeneratedPath(path)) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
-      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor))) {
+      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor)) && !isGeneratedFieldId(path, decodedFragment(anchor))) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
       }
     }

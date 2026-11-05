@@ -14,6 +14,7 @@ import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
+import { fieldIds, itemsParent, memberParent, parameterId, uniqueIds } from '@/lib/openapi/field-ids'
 import { allowsNull, flattenSchema, unionVariants, type SchemaVariant } from '@/lib/openapi/schema-variants'
 import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
 import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
@@ -63,6 +64,9 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
     { title: t('headers'), location: 'header' as const, parameters: operation.parameters.header },
     { title: t('cookieParameters'), location: 'cookie' as const, parameters: operation.parameters.cookie },
   ].filter((group) => group.parameters.length > 0)
+  const listedParameters = parameterGroups.flatMap((group) => group.parameters)
+  const listedIds = uniqueIds(listedParameters.map((param) => parameterId(param.name)))
+  const parameterIds = new Map(listedParameters.map((param, index) => [param, listedIds[index]]))
 
   const description = !showDescription ? null : operation.description ? (
     <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
@@ -140,6 +144,7 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
                   {group.parameters.map((param) => (
                     <ParamField
                       key={param.name}
+                      id={parameterIds.get(param)}
                       name={param.name}
                       type={resolveSchemaType(param.schema)}
                       required={param.required}
@@ -169,14 +174,14 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
               <h2 className="text-lg font-semibold text-foreground">{t('requestBody')}</h2>
               {operation.requestBody.description ? <Markdown className={cn(markdownProse, 'text-sm text-foreground/70')}>{operation.requestBody.description}</Markdown> : null}
             </div>
-            {operation.requestBody.contents.map((content) => (
+            {operation.requestBody.contents.map((content, index) => (
               <div key={content.mediaType}>
                 <div className="mb-2 flex items-center gap-2">
                   <span className="rounded border border-border/40 bg-muted px-2 py-0.5 font-mono text-xs text-foreground/70">{content.mediaType}</span>
                   <span className="text-xs text-foreground/50">{operation.requestBody?.required ? t('requiredCap') : t('optional')}</span>
                 </div>
                 <div className="border-y border-border">
-                  <SchemaAsParamFields schema={content.schema} />
+                  <SchemaAsParamFields schema={content.schema} parent={index === 0 ? 'body' : undefined} />
                 </div>
               </div>
             ))}
@@ -218,15 +223,16 @@ function WebhookExample({ body }: { body?: string }) {
 // SchemaAsParamFields — renders object properties as ParamField rows
 // ---------------------------------------------------------------------------
 
-function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
+function SchemaAsParamFields({ schema, parent }: { schema?: Record<string, unknown>; parent?: string }) {
   const t = useApiLabels()
   if (!schema) return null
 
   const flat = listedObject(schema)
+  const rowsParent = listedParent(parent, schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    if (variants) return <SchemaVariants variants={variants} depth={0} nullable={allowsNull(flat)} />
+    if (variants) return <SchemaVariants variants={variants} depth={0} nullable={allowsNull(flat)} parent={rowsParent} />
     return (
       <ParamField name="(body)" type={resolveSchemaType(flat)}>
         {typeof flat.description === 'string' ? <Markdown>{flat.description}</Markdown> : null}
@@ -235,10 +241,12 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
   }
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
+  const fields = Object.keys(properties).map((name) => fieldIds(rowsParent, name, flattenSchema(properties[name])))
+  const rowIds = uniqueIds(fields.map((field) => field.id))
 
   return (
     <>
-      {Object.entries(properties).map(([name, propSchema]) => {
+      {Object.entries(properties).map(([name, propSchema], index) => {
         const flatProp = flattenSchema(propSchema)
         const type = resolveSchemaType(flatProp)
         const description = typeof flatProp.description === 'string' ? flatProp.description : undefined
@@ -249,6 +257,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
         return (
           <ParamField
             key={name}
+            id={rowIds[index]}
             name={name}
             type={type}
             required={isRequired}
@@ -265,7 +274,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             ) : null}
             {nested ? (
               <Expandable title={`${name} ${t('properties')}`}>
-                <NestedFields schema={flatProp} depth={1} />
+                <NestedFields schema={flatProp} depth={1} parent={fields[index].nested} />
               </Expandable>
             ) : null}
           </ParamField>
@@ -326,9 +335,9 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
             <Markdown className={cn(markdownProse, 'mb-3 text-sm text-foreground/60')}>{active.description}</Markdown>
           ) : null}
           {active.contents.length ? (
-            active.contents.map((content) => (
+            active.contents.map((content, index) => (
               <div key={content.mediaType}>
-                <SchemaAsResponseFields schema={content.schema} />
+                <SchemaAsResponseFields schema={content.schema} parent={index === 0 ? 'response' : undefined} />
                 <ExamplePanel title={t('example')} mediaType={content.mediaType} example={content.example} examples={content.examples} />
               </div>
             ))
@@ -345,22 +354,25 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
 // SchemaAsResponseFields — renders object properties as ResponseField rows
 // ---------------------------------------------------------------------------
 
-function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string, unknown>; depth?: number }) {
+function SchemaAsResponseFields({ schema, depth = 0, parent }: { schema?: Record<string, unknown>; depth?: number; parent?: string }) {
   const t = useApiLabels()
   if (!schema) return null
 
   const flat = listedObject(schema)
+  const rowsParent = listedParent(parent, schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(flat)} /> : null
+    return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(flat)} parent={rowsParent} /> : null
   }
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
+  const fields = Object.keys(properties).map((name) => fieldIds(rowsParent, name, flattenSchema(properties[name])))
+  const rowIds = uniqueIds(fields.map((field) => field.id))
 
   return (
     <>
-      {Object.entries(properties).map(([name, propSchema]) => {
+      {Object.entries(properties).map(([name, propSchema], index) => {
         const flatProp = flattenSchema(propSchema)
         const type = resolveSchemaType(flatProp)
         const description = typeof flatProp.description === 'string' ? flatProp.description : undefined
@@ -368,7 +380,7 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
         const nested = depth < MAX_NESTING && getNestedProperties(flatProp)
 
         return (
-          <ResponseField key={name} name={name} type={type} required={isRequired} deprecated={flatProp.deprecated === true}>
+          <ResponseField key={name} id={rowIds[index]} name={name} type={type} required={isRequired} deprecated={flatProp.deprecated === true}>
             {description ? <Markdown>{description}</Markdown> : null}
             <AllowedValues schema={flatProp} />
             {flatProp.const !== undefined ? (
@@ -378,7 +390,7 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
             ) : null}
             {nested ? (
               <Expandable title={`${name} ${t('properties')}`}>
-                <NestedFields schema={flatProp} depth={depth + 1} />
+                <NestedFields schema={flatProp} depth={depth + 1} parent={fields[index].nested} />
               </Expandable>
             ) : null}
           </ResponseField>
@@ -404,13 +416,13 @@ function unionType(variants: Array<SchemaVariant>): string {
     .join(' | ')
 }
 
-function NestedFields({ schema, depth }: { schema: Record<string, unknown>; depth: number }) {
+function NestedFields({ schema, depth, parent }: { schema: Record<string, unknown>; depth: number; parent?: string }) {
   const nested = getNestedSchema(schema)
   const variants = unionVariants(nested)
-  return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(nested)} /> : <SchemaAsResponseFields schema={nested} depth={depth} />
+  return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(nested)} parent={parent} /> : <SchemaAsResponseFields schema={nested} depth={depth} parent={parent} />
 }
 
-function SchemaVariants({ variants, depth, nullable = false }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean }) {
+function SchemaVariants({ variants, depth, nullable = false, parent }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean; parent?: string }) {
   const t = useApiLabels()
   const [active, setActive] = useState(0)
   const current = variants[active] ?? variants[0]
@@ -440,7 +452,7 @@ function SchemaVariants({ variants, depth, nullable = false }: { variants: Array
       ) : null}
       {description ? <Markdown className={cn(markdownProse, 'mb-2 text-sm text-foreground/70')}>{description}</Markdown> : null}
       {hasFields ? (
-        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} />
+        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} parent={memberParent(parent, active, current.schema)} />
       ) : (
         <p className="text-xs text-foreground/60">
           {t('type')}: <code>{nullable && variants.length === 1 ? 'null | ' : ''}{resolveSchemaType(current.schema) ?? 'any'}</code>
@@ -527,6 +539,12 @@ function getNestedProperties(schema: Record<string, unknown>): boolean {
 function listedObject(schema: Record<string, unknown>): Record<string, unknown> {
   const flat = flattenSchema(schema)
   return flat.type === 'array' && getNestedProperties(flat) ? getNestedSchema(flat) : flat
+}
+
+/** The id the rows `listedObject` lists hang from: the fields of a list's items are named through `items`. */
+function listedParent(parent: string | undefined, schema: Record<string, unknown>): string | undefined {
+  const flat = flattenSchema(schema)
+  return flat.type === 'array' && getNestedProperties(flat) ? itemsParent(parent, flat) : parent
 }
 
 function getNestedSchema(schema: Record<string, unknown>): Record<string, unknown> {
