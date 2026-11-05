@@ -751,6 +751,11 @@ YouTube-embed package (e.g. a custom `LiteYouTube` wrapping
 page that imports that package directly, instead of losing the embed to the
 generic unknown-component fallback.
 
+A quoted frontmatter value that goes on over unindented lines (the closing quote
+alone on the next line, say) is read as Mintlify reads it, with each line break
+folded into a space, though strict YAML rejects it. A quote that is never
+closed, or text after the closing quote, is still reported as invalid YAML.
+
 ### Access-restricted pages
 
 Restricted Mintlify pages migrate as real pages with normalized access
