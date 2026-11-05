@@ -304,6 +304,36 @@ describe('Mintlify redirects whose source is also a page', () => {
   })
 })
 
+describe('Mintlify root index page', () => {
+  const what = '---\ntitle: What\n---\n\nWhat it is.'
+  const home = '---\ntitle: Home\nmode: custom\n---\n\nWelcome.'
+  const rootRedirect = (bundle: MigrationBundle) => (bundle.docsConfig.redirects ?? []).filter((redirect) => redirect.source === '/')
+
+  it('is served at /, so the root is not redirected to the first page even when docs.json does not list it', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
+    expect(rootRedirect(bundle)).toEqual([])
+    expect(bundle.pages.find((page) => page.id === 'introduction')).toMatchObject({ title: 'Home', source: expect.stringMatching(/#index\.mdx$/) })
+  })
+
+  it('is not redirected either when docs.json lists it first', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['index', 'what'] }] } }, { index: home, what })
+    expect(rootRedirect(bundle)).toEqual([])
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
+  })
+
+  it('stays out of the sidebar when docs.json does not list it, as on Mintlify', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
+    expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('introduction')
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBe(true)
+  })
+
+  it('is not a reason to skip the root redirect for an introduction page that is not an index page', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { introduction: home, what, other: what })
+    expect(rootRedirect(bundle)).toEqual([{ source: '/', destination: '/what', permanent: true }])
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
+  })
+})
+
 describe('Mintlify default version redirects', () => {
   it('leaves the page a version alias would hide alone, and says nothing about the alias', () => {
     const bundle = mintlify({

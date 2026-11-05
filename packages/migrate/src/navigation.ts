@@ -117,16 +117,6 @@ export function addMintlifyDirectoryRedirects(
       return match ? route === match[1] || route.startsWith(`${match[1]}/`) : false
     })
   }
-  for (const page of pages) {
-    if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
-    const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
-    if (!parent || pageIds.has(parent.toLowerCase())) continue
-    const source = `/${parent}`
-    if (hasAuthoredRedirect(source)) continue
-    redirects.push({ source, destination: `/${page.id}`, permanent: false })
-    redirectSources.add(source.toLowerCase())
-  }
-
   const navigationOrder: Array<string> = []
   function collectPages(nodes: Array<string | MigrationNavigationGroup>): void {
     for (const node of nodes) {
@@ -154,6 +144,17 @@ export function addMintlifyDirectoryRedirects(
       }
     }
   }
+  for (const page of pages) {
+    if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
+    const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
+    // Mintlify redirects a directory its navigation reaches; a directory with only unlisted pages under it (even an `overview`) is a 404 there.
+    if (!parent || pageIds.has(parent.toLowerCase()) || !firstDescendantByDirectory.has(parent)) continue
+    const source = `/${parent}`
+    if (hasAuthoredRedirect(source)) continue
+    redirects.push({ source, destination: `/${page.id}`, permanent: false })
+    redirectSources.add(source.toLowerCase())
+  }
+
   // Mintlify 307s *any* nav-shaped directory path with no page of its own to
   // its first descendant page in navigation order — not only ones an
   // overview/introduction page or an authored redirect already pointed at
@@ -177,9 +178,18 @@ export function addMintlifyDirectoryRedirects(
 }
 
 /**
+ * A root `index.mdx`: the page Mintlify serves at `/` itself, whether or not docs.json lists it. The runtime serves the page
+ * that holds its `introduction` id at `/` too. An `introduction.mdx` is no evidence of that; Mintlify sends `/` to the first page then.
+ */
+export function isMintlifyRootIndex(page: Pick<MigrationPage, 'id' | 'locale' | 'source'>, defaultLocale?: string): boolean {
+  return page.id === 'introduction' && (!page.locale || page.locale === defaultLocale) && /(?:^|[/#])index\.mdx?$/i.test(page.source)
+}
+
+/**
  * Keep authored page URLs while resolving bare documentation roots to the
  * first visible navigation page. An unrelated `home.mdx` is not evidence that
- * Mintlify served it at `/`; explicit source redirects always take priority.
+ * Mintlify served it at `/`; explicit source redirects always take priority,
+ * and a root `index.mdx` keeps the root.
  */
 export function addMintlifyHomepageRedirects(
   config: MigrationDocsConfig,
@@ -214,8 +224,9 @@ export function addMintlifyHomepageRedirects(
   // A home document with its own `url` takes over the root (the link step redirects `/` to that address),
   // so a root redirect to the first page would hide the link.
   const homeLinksElsewhere = pages.some((page) => page.id === 'introduction' && page.externalUrl)
+  const rootIsIndexPage = pages.some((page) => isMintlifyRootIndex(page, config.i18n?.defaultLocale))
   for (const locale of roots) {
-    if (!locale && homeLinksElsewhere) continue
+    if (!locale && (homeLinksElsewhere || rootIsIndexPage)) continue
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source.toLowerCase())) continue
     const destination = `${locale ? `/${locale}` : ''}/${homepage}`

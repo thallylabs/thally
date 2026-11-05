@@ -374,6 +374,15 @@ purpose; a `url` that is not an `http(s)` address is ignored. The home page
 both redirect, and the redirect from `/` replaces the generated one to the first
 page. A redirect for `/` that the source site wrote stays, and a warning says so.
 
+A Mintlify root `index.mdx` is the page Mintlify serves at `/`, listed in
+docs.json or not, so the root is not redirected to the first navigation page
+for it (an `introduction.mdx` gets that redirect), and an `index.mdx` that
+docs.json does not list is marked `hidden` to stay out of the sidebar. A
+section path (`/guides`) is redirected to its `overview` or `introduction` page
+only when the navigation lists pages under that directory, which is when
+Mintlify redirects it too; with only unlisted pages under it Mintlify answers
+404, and so does the migrated site.
+
 An authored redirect (Mintlify and Fern `redirects`, Docusaurus
 `plugin-client-redirects`) starts at a path on the site and ends at another
 path on it or at an absolute `http(s)` address, which is kept exactly as written
