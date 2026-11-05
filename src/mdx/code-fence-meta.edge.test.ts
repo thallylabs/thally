@@ -209,7 +209,7 @@ describe('applyCodeNotation edge cases', () => {
   it('ignores unknown or malformed markers', () => {
     expect(applyCodeNotation('a // [!code nope]')).toBeNull()
     expect(applyCodeNotation('a // [!code ++')).toBeNull()
-    expect(applyCodeNotation('a // [!code ++] trailing text')).toBeNull()
+    expect(applyCodeNotation('a // note [!code nope] more')).toBeNull()
   })
 
   it('is linear on a long whitespace run (ReDoS guard)', () => {
@@ -217,8 +217,104 @@ describe('applyCodeNotation edge cases', () => {
     const start = performance.now()
     expect(applyCodeNotation(line)).toBeNull()
     const trailing = 'x // [!code ++]' + ' '.repeat(200_000) + 'y'
-    expect(applyCodeNotation(trailing)).toBeNull()
-    expect(performance.now() - start).toBeLessThan(50)
+    expect(applyCodeNotation(trailing)!.code).toBe('x // y')
+    const stacked = 'x // ' + '[!code ++] '.repeat(20_000)
+    expect(applyCodeNotation(stacked)!.code).toBe('x')
+    expect(performance.now() - start).toBeLessThan(100)
+  })
+})
+
+// Lines read from the migration guides of a site migrated from Mintlify, where Shiki strips the marker wherever it sits in a line comment.
+describe('applyCodeNotation with a marker among comment text', () => {
+  it('strips a marker that is followed by text, and keeps the text in the comment', () => {
+    const r = applyCodeNotation([
+      '      "price": 0.999738,   // [!code --] JSON number',
+      '      "price": "0.999738"  // [!code ++] decimal string',
+      '{ "price": 3.49076496006e-10 }          // [!code --] v1',
+    ].join('\n'))!
+    expect(r.code).toBe([
+      '      "price": 0.999738,   // JSON number',
+      '      "price": "0.999738"  // decimal string',
+      '{ "price": 3.49076496006e-10 }          // v1',
+    ].join('\n'))
+    expect([...r.marks.remove]).toEqual([1, 3])
+    expect([...r.marks.add]).toEqual([2])
+  })
+
+  it('strips a marker that comes after the comment text', () => {
+    const r = applyCodeNotation('    x-api-key: <your-api-key>        # now required [!code ++]\n    next')!
+    expect(r.code).toBe('    x-api-key: <your-api-key>        # now required\n    next')
+    expect([...r.marks.add]).toEqual([1])
+    const mid = applyCodeNotation('a // one [!code ++] two')!
+    expect(mid.code).toBe('a // one two')
+    expect([...mid.marks.add]).toEqual([1])
+  })
+
+  it('keeps a comment-only line with text, and marks the line below it instead', () => {
+    const r = applyCodeNotation([
+      '    "currency": "usdc", // [!code --]',
+      '    "currencyObject": { "chainId": 137 } // [!code --]',
+      '    // read the currency object directly off the amount, [!code ++]',
+      '    // e.g. data.route.actual.origin.inputCurrency.currency [!code ++]',
+    ].join('\n'))!
+    expect(r.code).toBe([
+      '    "currency": "usdc",',
+      '    "currencyObject": { "chainId": 137 }',
+      '    // read the currency object directly off the amount,',
+      '    // e.g. data.route.actual.origin.inputCurrency.currency',
+    ].join('\n'))
+    expect([...r.marks.remove]).toEqual([1, 2])
+    // Only the second comment line is marked: the first line's marker applies to the line below it (the second's falls past the last line).
+    expect([...r.marks.add].filter((line) => line <= 4)).toEqual([4])
+  })
+
+  it('counts :N from the line below a comment-only line with text, and from the same line otherwise', () => {
+    expect([...applyCodeNotation('a\n# note [!code --:2]\nb\nc\nd')!.marks.remove]).toEqual([3, 4])
+    expect([...applyCodeNotation('a\nb // note [!code --:2]\nc\nd')!.marks.remove]).toEqual([2, 3])
+  })
+
+  it('numbers marks by rendered lines after a marker-only line is removed', () => {
+    const r = applyCodeNotation('a\n// [!code focus]\nb // note [!code ++]\nc')!
+    expect(r.code).toBe('a\nb // note\nc')
+    expect([...r.marks.focus]).toEqual([2])
+    expect([...r.marks.add]).toEqual([2])
+  })
+
+  it('reads every comment opener the notation supports', () => {
+    const r = applyCodeNotation([
+      'SELECT 1 -- old [!code --]',
+      '<b/> <!-- new [!code ++] more -->',
+      'c /* a [!code focus] b */',
+      '<a/> {/* note [!code highlight] */}',
+    ].join('\n'))!
+    expect(r.code).toBe(['SELECT 1 -- old', '<b/> <!-- new more -->', 'c /* a b */', '<a/> {/* note */}'].join('\n'))
+    expect([...r.marks.remove]).toEqual([1])
+    expect([...r.marks.add]).toEqual([2])
+    expect([...r.marks.focus]).toEqual([3])
+    expect([...r.marks.highlight]).toEqual([4])
+    const only = applyCodeNotation('<a>\n  {/* note [!code highlight] */}\n  <b/>\n</a>')!
+    expect(only.code).toBe('<a>\n  {/* note */}\n  <b/>\n</a>')
+    expect([...only.marks.highlight]).toEqual([3])
+  })
+
+  it('skips a comment opener inside a string, and keeps a marker inside a string', () => {
+    const url = applyCodeNotation('    "url": "https://api.test/a#b",  // note [!code ++]')!
+    expect(url.code).toBe('    "url": "https://api.test/a#b",  // note')
+    expect(applyCodeNotation('const s = "see // [!code ++] here"')).toBeNull()
+    expect(applyCodeNotation("const s = 'a # b [!code --] c'")).toBeNull()
+    expect(applyCodeNotation('const s = `x -- [!code ++] y`')).toBeNull()
+    expect([...applyCodeNotation('const s = "// [!code ++]" // note [!code --]')!.marks.remove]).toEqual([1])
+  })
+
+  it('keeps a quote that escapes inside a string', () => {
+    expect(applyCodeNotation('const s = "a \\" // [!code ++] b"')).toBeNull()
+  })
+
+  it('preserves CRLF endings', () => {
+    const r = applyCodeNotation('a // [!code ++] text\r\nb // text [!code --]\r\nc')!
+    expect(r.code).toBe('a // text\r\nb // text\r\nc')
+    expect([...r.marks.add]).toEqual([1])
+    expect([...r.marks.remove]).toEqual([2])
   })
 })
 
@@ -244,6 +340,25 @@ describe('rehypeShiki notation integration', () => {
       const { html } = await render('a\nb', 'typescript', { focusLines })
       expect(html).not.toContain('thally-line-dim')
     }
+  })
+
+  it('marks and cleans the lines of a diff fence that carry comment text', async () => {
+    const { code, html } = await render([
+      '{',
+      '  "price": 0.999738,   // [!code --] JSON number',
+      '  "price": "0.999738"  // [!code ++] decimal string',
+      '  // read it directly, [!code ++]',
+      '  "unit": "usd"',
+      '}',
+    ].join('\n'), 'jsonc')
+    expect(code).not.toContain('[!code')
+    expect(code).toContain('// JSON number')
+    const spans = html.split('\n')
+    expect(spans[1]).toContain('thally-line-remove')
+    expect(spans[2]).toContain('thally-line-add')
+    expect(spans[3]).not.toContain('thally-line-add')
+    expect(spans[4]).toContain('thally-line-add')
+    expect(html).not.toContain('[!code')
   })
 
   it('meta line numbers refer to rendered lines, after marker-only lines are removed', async () => {

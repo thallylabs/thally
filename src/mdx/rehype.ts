@@ -380,11 +380,71 @@ function tokensToHast(lines: Array<Array<ThemedToken>>, marks: LineMarks): Array
 const CODE_NOTATION =
   /(?:\/\/|#|--|\/\*|<!--|\{[ \t]*\/\*)[ \t]*\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\](?:[ \t]*(?:\*\/[ \t]*\}|\*\/|-->))?[ \t]*(\r?)$/
 
+// A marker anywhere in a comment, which is how Shiki reads it: `// [!code --] v1`, `# now required [!code ++]`.
+const NOTATION_MARKER = /\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\]/g
+
+// What a comment is once its markers are taken out and nothing else is left.
+const EMPTY_COMMENT = /^(?:\/\/|#|--|\/\*\s*\*\/|<!--\s*-->)$/
+
+/**
+ * Where the first comment on a line starts (`//`, `#`, `--`, `/*`, `<!--`), or
+ * -1. An opener inside a string literal is not one: `"https://x.test"` holds no
+ * comment. A single pass, so a hostile line costs no more than its length.
+ */
+function commentStart(line: string): number {
+  let quote = ''
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (quote) {
+      if (char === '\\') index += 1
+      else if (char === quote) quote = ''
+    } else if (char === '"' || char === "'" || char === '`') {
+      quote = char
+    } else if (char === '#' || line.startsWith('//', index) || line.startsWith('--', index) || line.startsWith('/*', index) || line.startsWith('<!--', index)) {
+      return index
+    }
+  }
+  return -1
+}
+
+/**
+ * Take every marker out of the first comment on a line, wherever the marker
+ * sits in it, and keep the comment's other text (`x // [!code --] v1` becomes
+ * `x // v1`). Null when the line has no comment outside a string, or no marker
+ * in it. `commentOnly` is true when nothing but the comment is on the line, as
+ * Shiki reads it, whatever the comment says: such a marker marks the line below.
+ */
+function stripCommentMarkers(line: string): { text: string; markers: Array<RegExpMatchArray>; commentOnly: boolean } | null {
+  const start = commentStart(line)
+  if (start < 0) return null
+  const comment = line.slice(start)
+  const markers = [...comment.matchAll(NOTATION_MARKER)]
+  if (markers.length === 0) return null
+  let kept = ''
+  let last = 0
+  for (const marker of markers) {
+    kept += comment.slice(last, marker.index)
+    last = marker.index! + marker[0].length
+    // `// [!code ++] note` leaves one space, not two.
+    if (kept.endsWith(' ') || kept.endsWith('\t')) while (comment[last] === ' ' || comment[last] === '\t') last += 1
+  }
+  kept = (kept + comment.slice(last)).trimEnd()
+  const before = line.slice(0, start)
+  return {
+    text: EMPTY_COMMENT.test(kept) ? before.trimEnd() : before + kept,
+    markers,
+    commentOnly: ['', '{'].includes(before.trim()),
+  }
+}
+
 /**
  * Strip notation comments from a fence and report which lines they mark.
  * Follows Shiki's notation rules: a marker after code marks that line (and,
  * with `:N`, the N-1 lines after it); a line that holds only a marker comment
  * is removed and marks the following line(s), counting `:N` from the next line.
+ * A marker among other comment text is stripped too, and the text stays: on a
+ * line of code it marks that line, on a line that is only a comment it marks
+ * the line below, and the comment line stays unmarked.
  * Mark sets, and any `{n}` / `focus={n}` authored in the fence meta, refer to
  * the RENDERED lines, i.e. after marker-only lines are removed.
  * Returns null when the fence has no markers, leaving plain fences
@@ -415,6 +475,23 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
       let end = match.index
       while (end > 0 && (rest[end - 1] === ' ' || rest[end - 1] === '\t')) end -= 1
       rest = rest.slice(0, end)
+    }
+    // What is left of a comment that holds more than the marker: `x // [!code --] v1`, `# text [!code ++]`.
+    // Outside any comment (a marker in a string literal) nothing changes.
+    if (rest.includes('[!code')) {
+      const body = rest.endsWith('\r') ? rest.slice(0, -1) : rest
+      const stripped = stripCommentMarkers(body)
+      if (stripped) {
+        found = true
+        if (!carriageReturn) carriageReturn = body === rest ? '' : '\r'
+        // A comment-only line stays when it has text, so the line below it is two ahead; with none left it is dropped, and the line below takes its place.
+        const target = out.length + 1 + (stripped.commentOnly && stripped.text.trim() !== '' ? 1 : 0)
+        for (const marker of stripped.markers) {
+          const count = Math.min(Number(marker[2] ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
+          for (let offset = 0; offset < count; offset += 1) kinds[marker[1] as keyof typeof kinds].add(target + offset)
+        }
+        rest = stripped.text
+      }
     }
     if (rest === line) out.push(line)
     else if (rest !== '') out.push(rest + carriageReturn)
