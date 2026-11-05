@@ -14,7 +14,7 @@ import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
-import { fieldIds, itemsParent, memberParent, parameterId, uniqueIds } from '@/lib/openapi/field-ids'
+import { fieldIds, itemsParent, memberParent, parameterId, rowsBelow, uniqueIds } from '@/lib/openapi/field-ids'
 import { allowsNull, flattenSchema, unionVariants, type SchemaVariant } from '@/lib/openapi/schema-variants'
 import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
 import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
@@ -223,7 +223,7 @@ function WebhookExample({ body }: { body?: string }) {
 // SchemaAsParamFields — renders object properties as ParamField rows
 // ---------------------------------------------------------------------------
 
-function SchemaAsParamFields({ schema, parent }: { schema?: Record<string, unknown>; parent?: string }) {
+function SchemaAsParamFields({ schema, parent, taken }: { schema?: Record<string, unknown>; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
   if (!schema) return null
 
@@ -232,7 +232,7 @@ function SchemaAsParamFields({ schema, parent }: { schema?: Record<string, unkno
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    if (variants) return <SchemaVariants variants={variants} depth={0} nullable={allowsNull(flat)} parent={rowsParent} />
+    if (variants) return <SchemaVariants variants={variants} depth={0} nullable={allowsNull(flat)} parent={rowsParent} taken={taken} />
     return (
       <ParamField name="(body)" type={resolveSchemaType(flat)}>
         {typeof flat.description === 'string' ? <Markdown>{flat.description}</Markdown> : null}
@@ -242,7 +242,8 @@ function SchemaAsParamFields({ schema, parent }: { schema?: Record<string, unkno
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
   const fields = Object.keys(properties).map((name) => fieldIds(rowsParent, name, flattenSchema(properties[name])))
-  const rowIds = uniqueIds(fields.map((field) => field.id))
+  const rowIds = uniqueIds(fields.map((field) => field.id), taken)
+  const below = rowsBelow(taken ?? new Set(), rowIds)
 
   return (
     <>
@@ -274,7 +275,7 @@ function SchemaAsParamFields({ schema, parent }: { schema?: Record<string, unkno
             ) : null}
             {nested ? (
               <Expandable title={`${name} ${t('properties')}`}>
-                <NestedFields schema={flatProp} depth={1} parent={fields[index].nested} />
+                <NestedFields schema={flatProp} depth={1} parent={fields[index].nested} taken={below} />
               </Expandable>
             ) : null}
           </ParamField>
@@ -354,7 +355,7 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
 // SchemaAsResponseFields — renders object properties as ResponseField rows
 // ---------------------------------------------------------------------------
 
-function SchemaAsResponseFields({ schema, depth = 0, parent }: { schema?: Record<string, unknown>; depth?: number; parent?: string }) {
+function SchemaAsResponseFields({ schema, depth = 0, parent, taken }: { schema?: Record<string, unknown>; depth?: number; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
   if (!schema) return null
 
@@ -363,12 +364,13 @@ function SchemaAsResponseFields({ schema, depth = 0, parent }: { schema?: Record
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
     const variants = unionVariants(flat)
-    return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(flat)} parent={rowsParent} /> : null
+    return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(flat)} parent={rowsParent} taken={taken} /> : null
   }
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
   const fields = Object.keys(properties).map((name) => fieldIds(rowsParent, name, flattenSchema(properties[name])))
-  const rowIds = uniqueIds(fields.map((field) => field.id))
+  const rowIds = uniqueIds(fields.map((field) => field.id), taken)
+  const below = rowsBelow(taken ?? new Set(), rowIds)
 
   return (
     <>
@@ -390,7 +392,7 @@ function SchemaAsResponseFields({ schema, depth = 0, parent }: { schema?: Record
             ) : null}
             {nested ? (
               <Expandable title={`${name} ${t('properties')}`}>
-                <NestedFields schema={flatProp} depth={depth + 1} parent={fields[index].nested} />
+                <NestedFields schema={flatProp} depth={depth + 1} parent={fields[index].nested} taken={below} />
               </Expandable>
             ) : null}
           </ResponseField>
@@ -416,13 +418,13 @@ function unionType(variants: Array<SchemaVariant>): string {
     .join(' | ')
 }
 
-function NestedFields({ schema, depth, parent }: { schema: Record<string, unknown>; depth: number; parent?: string }) {
+function NestedFields({ schema, depth, parent, taken }: { schema: Record<string, unknown>; depth: number; parent?: string; taken?: ReadonlySet<string> }) {
   const nested = getNestedSchema(schema)
   const variants = unionVariants(nested)
-  return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(nested)} parent={parent} /> : <SchemaAsResponseFields schema={nested} depth={depth} parent={parent} />
+  return variants ? <SchemaVariants variants={variants} depth={depth} nullable={allowsNull(nested)} parent={parent} taken={taken} /> : <SchemaAsResponseFields schema={nested} depth={depth} parent={parent} taken={taken} />
 }
 
-function SchemaVariants({ variants, depth, nullable = false, parent }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean; parent?: string }) {
+function SchemaVariants({ variants, depth, nullable = false, parent, taken }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
   const [active, setActive] = useState(0)
   const current = variants[active] ?? variants[0]
@@ -452,7 +454,7 @@ function SchemaVariants({ variants, depth, nullable = false, parent }: { variant
       ) : null}
       {description ? <Markdown className={cn(markdownProse, 'mb-2 text-sm text-foreground/70')}>{description}</Markdown> : null}
       {hasFields ? (
-        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} parent={memberParent(parent, active, current.schema)} />
+        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} parent={memberParent(parent, active, current.schema)} taken={taken} />
       ) : (
         <p className="text-xs text-foreground/60">
           {t('type')}: <code>{nullable && variants.length === 1 ? 'null | ' : ''}{resolveSchemaType(current.schema) ?? 'any'}</code>

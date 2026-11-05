@@ -85,4 +85,12 @@ describe('ids of the rows of a generated API page', () => {
     const html = body({ type: 'object', properties: { userId: { type: 'string' }, user_id: { type: 'string' }, 'user-id': { type: 'string' } } }, { parameters: [{ name: 'userId', in: 'query', schema: { type: 'string' } }, { name: 'user_id', in: 'header', schema: { type: 'string' } }] })
     expect(ids(html)).toEqual(['parameter-user-id', 'parameter-user-id-2', 'body-user-id', 'body-user-id-2', 'body-user-id-3'])
   })
+
+  it('number a nested row that spells like a row of a level above it, in a body and in a response', () => {
+    const schema = { type: 'object', properties: { user_id: { type: 'string' }, user: { type: 'object', properties: { id: { type: 'string' } } } } }
+    expect(ids(body(schema))).toEqual(['body-user-id', 'body-user', 'body-user-id-2'])
+    expect(ids(response(schema))).toEqual(['response-user-id', 'response-user', 'response-user-id-2'])
+    const deeper = { type: 'object', properties: { a_b: { type: 'string' }, a: { type: 'object', properties: { x: { type: 'object', properties: { y: { type: 'string' } } }, b: { type: 'string' } } } } }
+    expect(ids(response(deeper))).toEqual(['response-a-b', 'response-a', 'response-a-x', 'response-a-x-y', 'response-a-b-2'])
+  })
 })

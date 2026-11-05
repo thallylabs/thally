@@ -49,9 +49,14 @@ export function fieldIds(parent: string | undefined, name: string, schema: Schem
   return { id, nested: itemsParent(id, schema) }
 }
 
-/** Ids as given, but a repeat gets `-2`, `-3` ... in order, so no two rows on a page share one. */
-export function uniqueIds(ids: ReadonlyArray<string | undefined>): Array<string | undefined> {
-  const used = new Set<string>()
+/**
+ * Ids as given, but a repeat gets `-2`, `-3` ... in order, so no two rows on a page share one. `taken` holds the ids of the
+ * levels above (a `user_id` row and the `id` row of a `user` object spell alike); `rowsBelow` is what the rows of one level
+ * pass down. Rows of different branches that spell alike are not told apart: the ids are fixed by the schema, not by what
+ * else renders, so a rerender or a tab never renumbers them.
+ */
+export function uniqueIds(ids: ReadonlyArray<string | undefined>, taken: ReadonlySet<string> = new Set()): Array<string | undefined> {
+  const used = new Set(taken)
   return ids.map((id) => {
     if (!id) return id
     let unique = id
@@ -59,4 +64,9 @@ export function uniqueIds(ids: ReadonlyArray<string | undefined>): Array<string 
     used.add(unique)
     return unique
   })
+}
+
+/** The ids taken at a level and above it, for the levels below. */
+export function rowsBelow(taken: ReadonlySet<string>, ids: ReadonlyArray<string | undefined>): Set<string> {
+  return new Set([...taken, ...ids.filter((id): id is string => Boolean(id))])
 }
