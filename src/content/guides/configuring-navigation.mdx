@@ -248,4 +248,4 @@ An address with no page shows the 404 page, which you can replace with `src/cont
 }
 ```
 
-A page the reader may not see, or one that is not published, is answered the same way, so the redirect does not show which addresses exist. The home page itself, the home page of a language and addresses that end in a file extension (a missing image, say) still answer 404, and API routes, `llms.txt` and the machine routes are not affected.
+A page the reader may not see, or one that is not published, is answered the same way, so the redirect does not show which addresses exist. These still answer 404: the home page itself, the home page of a language, and an address that ends in a file extension (a missing image, say). The setting does not reach what the site serves itself, such as the endpoints under `/api/` that return data (`/api/search`), `llms.txt` and `sitemap.xml`.
