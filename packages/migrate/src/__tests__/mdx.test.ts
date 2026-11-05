@@ -121,6 +121,39 @@ describe('a leading H1 on a page without a frontmatter title', () => {
   })
 })
 
+describe('Mintlify autoplay videos', () => {
+  const mintlify = (body: string) => normalizeMdx(body, 'mintlify')
+
+  it('adds the muted, loop and playsInline an autoPlay video lacks, right after autoPlay', () => {
+    expect(mintlify('<video controls autoPlay src="/a.mp4"></video>')).toBe('<video controls autoPlay muted loop playsInline src="/a.mp4"></video>')
+    expect(mintlify('<video autoPlay loop controls src="/a.mp4" />')).toBe('<video autoPlay muted playsInline loop controls src="/a.mp4" />')
+    expect(mintlify('<video autoplay src="/a.mp4"></video>')).toBe('<video autoplay muted loop playsInline src="/a.mp4"></video>')
+  })
+
+  it('keeps a multi-line tag one attribute per line', () => {
+    expect(mintlify('<Frame>\n  <video\n    controls\n    autoPlay\n    src="/a.mp4"\n    height="400" width="300"\n  ></video>\n</Frame>'))
+      .toBe('<Frame>\n  <video\n    controls\n    autoPlay\n    muted\n    loop\n    playsInline\n    src="/a.mp4"\n    height="400" width="300"\n  ></video>\n</Frame>')
+  })
+
+  it('leaves a video that has all three, one without autoPlay, or one with autoPlay turned off', () => {
+    for (const tag of [
+      '<video autoPlay muted loop playsInline src="/a.mp4"></video>',
+      '<video controls className="w-full" src="/a.mp4"></video>',
+      '<video autoPlay={false} src="/a.mp4"></video>',
+    ]) expect(mintlify(tag)).toBe(tag)
+  })
+
+  it('leaves a video inside a code fence or inline code', () => {
+    const body = '```html\n<video autoPlay src="/a.mp4"></video>\n```\n\nUse `<video autoPlay>` for a demo.'
+    expect(mintlify(body)).toBe(body)
+  })
+
+  it('does not run on another platform or an unknown one', () => {
+    const tag = '<video controls autoPlay src="/a.mp4"></video>'
+    for (const platform of ['fern', 'docusaurus', undefined] as const) expect(normalizeMdx(tag, platform)).toBe(tag)
+  })
+})
+
 describe('normalizeMdx', () => {
   it('pins Mintlify step titles to plain text unless the source sets titleSize', () => {
     expect(normalizeMdx('<Steps>\n<Step title="A">x</Step>\n</Steps>', 'mintlify')).toContain('<Steps titleSize="p">')

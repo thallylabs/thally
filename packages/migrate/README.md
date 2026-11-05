@@ -611,6 +611,9 @@ homepage and explicit redirects. Locale tags and recognized locale-prefixed
 sections are normalized without discarding original URL redirects.
 Mintlify's generated `param-*` links for settings headings and named fields
 become explicit anchors in migrated MDX.
+A `<video autoPlay>` gets the `muted`, `loop` and `playsInline` it lacks, as
+Mintlify renders it, so browsers let it start; a video without `autoPlay` is
+left as written.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
 For a copied client component that receives a simple page-authored JSX callback,

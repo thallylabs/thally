@@ -2492,6 +2492,47 @@ function pinStepsTitleSize(body: string): string {
 }
 
 /**
+ * Mintlify renders `<video autoPlay>` muted, looping and inline, so it starts on
+ * its own where browsers refuse autoplay with sound. Add the ones of `muted`,
+ * `loop` and `playsInline` an `autoPlay` video lacks, right after `autoPlay` (on
+ * a line of its own when `autoPlay` has one). A video without `autoPlay`, or with
+ * `autoPlay={false}`, is left as it is.
+ */
+function addMintlifyVideoAttributes(body: string): string {
+  if (!body.includes('<video')) return body
+  interface VideoAttribute { type: string; name?: string; value?: unknown; position?: MdxOffsetNode['position'] }
+  let result = ''
+  let cursor = 0
+  for (const match of body.matchAll(/<video(?=[\s/>])/g)) {
+    if (match.index < cursor) continue
+    const tag = readTagEnd(body, match.index + match[0].length)
+    if (tag === UNTERMINATED) break
+    if (!tag) continue
+    let attributes: Array<VideoAttribute>
+    try {
+      attributes = ((descriptionParser.parse(`<video${tag.attributes}/>`) as { children?: Array<{ attributes?: Array<VideoAttribute> }> }).children?.[0]?.attributes) ?? []
+    } catch {
+      continue
+    }
+    const named = (name: string): VideoAttribute | undefined => attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name?.toLowerCase() === name.toLowerCase())
+    const autoPlay = named('autoPlay')
+    const start = autoPlay?.position?.start.offset
+    const end = autoPlay?.position?.end.offset
+    const off = typeof autoPlay?.value === 'object' && (autoPlay.value as { value?: string } | null)?.value?.trim() === 'false'
+    const missing = ['muted', 'loop', 'playsInline'].filter((name) => !named(name))
+    if (!autoPlay || off || missing.length === 0 || start === undefined || end === undefined) continue
+    // Offsets are in the parsed tag, which starts where the tag does.
+    const at = match.index + end
+    const indent = body.slice(body.lastIndexOf('\n', match.index + start - 1) + 1, match.index + start)
+    const eol = /^[ \t]*(\r?\n)/.exec(body.slice(at))?.[1]
+    const insert = eol && /^[ \t]*$/.test(indent) ? missing.map((name) => `${eol}${indent}${name}`).join('') : missing.map((name) => ` ${name}`).join('')
+    result += body.slice(cursor, at) + insert
+    cursor = at
+  }
+  return result + body.slice(cursor)
+}
+
+/**
  * Escape closing tags that have no matching real opener (outside code), e.g.
  * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
  * literal text, so the bare closer is a compile error. Escaping the closer the
@@ -2821,6 +2862,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       // Mintlify renders step titles as plain text unless `titleSize` says
       // otherwise; Thally's default is an `<h3>`, so pin the source's default.
       result = pinStepsTitleSize(result)
+      result = addMintlifyVideoAttributes(result)
     }
     if (runFern) {
       result = result
