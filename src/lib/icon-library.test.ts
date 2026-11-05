@@ -86,6 +86,10 @@ describe('Font Awesome icon resolution', () => {
     })
   })
 
+  it('maps a Pro-only name to the Free solid icon that matches it', () => {
+    for (const style of STYLES) expect(resolution('mountains', style), String(style)).toEqual({ kind: 'solid', file: 'mountain' })
+  })
+
   it('keeps Pro names that are bundled Lucide glyphs visible under Font Awesome', () => {
     expect(Object.fromEntries(['rocket-launch', 'party-horn', 'brackets-curly', 'code-simple', 'grid-round', 'link-simple', 'circle-x'].map((name) => [name, resolution(name, 'regular')]))).toEqual({
       'rocket-launch': { kind: 'lucide', file: 'rocket' },

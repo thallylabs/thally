@@ -121,7 +121,7 @@ export const FONT_AWESOME_PRO_FALLBACKS: Readonly<Record<string, string>> = {
   'square-code': 'lucide:square-code', 'shield-check': 'lucide:shield-check',
   'rectangle-terminal': 'lucide:square-terminal', 'messages-question': 'lucide:message-circle-question',
   'message-bot': 'lucide:bot-message-square', books: 'lucide:library',
-  'code-change': 'code-compare',
+  'code-change': 'code-compare', mountains: 'mountain',
   // Names the Dub docs use.
   'arrow-progress': 'lucide:arrow-right-to-line', 'grid-2': 'table-cells-large', window: 'lucide:app-window',
   'user-crown': 'lucide:user-star',
