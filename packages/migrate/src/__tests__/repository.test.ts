@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
+import { rewriteMintlifyMountedLinks } from '../repository.js'
 import { withoutDashboardWarning } from './dashboard-warning.js'
 import { emptyTabsWithoutHiddenExemption, endpointPageId, endpointSpec, productsNavigation } from './endpoint-spec.js'
 
@@ -3050,6 +3051,253 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  describe('prose braces acorn cannot parse', () => {
+    const migrateOne = (pages: Record<string, string>) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-braces-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: Object.keys(pages) } }))
+      for (const [id, content] of Object.entries(pages)) {
+        mkdirSync(dirname(join(root, `${id}.mdx`)), { recursive: true })
+        writeFileSync(join(root, `${id}.mdx`), content)
+      }
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+
+    // These pages need the later normalizing before they compile (the orphan `<Feature>` tag), so the brace repair happens late:
+    // the passes that read the page's syntax tree did nothing until then and must still give it what any page gets.
+    const lateRepaired = (body: string): string | undefined => migrateOne({
+      home: `---\ntitle: Home\n---\n\nText <Feature> needs pro.\n\n${body}\n\nCall /x/{chainId?}\n`,
+    }).pages.find((page) => page.id === 'home')?.body
+
+    it('gives a page repaired late what the passes that read its syntax tree give any page', () => {
+      // An undefined expression is neutralized (here escaped as literal text, as the first of these passes does on a page that parses).
+      expect(lateRepaired('| a |\n|---|\n| {x} |')).toContain('| \\{x\\} |')
+      expect(lateRepaired('Hello {name} there')).toContain('Hello \\{name\\} there')
+      // An unresolved component becomes a div, a paragraph container with paragraphs in it a div, and Link an anchor.
+      expect(lateRepaired('<Widget size="1">inner</Widget>')).toContain('<div>inner</div>')
+      expect(lateRepaired('<p>\n\ninner para\n\n</p>')).toContain('<div>\n\ninner para\n\n</div>')
+      expect(lateRepaired('<Link href="/a">a</Link>')).toContain('<a href="/a">a</a>')
+      for (const body of ['| {x} |', '<Widget>w</Widget>']) expect(lateRepaired(body)).toContain('Call /x/\\{chainId?}')
+    })
+
+    it('adds nothing to a late-repaired page that needs none of those passes', () => {
+      expect(lateRepaired('Plain text.')).toBe('Text &lt;Feature&gt; needs pro.\n\nPlain text.\n\nCall /x/\\{chainId?}')
+    })
+
+    it('keeps a bare URL with braces as written, with no repair and no warning: the runtime autolinks it', () => {
+      const bundle = migrateOne({ 'aa/guides/bundler': '---\ntitle: Bundler\n---\n\n## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'aa/guides/bundler')
+      expect(page?.body).toContain('https://bundler.particle.network/{chainId?}')
+      expect(page?.body).not.toContain('\\{')
+      expect(bundle.warnings.filter((warning) => warning.message.includes('Escaped'))).toEqual([])
+      expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+    })
+
+    it('keeps a page whose path placeholder is not a valid expression, escapes it and warns with the line', () => {
+      const bundle = migrateOne({ 'aa/guides/bundler': '---\ntitle: Bundler\ndescription: "Use {id?} here"\n---\n\n## Endpoint\n\nPath /{chainId?}\n\nTotal {1 + 1}\n' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'aa/guides/bundler')
+      expect(page?.body).toContain('Path /\\{chainId?}')
+      expect(page?.body).toContain('Total {1 + 1}')
+      expect(page?.description).toBe('Use {id?} here')
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'unsupported-config',
+        source: 'aa/guides/bundler.mdx',
+        message: 'Escaped the braces of `{chainId?}` so the page compiles; they render as literal text.',
+      }))
+      expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+    })
+
+    it('applies the brace repair after the closing-tag repair, with one warning each', () => {
+      const bundle = migrateOne({ mixed: '---\ntitle: Mixed\n---\n\n\\<Warning>\nWatch out.\n</Warning>\n\nSee /{chainId?}\n' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'mixed')
+      expect(page?.body).toContain('\\</Warning>')
+      expect(page?.body).toContain('/\\{chainId?}')
+      const messages = bundle.warnings.filter((warning) => warning.source === 'mixed.mdx').map((warning) => warning.message)
+      expect(messages).toContain('Escaped unmatched closing tag(s) `</Warning>` so the page compiles; they render as literal text.')
+      expect(messages).toContain('Escaped the braces of `{chainId?}` so the page compiles; they render as literal text.')
+    })
+
+    it('quotes at most three escaped items, each at most 60 characters, and counts the rest', () => {
+      const long = `{${'x'.repeat(100)}?}`
+      const bundle = migrateOne({ many: `---\ntitle: Many\n---\n\n/{a?} /{b?} /${long} /{c?} /{d?} /{a?}\n` })
+      const message = bundle.warnings.find((warning) => warning.message.startsWith('Escaped the braces'))?.message
+      expect(message).toBe(`Escaped the braces of \`{a?}\`, \`{b?}\`, \`{${'x'.repeat(58)}…\`, and 2 more so the page compiles; they render as literal text.`)
+    })
+
+    const hook = 'export const Counter = () => { const [n, setN] = useState(0); return <button onClick={() => setN(n + 1)}>{n}</button> }\n\n<Counter />'
+
+    it('extracts an inline hook component from a page whose prose brace stopped the analysis', () => {
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\nCall /x/{chainId?}\n\n${hook}\n` })
+      const page = bundle.pages.find((candidate) => candidate.id === 'home')
+      expect(page?.body).toContain('Call /x/\\{chainId?}')
+      expect(page?.body).toMatch(/<Migrated\w+ \/>/)
+      expect(page?.body).not.toContain("import { useState } from 'react'")
+      expect(bundle.componentFiles?.some((file) => file.path.includes('/migrated/'))).toBe(true)
+      expect(bundle.warnings.filter((warning) => warning.message.includes('Custom component analysis could not parse'))).toEqual([])
+      expect(bundle.warnings.filter((warning) => warning.message.startsWith('Escaped the braces'))).toHaveLength(1)
+    })
+
+    it('leaves the braces of a math block alone when the page also needs a brace repair', () => {
+      const bundle = migrateOne({ home: '---\ntitle: Home\n---\n\nPath /{chainId?}\n\n$$\n\\begin{align*}\nx\n\\end{align*}\n$$\n' })
+      const body = bundle.pages.find((candidate) => candidate.id === 'home')?.body ?? ''
+      expect(body).toContain('Path /\\{chainId?}')
+      expect(body).toContain('\\begin{align*}')
+      expect(body).not.toContain('\\begin\\{')
+    })
+
+    it('keeps a page whose analysis was stopped by an HTML comment as well as a prose brace, with the comment converted', () => {
+      for (const [comment, expected] of [
+        ['<!-- c -->', ['{/* c */}']],
+        ['{/* c */}\n<!-- d -->', ['{/* c */}', '{/* d */}']],
+        ['<p style="a:b">x</p>\n<!-- c -->', ['{/* c */}']],
+      ] as const) {
+        const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n${comment}\n\nCall /x/{chainId?}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+        const body = bundle.pages.find((page) => page.id === 'home')?.body
+        expect(body, comment).toBeDefined()
+        expect(body).toContain('Call /x/\\{chainId?}')
+        for (const text of expected) expect(body).toContain(text)
+        expect(body).not.toContain('<!--')
+        expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('reads the frontmatter as the page does when it repairs braces for the analysis', () => {
+      // A trailing space after the opening `---` and an empty block are both frontmatter to the page parser.
+      const spaced = migrateOne({ home: '--- \ntitle: Home\ndescription: Use {a b} here\n---\n\nCall /x/{chainId?}\n' })
+      const spacedPage = spaced.pages.find((page) => page.id === 'home')
+      expect(spacedPage?.description).toBe('Use {a b} here')
+      expect(spacedPage?.body).toContain('Call /x/\\{chainId?}')
+      const empty = migrateOne({ home: '---\n---\n\nCall /x/{chainId?}\n\n---\n\nmore\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      const emptyPage = empty.pages.find((page) => page.id === 'home')
+      expect(emptyPage?.body).toContain('Call /x/\\{chainId?}')
+      expect(emptyPage?.body).toContain('more')
+    })
+
+    it('extracts the component when an HTML comment as well as a prose brace stopped the analysis', () => {
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n<!-- note -->\n\nCall /x/{chainId?}\n\n${hook}\n` })
+      const body = bundle.pages.find((candidate) => candidate.id === 'home')?.body
+      expect(body).toContain('{/* note */}')
+      expect(body).toMatch(/<Migrated\w+ \/>/)
+      expect(body).not.toContain("import { useState } from 'react'")
+    })
+
+    it('excludes such a page as before when the analysis still cannot read the repaired page', () => {
+      // Only the later normalizing turns the placeholder tag into text, so the repair cannot be tried on the page the analysis reads.
+      const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\nSet <Feature> here\n\nCall /x/{chainId?}\n\n${hook}\n`, fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'skipped-file',
+        source: 'home.mdx',
+        message: expect.stringContaining('does not compile as MDX'),
+      }))
+      expect(bundle.warnings.some((warning) => warning.message.includes('Escaped the braces'))).toBe(false)
+    })
+
+    it('keeps a page the analysis could not read, with a brace repair, when it has nothing for the analysis to do', () => {
+      // Only the later normalizing turns these placeholder tags into text, so the analysis never read the repaired page.
+      for (const prose of ['IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE', '<Feature> requires a Pro plan']) {
+        const bundle = migrateOne({ home: `---\ntitle: Home\n---\n\n${prose}\n\nCall /x/{chainId?}\n` })
+        const body = bundle.pages.find((page) => page.id === 'home')?.body ?? ''
+        expect(body, prose).toContain(prose.replaceAll('<', '&lt;').replaceAll('>', '&gt;'))
+        expect(body, prose).toContain('Call /x/\\{chainId?}')
+        expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file'), prose).toEqual([])
+      }
+    })
+
+    it('still excludes such a page when a fence opened inside a template literal hides its npm import from the scan', () => {
+      const bundle = migrateOne({
+        home: "---\ntitle: Home\n---\n\nText <Feature> needs pro. Call /x/{chainId?}\n\n<CodeBlock code={`\n~~~\n`} />\n\nimport { A, B } from 'some-npm-pkg'\n\n<A />\n",
+        fine: '---\ntitle: Fine\n---\n\nFine.\n',
+      })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'home.mdx' }))
+    })
+
+    it('keeps such a page when the only require( is inside a closed code fence', () => {
+      const bundle = migrateOne({ home: '---\ntitle: Home\n---\n\n<Feature> requires a Pro plan\n\nCall /x/{chainId?}\n\n```js\nconst a = require("x")\n```\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['home'])
+      expect(bundle.pages[0].body).toContain('require("x")')
+    })
+
+    it('still excludes such a page when it has an import, an export or an event handler for the analysis to handle', () => {
+      const pages: Record<string, string> = {
+        imported: "import Foo from '/snippets/Foo.jsx'\n\n<Foo />",
+        handler: '<button onClick={() => window.alert(1)}>go</button>',
+      }
+      for (const [name, extra] of Object.entries(pages)) {
+        const root = mkdtempSync(join(tmpdir(), 'thally-migrate-braces-work-'))
+        mkdirSync(join(root, 'snippets'))
+        writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['home', 'fine'] } }))
+        writeFileSync(join(root, 'snippets', 'Foo.jsx'), 'export default function Foo() { return <div>foo</div> }\n')
+        writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n<Feature> requires a Pro plan\n\nCall /x/{chainId?}\n\n${extra}\n`)
+        writeFileSync(join(root, 'fine.mdx'), '---\ntitle: Fine\n---\n\nFine.\n')
+        const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+        expect(bundle.pages.map((page) => page.id), name).toEqual(['fine'])
+        expect(bundle.warnings, name).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'home.mdx', message: expect.stringContaining('does not compile as MDX') }))
+      }
+    })
+
+    it('still excludes a page whose broken expression is a JSX attribute', () => {
+      const bundle = migrateOne({ broken: '---\ntitle: Broken\n---\n\nsee {a?}\n\n<Card title={a b}>\nbody\n</Card>\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'skipped-file',
+        source: 'broken.mdx',
+        message: expect.stringContaining('does not compile as MDX'),
+      }))
+      expect(bundle.warnings.some((warning) => warning.message.includes('Escaped `{`'))).toBe(false)
+    })
+
+    it('still excludes a page whose export does not parse', () => {
+      const bundle = migrateOne({ esm: '---\ntitle: Esm\n---\n\nexport const x = ;\n\nsee {a?}\n', fine: '---\ntitle: Fine\n---\n\nFine.\n' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['fine'])
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', source: 'esm.mdx' }))
+    })
+  })
+
+  describe('import lines inside a template literal', () => {
+    const literal = "`\nimport React from 'react';\nimport { AuthType } from \"@particle-network/auth-core\";\n  import { X } from \"@scope/x\";\n\nconst a = 1;\n`"
+    const component = (name: string) => `export const ${name} = () => {\n  const snippet = ${literal}\n  return <pre>{snippet}</pre>\n}`
+    const migrate = (files: Record<string, string>) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-template-literal-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['home'] } }))
+      for (const [name, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, name)), { recursive: true })
+        writeFileSync(join(root, name), content)
+      }
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    }
+    const unmoved = (bundle: ReturnType<typeof migrate>, copies = 1): void => {
+      const body = bundle.pages[0].body
+      expect(body.split(literal)).toHaveLength(copies + 1)
+      expect(body.startsWith('import ')).toBe(false)
+      expect(bundle.warnings.filter((warning) => warning.message.includes('MDX import of'))).toEqual([])
+    }
+
+    it('keeps them in the template literal of a page export', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\n${component('Code')}\n\n<Code />\n` }))
+    })
+
+    it('keeps them in the template literal of a flow expression and of a JSX attribute', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\n{${literal}}\n\n<Card title="Code" code={${literal}} />\n` }), 2)
+    })
+
+    it('keeps them when the frontmatter or another prose brace would stop the page parsing', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\ndescription: "Use {id?} here"\n---\n\nPath /{chainId?}\n\n${component('Code')}\n\n<Code />\n` }))
+    })
+
+    it('keeps them when an HTML comment or an unmatched closing tag stops the page parsing', () => {
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\n<!-- note -->\n\n${component('Code')}\n\n<Code />\n` }))
+      unmoved(migrate({ 'home.mdx': `---\ntitle: Home\n---\n\ntext </Foo> here\n\n${component('Code')}\n\n<Code />\n` }))
+    })
+
+    it('keeps them in the template literal of an inlined snippet component', () => {
+      unmoved(migrate({
+        'snippets/code.mdx': component('Code'),
+        'home.mdx': "---\ntitle: Home\n---\n\nimport { Code } from '/snippets/code.mdx'\n\n<Code />\n",
+      }))
+    })
+  })
+
   it('excludes a page that re-exports from a relative module the migration does not ship, but keeps relative snippet imports', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-module-'))
     mkdirSync(join(root, 'snippets'))
@@ -3960,6 +4208,52 @@ function docusaurusFixture(sidebarSource?: string): string {
   writeFileSync(join(root, 'static', 'img', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
   return root
 }
+
+describe('a Fern page repaired late', () => {
+  it('gets its literal brace escaped as a page that parses does', () => {
+    const migrateFern = (body: string) => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-late-repair-'))
+      const fernRoot = join(root, 'fern')
+      mkdirSync(join(fernRoot, 'pages'), { recursive: true })
+      writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+      writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Welcome\n    path: pages/welcome.mdx\n')
+      writeFileSync(join(fernRoot, 'pages', 'welcome.mdx'), `---\ntitle: Welcome\n---\n\n${body}\n`)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' }).pages.find((page) => page.title === 'Welcome')?.body
+    }
+    const text = 'Text <Feature> needs pro. Hello {name} there.\n\n'
+    const repaired = migrateFern(`${text}Call /x/{chainId?}`)
+    expect(repaired).toContain('Call /x/\\{chainId?}')
+    expect(repaired).toContain('Hello \\{name\\} there')
+    expect(repaired).not.toContain('Hello {name}')
+  })
+})
+
+describe('relative component hrefs on other platforms', () => {
+  it('leaves them as written for Docusaurus', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\n---\n\n<a href="./nowhere">Next</a>')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.title === 'Authentication')?.body).toContain('href="./nowhere"')
+  })
+
+  it('names the Thally default icon library for a page icon object, as these sites set none', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\nicon:\n  name: key\n  library: fontawesome\n---\n\nAuthenticate first.')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings.find((warning) => /icon library/.test(warning.message))?.message).toMatch(/"fontawesome" icon library, but this site uses "lucide"/)
+  })
+
+  it('leaves them as written for Fern when no page matches', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-relative-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'pages'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Welcome\n    path: pages/welcome.mdx\n')
+    writeFileSync(join(fernRoot, 'pages', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\n<Card href="./nowhere" />')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+    expect(bundle.pages.find((page) => page.title === 'Welcome')?.body).toContain('href="./nowhere"')
+  })
+})
 
 describe('Docusaurus repository migration', () => {
   it('expands category DocCardList at its authored position', () => {
@@ -6235,6 +6529,145 @@ describe('Mintlify mounted links', () => {
     expect(body).toContain('[Example](/docs/fr/quickstart)')
   })
 
+})
+
+// The source site's own host comes from docs.json (`seo.metatags.canonical`, else `integrations.plausible.domain`); a link to it that
+// reaches an imported page becomes root-relative, anything else keeps its absolute URL.
+describe('Mintlify links to the site\'s own domain', () => {
+  const PAGE = '---\ntitle: Page\n---\n\n'
+
+  /** Migrates a Mintlify fixture with the given docs.json fields and pages (path -> body); returns the body of `other`. */
+  function migrateOther(config: Record<string, unknown>, other: string, pages: Array<string> = ['docs/guide/start']): string {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-own-domain-'))
+    const ids = [...pages, 'other']
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', ...config, navigation: { pages: ids } }))
+    for (const id of pages) {
+      mkdirSync(dirname(join(root, id)), { recursive: true })
+      writeFileSync(join(root, `${id}.mdx`), `${PAGE}Target.`)
+    }
+    writeFileSync(join(root, 'other.mdx'), `${PAGE}${other}`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    return bundle.pages.find((page) => page.id === 'other')?.body ?? ''
+  }
+  const plausible = (domain: string) => ({ integrations: { plausible: { domain } } })
+
+  it('makes a same-host Markdown link and Card href root-relative when the page exists', () => {
+    const body = migrateOther(plausible('docs.example.com'), [
+      '[x](https://docs.example.com/docs/guide/start#step)',
+      '[q](http://docs.example.com/docs/guide/start?view=all)',
+      '[upper](https://DOCS.example.com/docs/guide/start)',
+      '<Card title="T" href="https://docs.example.com/docs/guide/start" />',
+    ].join('\n\n'))
+    expect(body).toContain('[x](/docs/guide/start#step)')
+    expect(body).toContain('[q](/docs/guide/start?view=all)')
+    expect(body).toContain('[upper](/docs/guide/start)')
+    expect(body).toContain('href="/docs/guide/start"')
+    expect(body).not.toContain('docs.example.com')
+  })
+
+  it('keeps a same-host link to a page that does not exist absolute', () => {
+    const missing = '[m](https://docs.example.com/docs/guide/missing)\n\n[a](https://docs.example.com/docs/guide/image.png)\n\n[h](https://docs.example.com)'
+    const body = migrateOther(plausible('docs.example.com'), missing)
+    expect(body).toContain('[m](https://docs.example.com/docs/guide/missing)')
+    expect(body).toContain('[a](https://docs.example.com/docs/guide/image.png)')
+    expect(body).toContain('[h](https://docs.example.com)')
+  })
+
+  it('keeps a link to another host, port or account absolute', () => {
+    const links = [
+      'https://other.example.com/docs/guide/start',
+      'https://www.docs.example.com/docs/guide/start',
+      'https://docs.example.com.evil.test/docs/guide/start',
+      'https://docs.example.com:8443/docs/guide/start',
+      'https://user@docs.example.com/docs/guide/start',
+    ]
+    const body = migrateOther(plausible('docs.example.com'), links.map((link) => `[l](${link})`).join('\n\n'))
+    for (const link of links) expect(body).toContain(`[l](${link})`)
+  })
+
+  it('makes a link to a redirect source root-relative', () => {
+    const body = migrateOther(
+      { ...plausible('docs.example.com'), redirects: [{ source: '/docs/old', destination: '/docs/guide/start' }] },
+      '[old](https://docs.example.com/docs/old)',
+    )
+    expect(body).toContain('[old](/docs/old)')
+  })
+
+  it('removes a mount prefix only when the rest is an imported page', () => {
+    const body = migrateOther(plausible('docs.example.com'), '[g](https://docs.example.com/docs/guide)\n\n[n](https://docs.example.com/docs/nope)', ['guide'])
+    expect(body).toContain('[g](/guide)')
+    expect(body).toContain('[n](https://docs.example.com/docs/nope)')
+  })
+
+  // The Plausible domain is often the marketing site's apex or a product host, not the docs host: a link there is not a docs page.
+  it('trusts a Plausible domain only when it names a docs host, never an apex or other subdomain', () => {
+    const link = (host: string) => `[l](https://${host}/pricing)`
+    for (const host of ['example.com', 'www.example.com', 'blog.example.com', 'app.example.com']) {
+      expect(migrateOther(plausible(host), link(host), ['pricing'])).toContain(link(host))
+    }
+    for (const host of ['docs.example.com', 'developer.example.com', 'developers.example.co.uk']) {
+      expect(migrateOther(plausible(host), link(host), ['pricing'])).toContain('[l](/pricing)')
+    }
+    // seo.metatags.canonical is the author's own statement of the docs address, so any host stays.
+    expect(migrateOther({ seo: { metatags: { canonical: 'https://example.com/' } } }, link('example.com'), ['pricing'])).toContain('[l](/pricing)')
+  })
+
+  it('keeps a canonical address\'s path: only links under it can reach a docs page', () => {
+    const links = [
+      '[o](https://example.com/security)',
+      '[b](https://example.com/docsfoo/guide/start)',
+      '[d](https://example.com/docs/guide/start)',
+    ].join('\n\n')
+    const body = migrateOther({ seo: { metatags: { canonical: 'https://example.com/docs/' } } }, links, ['security', 'docs/guide/start'])
+    expect(body).toContain('[o](https://example.com/security)')
+    expect(body).toContain('[b](https://example.com/docsfoo/guide/start)')
+    expect(body).toContain('[d](/docs/guide/start)')
+  })
+
+  it('prefers seo.metatags.canonical over the Plausible domain', () => {
+    const body = migrateOther(
+      { seo: { metatags: { canonical: 'https://canonical.example.com/docs' } }, ...plausible('docs.example.com') },
+      '[c](https://canonical.example.com/docs/guide/start)\n\n[p](https://docs.example.com/docs/guide/start)',
+    )
+    expect(body).toContain('[c](/docs/guide/start)')
+    expect(body).toContain('[p](https://docs.example.com/docs/guide/start)')
+  })
+
+  it('falls back to the Plausible domain when the canonical is not an http(s) URL, and ignores a Plausible list', () => {
+    const link = '[p](https://docs.example.com/docs/guide/start)'
+    expect(migrateOther({ seo: { metatags: { canonical: 'docs.example.com' } }, ...plausible('docs.example.com') }, link)).toContain('[p](/docs/guide/start)')
+    expect(migrateOther(plausible('docs.example.com,other.example.com'), link)).toContain(link)
+  })
+
+  it('changes nothing without a canonical or Plausible domain', () => {
+    const links = '[x](https://docs.example.com/docs/guide/start#step)\n\n<Card title="T" href="https://docs.example.com/docs/guide/start" />'
+    const body = migrateOther({}, links)
+    expect(body).toContain('[x](https://docs.example.com/docs/guide/start#step)')
+    expect(body).toContain('href="https://docs.example.com/docs/guide/start"')
+  })
+
+  // MDX has no `<https://...>` autolinks (a page holding one does not compile), so only bare URLs and code can show a same-host URL.
+  it('never touches code or bare URLs', () => {
+    const url = 'https://docs.example.com/docs/guide/start'
+    const body = migrateOther(plausible('docs.example.com'), [url, `\`[x](${url})\``, `\`\`\`md\n[x](${url})\n\`\`\``].join('\n\n'))
+    expect(body).toContain(`\`[x](${url})\``)
+    expect(body).toContain(`\`\`\`md\n[x](${url})\n\`\`\``)
+    expect(body.replace(/`[^`]*`|```[\s\S]*?```/g, '').match(new RegExp(url.replace(/[./]/g, '\\$&'), 'g'))).toHaveLength(1)
+  })
+})
+
+describe('rewriteMintlifyMountedLinks on long runs', () => {
+  it.each(['](/a', '](https://h/a', ' href="/a', ' href="https://h/a'])('stays linear on a repeated %s with no end', (unit) => {
+    const body = unit.repeat(15_000)
+    const started = performance.now()
+    expect(rewriteMintlifyMountedLinks(body, new Set(['a']), { host: 'h', path: '' })).toBe(body)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
+  it('still rewrites a link whose target is long but within bounds', () => {
+    const route = `${'s/'.repeat(500)}end`
+    expect(rewriteMintlifyMountedLinks(`[x](/docs/${route})`, new Set([route]))).toBe(`[x](/${route})`)
+  })
 })
 
 describe('scanFiles follows a submodule symlink inside the repository checkout', () => {

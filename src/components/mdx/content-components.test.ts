@@ -116,6 +116,24 @@ describe('standalone rich-content primitives', () => {
     expect(unsafe).not.toContain('href=')
   })
 
+  it.each([Card, Tile])('links a relative href unchanged and keeps it internal', (Component) => {
+    for (const href of ['./x', '../x', './a/b', '../../a/b#step']) {
+      const markup = renderToStaticMarkup(createElement(Component, { title: 'T', href }))
+      expect(markup).toMatch(new RegExp(`<h2[^>]*><a [^>]*href="${href.replace(/[./#]/g, '\\$&')}"[^>]*>T</a></h2>`))
+      expect(markup).not.toContain('target="_blank"')
+      expect(markup).not.toContain('data-card-external')
+    }
+    for (const href of ['.\\evil', './\\evil', '..\\x', './/evil.com', '..//evil.com', './\t/evil.com', '../\n/x', '//evil.com', 'a/b', '.hidden', 'javascript:alert(1)']) {
+      expect(renderToStaticMarkup(createElement(Component, { title: 'T', href }))).not.toContain('href=')
+    }
+  })
+
+  it('checks a long relative href in linear time', () => {
+    const started = performance.now()
+    expect(renderToStaticMarkup(createElement(Card, { title: 'T', href: `${'./'.repeat(100_000)}\\` }))).not.toContain('href=')
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   it('never nests anchors when a linked card body contains a link', () => {
     const markup = renderToStaticMarkup(createElement(Card, { title: 'Repo', href: '/repo' },
       createElement('a', { href: 'https://github.com/x' }, 'GitHub Repo')))
@@ -200,6 +218,15 @@ describe('standalone rich-content primitives', () => {
     expect(tooltip).toContain('href="/auth"')
     const unsafe = renderToStaticMarkup(createElement(Tooltip, { tip: 'No link', cta: 'Run', href: 'javascript:alert(1)' }, 'token'))
     expect(unsafe).not.toContain('javascript:')
+  })
+
+  it('links a Tooltip cta to a relative href and rejects backslash paths', () => {
+    const relative = renderToStaticMarkup(createElement(Tooltip, { tip: 'Tip', cta: 'Learn', href: '../auth' }, 'token'))
+    expect(relative).toContain('href="../auth"')
+    for (const href of ['.\\evil', './\\evil', './/evil.com', '..//evil.com', '//evil.com', 'javascript:alert(1)']) {
+      const unsafe = renderToStaticMarkup(createElement(Tooltip, { tip: 'Tip', cta: 'Learn', href }, 'token'))
+      expect(unsafe, href).not.toContain('href=')
+    }
   })
 
   it('preserves legacy colors and adds compound palette items', () => {

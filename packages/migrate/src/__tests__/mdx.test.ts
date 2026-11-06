@@ -1,9 +1,13 @@
 /** Generated page descriptions contain readable prose, never component syntax. */
 
 import { compileSync } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -805,6 +809,25 @@ describe('Mintlify heading ids', () => {
     ].join('\n'))
   })
 
+  // Docusaurus headings end in `[\u200b](#id "Direct link to <text>")` (U+200B is a zero-width space). A title holding parentheses ended the
+  // old `\]\([^)]*\)` protection early, so the title's closing quote was typeset as a curly quote.
+  it.each([
+    '3. (AVS Operators Only) Register with Hyperlane AVS',
+    'Interchain Security Module (ISM)',
+  ])('keeps the link title of a Docusaurus heading with parentheses straight: %s', (text) => {
+    const link = `[\u200b](#${mintlifyHeadingSlug(text)} "Direct link to ${text}")`
+    const output = normalizeMdx(`## ${text}${link}`, 'mintlify')
+    expect(output).not.toMatch(/[\u201c\u201d]/)
+    expect(output).toContain(link)
+    // The link is not part of the heading's text, so the id is Thally's own and the line needs no marker.
+    expect(output).toBe(`## ${text}${link}`)
+  })
+
+  it('still typesets the heading text next to a protected link', () => {
+    expect(normalizeMdx('## The "ISM" (v2)[\u200b](#ism "Direct link to The "ISM" (v2)")', 'mintlify'))
+      .toContain('The \u201cISM\u201d (v2)[')
+  })
+
   it('leaves other platforms alone', () => {
     expect(normalizeMdx('## Scrape + Interact', 'docusaurus')).toBe('## Scrape + Interact')
   })
@@ -1050,6 +1073,74 @@ describe('Mintlify callouts', () => {
   })
 })
 
+// Mintlify sources converted from Docusaurus keep `<Tabs values>` and `<TabItem>` (Hyperlane's extending-warp-routes page has no imports).
+describe('Mintlify pages that kept Docusaurus Tabs', () => {
+  const docusaurusTabs = [
+    '<Tabs',
+    '  defaultValue="eoa"',
+    '  values={[',
+    '    { label: "EOA", value: "eoa" },',
+    '    { label: "Gnosis Safe", value: "gnosis" },',
+    '  ]}',
+    '>',
+    '  <TabItem value="eoa">',
+    '    <WarpApplySymbolConfigDefaultPartial />',
+    '  </TabItem>',
+    '  <TabItem value="gnosis">',
+    '    Use this template to define and save a Gnosis Safe strategy.',
+    '    <WarpApplySymbolConfigDefaultStrategyPartial />',
+    '  </TabItem>',
+    '</Tabs>',
+  ].join('\n')
+  const mintlifyTabs = '<Tabs defaultTabIndex={1}>\n  <Tab title="A">\n    One\n  </Tab>\n  <Tab title="B">\n    Two\n  </Tab>\n</Tabs>'
+
+  it('maps <Tabs values> and <TabItem value> to <Tab title>, dropping the Docusaurus props', () => {
+    const output = normalizeMdx(`Intro\n\n${docusaurusTabs}\n`, 'mintlify')
+    expect(output).toMatch(/^Intro\n\n<Tabs\s*>/)
+    expect(output).toContain('<Tab title="EOA">')
+    expect(output).toContain('<Tab title="Gnosis Safe">')
+    expect(output).not.toMatch(/defaultValue|values=|TabItem/)
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('turns a <TabItem> outside any <Tabs> pair into a <Tab>', () => {
+    expect(normalizeMdx('<TabItem value="a" label="Alpha">Body</TabItem>', 'mintlify')).toBe('<Tab title="Alpha">Body</Tab>')
+  })
+
+  it('leaves a <TabItem> that is only named in prose to the orphan-tag escape, so the page still compiles', () => {
+    const output = normalizeMdx('The <TabItem> tag is used.', 'mintlify')
+    expect(output).toBe('The &lt;TabItem&gt; tag is used.')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+    expect(normalizeMdx('<TabItem value="a" label="A">One</TabItem>\n\nThe <TabItem> tag.', 'mintlify'))
+      .toBe('<Tab title="A">One</Tab>\n\nThe &lt;TabItem&gt; tag.')
+    expect(normalizeMdx('The <TabItem value="a"> and </TabItem> tags.', 'mintlify')).toBe('The <Tab title="a"> and </Tab> tags.')
+  })
+
+  it('maps nested stray <TabItem> pairs and never a self-closing one', () => {
+    expect(normalizeMdx('<TabItem label="Out"><TabItem label="In">x</TabItem></TabItem>', 'mintlify'))
+      .toBe('<Tab title="Out"><Tab title="In">x</Tab></Tab>')
+    expect(normalizeMdx('<TabItem value="a" />\n\n<TabItem value="b">B</TabItem>', 'mintlify'))
+      .toBe('<TabItem value="a" />\n\n<Tab title="b">B</Tab>')
+  })
+
+  it('leaves Docusaurus Tabs shown in a fenced example alone, and still maps the ones outside it', () => {
+    const fenced = `\`\`\`mdx\n${docusaurusTabs}\n\`\`\``
+    expect(normalizeMdx(fenced, 'mintlify')).toBe(fenced)
+    const output = normalizeMdx(`${fenced}\n\n${docusaurusTabs}`, 'mintlify')
+    expect(output.startsWith(`${fenced}\n\n<Tabs`)).toBe(true)
+    expect(output.slice(fenced.length)).toContain('<Tab title="EOA">')
+  })
+
+  it('leaves Mintlify <Tabs> and <Tab title> byte-identical, also next to Docusaurus Tabs', () => {
+    expect(normalizeMdx(mintlifyTabs, 'mintlify')).toBe(mintlifyTabs)
+    expect(normalizeMdx(`${mintlifyTabs}\n\n${docusaurusTabs}`, 'mintlify').startsWith(`${mintlifyTabs}\n\n`)).toBe(true)
+  })
+
+  it('does not map TabItem on other platforms that never asked for it', () => {
+    expect(normalizeMdx('<TabItem value="a">Body</TabItem>', 'fern')).toBe('<TabItem value="a">Body</TabItem>')
+  })
+})
+
 describe('Mintlify explicit heading ids stay on the heading', () => {
   it('keeps a translated heading\'s English id as the heading id, not as a separate anchor', () => {
     const output = normalizeMdx('## Primeros pasos {#get-started}\n\nTexto.', 'mintlify')
@@ -1162,6 +1253,97 @@ describe('Fern relative page links', () => {
   it('leaves unknown files, external URLs, assets, and code examples unchanged', () => {
     const body = '<Card href="https://example.com/x.mdx" />\n<Card href="missing.mdx" />\n<a href="./assets/chart.svg" />\n`<Card href="tier1-validation.mdx" />`\n```mdx\n<Card href="tier1-validation.mdx" />\n```'
     expect(rewriteFernRelativePageLinks(body, '../docs/index.mdx', routes)).toBe(body)
+  })
+})
+
+describe('esmTemplateLiteralRanges', () => {
+  const spans = (body: string): Array<string> => esmTemplateLiteralRanges(body).map(([start, end]) => body.slice(start, end))
+
+  it('finds the template literals in a page export, one holding blank lines and a nested one', () => {
+    const body = 'Intro.\n\nexport const code = () => {\n  const s = `\nimport a from "b";\n\n${`n`}\n`\n  return s\n}\n\n<code />\n'
+    expect(spans(body)).toEqual(['`\nimport a from "b";\n\n${`n`}\n`', '`n`'])
+  })
+
+  it('ignores backticks in prose and code blocks', () => {
+    expect(spans('Use `x` here.\n\n```js\nconst a = `b`\n```\n')).toEqual([])
+  })
+
+  it('is empty when the page does not parse as MDX', () => {
+    expect(spans('{unclosed\n\nexport const a = `x`\n')).toEqual([])
+  })
+
+  it('finds the ones in flow expressions, text expressions and JSX attribute expressions', () => {
+    const body = "{`\nimport a from 'b'\n`}\n\nText {`x`} more\n\n<CodeBlock code={`\nimport c from 'd'\n`} />\n"
+    expect(spans(body)).toEqual(["`\nimport a from 'b'\n`", '`x`', "`\nimport c from 'd'\n`"])
+  })
+
+  it('reads past a frontmatter value that holds braces', () => {
+    const body = '---\ntitle: T\ndescription: "Use {id?} here"\n---\n\nexport const c = () => `\nimport a from "b";\n`\n'
+    expect(spans(body)).toEqual(['`\nimport a from "b";\n`'])
+  })
+
+  it('finds them in the page\'s own offsets when a prose brace that acorn rejects stops the parse', () => {
+    const body = 'Path /{chainId?} and {a b}\n\nexport const c = () => `\nimport a from "b";\n`\n\nThen /{d?}\n'
+    expect(spans(body)).toEqual(['`\nimport a from "b";\n`'])
+  })
+
+  it('finds them in the page\'s own offsets when an HTML comment or an unmatched closing tag stops the parse', () => {
+    const literal = '`\nimport a from "b";\n`'
+    const code = `export const c = () => ${literal}\n`
+    expect(spans(`<!-- note\nmore -->\n\n${code}`)).toEqual([literal])
+    expect(spans(`text </Foo> and more\n\n${code}`)).toEqual([literal])
+    expect(spans(`<!-- a -->\n\nPath /{chainId?} and </Foo>\n\n<!-- b -->\n\n${code}`)).toEqual([literal])
+  })
+
+  it('is still empty when the repaired page does not parse either', () => {
+    expect(spans('Path /{chainId?}\n\nline<br>\n\nexport const c = `x`\n')).toEqual([])
+  })
+})
+
+describe('rewriteRelativeJsxHrefs', () => {
+  const rewrite = (body: string, pagePath: string) => rewriteRelativeJsxHrefs(body, pagePath)
+
+  it('resolves ./ and ../ against the page URL, as the browser does on the live page', () => {
+    const body = '<Card href="./lesson-1" />\n<Card href="../other/x" />\n<Card href="./a/../b" />\n<Card href="../../x" />'
+    expect(rewrite(body, 'ua-course/part/intro')).toBe(
+      '<Card href="/ua-course/part/lesson-1" />\n<Card href="/ua-course/other/x" />\n<Card href="/ua-course/part/b" />\n<Card href="/x" />',
+    )
+  })
+
+  it('resolves from a top-level page against the site root', () => {
+    expect(rewrite('<Card href="./x" /> <Card href="./" />', 'intro')).toBe('<Card href="/x" /> <Card href="/" />')
+  })
+
+  it('serves a directory index page at its parent route, so ./ resolves from the parent directory', () => {
+    // `guides/index.mdx` has the page id `guides` and is served at `/guides` (Mintlify and Thally alike),
+    // so the browser drops `guides` and resolves `./x` to `/x`, not `/guides/x`.
+    expect(rewrite('<Card href="./x" />', 'guides')).toBe('<Card href="/x" />')
+  })
+
+  it('clamps a href that climbs above the site root at the root, as the browser does', () => {
+    expect(rewrite('<Card href="../x" /> <Card href="./y" />', 'intro')).toBe('<Card href="/x" /> <Card href="/y" />')
+    expect(rewrite('<Card href="../../x?a=1#b" /> <Card href="../../../" />', 'a/b')).toBe('<Card href="/x?a=1#b" /> <Card href="/" />')
+  })
+
+  it('keeps the query and the fragment', () => {
+    expect(rewrite('<Card href="./x?tab=1#top" /> <Card href="../y#z" /> <Card href="./w/?a=b" />', 'a/b'))
+      .toBe('<Card href="/a/x?tab=1#top" /> <Card href="/y#z" /> <Card href="/a/w/?a=b" />')
+  })
+
+  it('handles single quotes and string expressions', () => {
+    expect(rewrite(`<Card href='./a' /> <Card href={"./b"} /> <Card href={ './c' } /> <a href="./d">d</a>`, 'p/q'))
+      .toBe(`<Card href='/p/a' /> <Card href={"/p/b"} /> <Card href={ '/p/c' } /> <a href="/p/d">d</a>`)
+  })
+
+  it('leaves code, comments, Markdown links, other attributes and non-relative hrefs alone', () => {
+    const body = [
+      '```mdx', '<Card href="./x" />', '```', '',
+      'Use `<Card href="./x" />` here and [text](./x) or [up](../x).',
+      '{/* <Card href="./x" /> */}',
+      '<Card href="/abs" /> <Card href="https://e.com/./x" /> <Card href="#top" /> <Card href="mailto:a@b.c" /> <Card href="//cdn.x/y" />',
+      '<Card href="sibling" /> <Card href="./a\\b" /> <Card src="./x.png" data-href="./x" /> <Card to="./x" />',
+    ].join('\n')
+    expect(rewrite(body, 'a/b')).toBe(body)
   })
 })
 
@@ -1855,34 +2037,34 @@ describe('escapeUnmatchedClosingTags', () => {
     ].join('\n')
     expect(() => compiles(real)).toThrow(/Unexpected closing slash/)
     const out = escapeUnmatchedClosingTags(real)
-    expect(out.lines).toEqual([7])
+    expect(out.escaped).toEqual(['</Warning>'])
     expect(() => compiles(out.body)).not.toThrow()
     expect(out.body).toContain("You can't change `workspace_id` through the API.")
   })
 
   it('leaves balanced and nested same-name tags untouched', () => {
     const src = '<Note>\n<Note>\ninner\n</Note>\n</Note>\n'
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('ignores closers inside code fences and inline code', () => {
     const src = '```html\n</Warning>\n```\n\nUse `</Warning>` here.\n'
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
   })
 
   it('is linear on a long whitespace run inside an unfinished tag', () => {
     const src = `<a${' '.repeat(80_000)}x`
     const start = performance.now()
-    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, escaped: [] })
     expect(performance.now() - start).toBeLessThan(200)
   })
 
   it('counts an opener whose brace attribute contains angle brackets', () => {
     const src = '<Card icon={<Icon />}>\nbody\n</Card>\n</Card>\n'
     const out = escapeUnmatchedClosingTags(src)
-    expect(out.lines).toEqual([4])
+    expect(out.escaped).toEqual(['</Card>'])
     expect(out.body).toBe('<Card icon={<Icon />}>\nbody\n</Card>\n\\</Card>\n')
-    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', lines: [] })
+    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', escaped: [] })
   })
 
   it('is linear on adversarial input', () => {
@@ -1900,6 +2082,109 @@ describe('escapeUnmatchedClosingTags', () => {
         expect(performance.now() - start).toBeLessThan(200)
       }
     }
+  })
+})
+
+describe('escapeUnparseableExpressions', () => {
+  const compiles = (src: string) => { compileSync(src, { outputFormat: 'program' }) }
+  // The expressions the page would still evaluate at render, as written between their braces.
+  const liveExpressions = (src: string): Array<string> => {
+    const found: Array<string> = []
+    const visit = (node: { type: string; value?: string; children?: Array<unknown> }): void => {
+      if (node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression') found.push(node.value ?? '')
+      for (const child of node.children ?? []) visit(child as typeof node)
+    }
+    visit(unified().use(remarkParse).use(remarkMdx).parse(src) as Parameters<typeof visit>[0])
+    return found
+  }
+
+  it('repairs a path placeholder and renders it as literal text under the runtime\'s remark-gfm', () => {
+    const src = '## Endpoint\n\nSend it to /{chainId?}\n'
+    expect(() => compiles(src)).toThrow(/Could not parse expression/)
+    const out = escapeUnparseableExpressions(src)
+    expect(out.escaped).toEqual(['{chainId?}'])
+    expect(out.body).toBe('## Endpoint\n\nSend it to /\\{chainId?}\n')
+    const rendered = String(compileSync(out.body, { outputFormat: 'program', remarkPlugins: [remarkGfm] }))
+    expect(rendered).toContain('Send it to /{chainId?}')
+    expect(rendered).not.toContain('\\{')
+  })
+
+  it('does not repair a bare URL: the runtime\'s remark-gfm autolinks it, braces included', () => {
+    const src = '## Endpoint\n\nhttps://bundler.particle.network/{chainId?}\n'
+    expect(() => compiles(src)).toThrow(/Could not parse expression/)
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+    expect(String(compileSync(src, { outputFormat: 'program', remarkPlugins: [remarkGfm] }))).toContain('https://bundler.particle.network/{chainId?}')
+  })
+
+  it('repairs several broken expressions on different lines, one repair each', () => {
+    const src = 'one {a?} two\n\nplain\n\nthree {b c}\n'
+    const out = escapeUnparseableExpressions(src)
+    expect(out.escaped).toEqual(['{a?}', '{b c}'])
+    expect(out.body).toBe('one \\{a?} two\n\nplain\n\nthree \\{b c}\n')
+    expect(() => compiles(out.body)).not.toThrow()
+  })
+
+  it('escapes every brace of a nested span so no inner expression stays live', () => {
+    const src = 'a {x {y} ?} b\n'
+    // Escaping only the outer brace compiles but leaves `{y}` evaluated at render (a ReferenceError).
+    expect(liveExpressions('a \\{x {y} ?} b\n')).toEqual(['y'])
+    const out = escapeUnparseableExpressions(src)
+    expect(out.escaped).toEqual(['{x {y} ?}'])
+    expect(out.body).toBe('a \\{x \\{y} ?} b\n')
+    expect(liveExpressions(out.body)).toEqual([])
+    expect(String(compileSync(out.body, { outputFormat: 'program' }))).toContain('a {x {y} ?} b')
+  })
+
+  it('leaves a valid expression elsewhere on the page live', () => {
+    const out = escapeUnparseableExpressions('Total {1 + 1}\n\nsee /{chainId?}\n\nThen {2 * 3}\n')
+    expect(out.escaped).toEqual(['{chainId?}'])
+    expect(liveExpressions(out.body)).toEqual(['1 + 1', '2 * 3'])
+  })
+
+  it('does not touch braces in code fences or inline code', () => {
+    const src = '```js\n{x?}\n```\n\nUse `{x?}` and {y?} here.\n\n~~~\n{z?}\n~~~\n'
+    const out = escapeUnparseableExpressions(src)
+    expect(out.escaped).toEqual(['{y?}'])
+    expect(out.body).toBe('```js\n{x?}\n```\n\nUse `{x?}` and \\{y?} here.\n\n~~~\n{z?}\n~~~\n')
+  })
+
+  it('keeps a brace that is already escaped and a lone closing brace', () => {
+    const src = 'a \\{b?} and a } alone and {c?}\n'
+    const out = escapeUnparseableExpressions(src)
+    expect(out.body).toBe('a \\{b?} and a } alone and \\{c?}\n')
+    expect(out.escaped).toEqual(['{c?}'])
+  })
+
+  it('gives up on an attribute expression, since escaping its brace is invalid JSX', () => {
+    const src = '<Card title={a b}>\nbody\n</Card>\n'
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+  })
+
+  it('gives up when a broken expression sits in a tag attribute even if prose ones were repairable', () => {
+    const src = 'see {a?}\n\n<Card title={a b}>\nbody\n</Card>\n'
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+  })
+
+  it('does not repair a broken export, and does not touch other braces once it gives up', () => {
+    const src = 'export const x = ;\n\nsee {a?}\n'
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+  })
+
+  it('gives up on an expression that never closes', () => {
+    expect(escapeUnparseableExpressions('{unclosed')).toEqual({ body: '{unclosed', escaped: [] })
+  })
+
+  it('returns a page that already compiles unchanged', () => {
+    const src = 'Total {1 + 1}\n'
+    expect(escapeUnparseableExpressions(src)).toEqual({ body: src, escaped: [] })
+  })
+
+  it('stops after 50 repairs rather than looping', () => {
+    const many = (count: number) => Array.from({ length: count }, (_unused, index) => `row ${index} {a?}`).join('\n\n')
+    const ok = escapeUnparseableExpressions(many(50))
+    expect(ok.escaped).toHaveLength(50)
+    expect(() => compiles(ok.body)).not.toThrow()
+    expect(escapeUnparseableExpressions(many(51))).toEqual({ body: many(51), escaped: [] })
   })
 })
 

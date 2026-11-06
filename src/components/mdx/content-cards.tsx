@@ -56,7 +56,9 @@ function isExternalLink(href: string): boolean {
 }
 
 function isSafeLink(href: string): boolean {
-  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(https?:|mailto:)/i.test(href)
+  // `./` and `../` pass through unchanged so the browser resolves them against the page URL, as Mintlify does.
+  // A backslash, a control character (browsers drop tabs and newlines) or a slash right after the dots is refused.
+  return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^\.\.?\/(?!\/)[^\\\u0000-\u001f\u007f]*$/.test(href) || /^(https?:|mailto:)/i.test(href)
 }
 
 function isSafeImageSource(src: string): boolean {

@@ -9,13 +9,14 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { basename, dirname, extname, posix, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
+import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, maskedOutsideCode, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments, splitFrontmatterBlock } from './mdx.js'
 import { resolveWithin } from './path.js'
 import { gateOnMount, hoistedVarNames, mountGateHelper, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
@@ -207,7 +208,22 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
   return undefined
 }
 
-const parser = unified().use(remarkParse).use(remarkMdx)
+/** The start of the warning for a page this analysis could not parse; the repository adapter looks for it. */
+export const COMPONENT_ANALYSIS_FAILED = 'Custom component analysis could not parse this MDX'
+
+/**
+ * Whether `createComponentMigrator().transform` has anything to do on a page, outside code: an `import` or `export` line (components,
+ * unavailable packages, inline declarations), a JSX event handler (an interactive root moves to a client component) or an asset
+ * `require(` in an attribute. A page with none loses nothing when the analysis cannot read it. A fence that is never closed hides the
+ * rest of the page from the scan, so such a page counts as having work.
+ */
+export function pageHasComponentWork(body: string): boolean {
+  const { text, openFence } = maskedOutsideCode(splitFrontmatterBlock(body).body)
+  return openFence || /^[ \t]*(?:import|export)\b|\bon[A-Z]\w*\s*=|\brequire\s*\(/m.test(text)
+}
+
+// remark-gfm, like the runtime's compile and `MDX_COMPILE_OPTIONS`: a page that compiles must also parse here.
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
 /**
@@ -1301,7 +1317,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     try {
       tree = parser.parse(content) as MdxNode
     } catch {
-      warn('Custom component analysis could not parse this MDX; its source was preserved for manual migration.', currentFile)
+      warn(`${COMPONENT_ANALYSIS_FAILED}; its source was preserved for manual migration.`, currentFile)
       // The AST walk below is how every `@site/...`/relative component
       // import normally gets copied or removed; none of that runs on a page
       // that can't even be parsed. Left alone, an import like that survives

@@ -33,7 +33,7 @@ import * as ts from 'typescript'
 
 import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
 import { isThallyBuiltinComponent } from './builtin-components.js'
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
+import { COMPONENT_ANALYSIS_FAILED, createComponentMigrator, pageHasComponentWork, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1361,6 +1361,16 @@ function readMintignoreMatcher(mintlifyRoot: string): IgnoreMatcher | null {
   return createIgnoreMatcher().add(readFileSync(path, 'utf8'))
 }
 
+/** The icon library a site that names none uses (`DEFAULT_ICON_LIBRARY` in the runtime's `src/lib/icon-library.ts`). */
+const RUNTIME_DEFAULT_ICON_LIBRARY = 'lucide'
+
+/** Up to three of `items` in backticks, each at most 60 characters, then how many more: a warning cannot give a line number, as the body is not the source file. */
+function quoted(items: ReadonlyArray<string>): string {
+  const unique = [...new Set(items.map((item) => item.replace(/\s+/g, ' ').trim()))]
+  const shown = unique.slice(0, 3).map((item) => `\`${item.length > 60 ? `${item.slice(0, 59)}…` : item}\``)
+  return `${shown.join(', ')}${unique.length > 3 ? `, and ${unique.length - 3} more` : ''}`
+}
+
 /**
  * Compile-check a page body with the same MDX compiler the scaffold's
  * runtime build uses (`@mdx-js/mdx`). A single malformed page must never
@@ -1369,11 +1379,49 @@ function readMintignoreMatcher(mintlifyRoot: string): IgnoreMatcher | null {
  */
 function invalidMdxReason(body: string): string | null {
   try {
-    compileSync(body, { outputFormat: 'program' })
+    compileSync(body, MDX_COMPILE_OPTIONS)
     return null
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
   }
+}
+
+/** The warning for a capitalized tag nothing backs, which `replaceUnknownComponents` neutralizes. */
+function unresolvedComponentWarning(name: string, source: string): MigrationWarning {
+  return {
+    code: 'unsupported-config',
+    message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
+    source,
+  }
+}
+
+/**
+ * Fail closed: the repairs of a page that does not compile, kept only when the page then compiles. Unmatched closing tags
+ * first; when that alone is not enough, braces acorn rejects as well. Null when neither makes the page compile.
+ */
+function repairUncompilableMdx(body: string): { body: string; closingTags: Array<string>; braces: Array<string> } | null {
+  const closingTags = escapeUnmatchedClosingTags(body)
+  if (closingTags.escaped.length > 0 && invalidMdxReason(closingTags.body) === null) {
+    return { body: closingTags.body, closingTags: closingTags.escaped, braces: [] }
+  }
+  const braces = escapeUnparseableExpressions(closingTags.body)
+  return braces.escaped.length > 0 ? { body: braces.body, closingTags: closingTags.escaped, braces: braces.escaped } : null
+}
+
+/** One warning for each kind of repair `repairUncompilableMdx` made. */
+function repairWarnings(repair: { closingTags: Array<string>; braces: Array<string> }, source: string): Array<MigrationWarning> {
+  return [
+    ...(repair.closingTags.length > 0 ? [{
+      code: 'unsupported-config' as const,
+      message: `Escaped unmatched closing tag(s) ${quoted(repair.closingTags)} so the page compiles; they render as literal text.`,
+      source,
+    }] : []),
+    ...(repair.braces.length > 0 ? [{
+      code: 'unsupported-config' as const,
+      message: `Escaped the braces of ${quoted(repair.braces)} so the page compiles; they render as literal text.`,
+      source,
+    }] : []),
+  ]
 }
 
 const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
@@ -3390,18 +3438,37 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
 
 /** MDX imports from nested Markdown partials must live at page scope. */
 function hoistMdxImports(source: string): string {
-  const imports = new Set<string>()
-  const withoutImports = replaceOutsideCode(source, (body) => body.replace(
-    /^[ \t]*import\s+(?:\{[^}\n]+\}|[A-Za-z_$][\w$]*)\s+from\s+(['"])[^'"\n]+\1[ \t]*;?/gm,
-    (statement: string) => {
-      imports.add(statement.trim().replace(/;?$/, ';'))
-      return ''
-    },
-  ))
+  const hoist = (text: string): { imports: Set<string>; rest: string } => {
+    const imports = new Set<string>()
+    const rest = replaceOutsideCode(text, (body) => body.replace(
+      /^[ \t]*import\s+(?:\{[^}\n]+\}|[A-Za-z_$][\w$]*)\s+from\s+(['"])[^'"\n]+\1[ \t]*;?/gm,
+      (statement: string) => {
+        imports.add(statement.trim().replace(/;?$/, ';'))
+        return ''
+      },
+    ))
+    return { imports, rest }
+  }
+  let { imports, rest } = hoist(source)
   if (imports.size === 0) return source
-  const frontmatter = withoutImports.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  // A template literal in the page's JavaScript can hold a code sample whose lines read as imports; each one is set aside whole and put back.
+  const literals: Array<string> = []
+  let protectedSource = ''
+  let cursor = 0
+  for (const [start, end] of source.includes('`') ? esmTemplateLiteralRanges(source) : []) {
+    if (start < cursor) continue
+    literals.push(source.slice(start, end))
+    protectedSource += `${source.slice(cursor, start)}\u0002${literals.length - 1}\u0002`
+    cursor = end
+  }
+  if (literals.length > 0) {
+    ({ imports, rest } = hoist(protectedSource + source.slice(cursor)))
+    if (imports.size === 0) return source
+  }
+  const frontmatter = rest.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
   const prefix = frontmatter?.[0] ?? ''
-  return `${prefix}${[...imports].join('\n')}\n\n${withoutImports.slice(prefix.length).replace(/^(?:\r?\n)*/, '')}`
+  return `${prefix}${[...imports].join('\n')}\n\n${rest.slice(prefix.length).replace(/^(?:\r?\n)*/, '')}`
+    .replace(/\u0002(\d+)\u0002/g, (marker, index: string) => literals[Number(index)] ?? marker)
 }
 
 /** Fern can publish a repository beneath a domain path such as `/skills`. */
@@ -3479,15 +3546,38 @@ function stripFernBasePathFromLinks(body: string, basePath: string): string {
     )))
 }
 
-/** Remove a published Mintlify mount path only when its destination is an imported page. */
-function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>): string {
-  const rewrite = (target: string): string => {
+/**
+ * The host a Mintlify site is served from, read from its docs.json, with the path its docs live under (empty for the root):
+ * `seo.metatags.canonical` when it is an http(s) URL, otherwise `integrations.plausible.domain` when that names a single
+ * hostname (Plausible also takes a comma list, which names no one site) whose first label is `docs`, `developer` or
+ * `developers`. Plausible is often set up for the marketing site's apex or another host, and a link there is not a docs page.
+ */
+function mintlifySourceSite(config: Record<string, unknown> | null): { host: string; path: string } | undefined {
+  const canonical = (config?.seo as { metatags?: { canonical?: unknown } } | undefined)?.metatags?.canonical
+  if (typeof canonical === 'string') {
+    try {
+      const url = new URL(canonical.trim())
+      if (url.protocol === 'http:' || url.protocol === 'https:') return { host: url.hostname, path: url.pathname.replace(/\/+$/, '') }
+    } catch { /* not a URL: the Plausible domain is next */ }
+  }
+  const domain = (config?.integrations as { plausible?: { domain?: unknown } } | undefined)?.plausible?.domain
+  return typeof domain === 'string' && /^(?:docs|developers?)(?:\.[a-z0-9-]+)+$/i.test(domain.trim()) ? { host: domain.trim().toLowerCase(), path: '' } : undefined
+}
+
+/**
+ * Remove a published Mintlify mount path only when its destination is an imported page. A link to the source site's own host
+ * (`sourceSite`) under the path its docs live at gets the same treatment and becomes root-relative only when that proves the
+ * route exists here.
+ */
+export function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>, sourceSite?: { host: string; path: string }): string {
+  /** The root-relative route `target` reaches here, or undefined when it names no imported page. */
+  const resolve = (target: string): string | undefined => {
     const suffixAt = target.search(/[?#]/)
     const pathname = suffixAt < 0 ? target : target.slice(0, suffixAt)
     const suffix = suffixAt < 0 ? '' : target.slice(suffixAt)
-    if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('\\')) return target
+    if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('\\')) return undefined
     const segments = pathname.slice(1).split('/')
-    if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return target
+    if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return undefined
     const markdown = pathname.endsWith('.md')
     const sourceMdx = pathname.endsWith('.mdx')
     const routeSegments = markdown || sourceMdx ? [...segments.slice(0, -1), segments.at(-1)!.replace(/\.mdx?$/, '')] : segments
@@ -3501,11 +3591,25 @@ function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>)
       const candidate = routeSegments.slice(count).join('/')
       if (pageIds.has(candidate)) return `/${candidate}${markdown ? '.md' : ''}${suffix}`
     }
-    return target
+    return undefined
   }
+  const rewrite = (target: string): string => {
+    if (target.startsWith('/')) return resolve(target) ?? target
+    if (!sourceSite) return target
+    try {
+      const url = new URL(target)
+      // Exact host only: another port or a login is another site. A docs site under a path (`/docs`) owns nothing outside it.
+      if (url.hostname !== sourceSite.host || url.port || url.username || url.password) return target
+      if (sourceSite.path && url.pathname !== sourceSite.path && !url.pathname.startsWith(`${sourceSite.path}/`)) return target
+      return resolve(`${url.pathname}${url.search}${url.hash}`) ?? target
+    } catch {
+      return target
+    }
+  }
+  // A run that never ends would otherwise be rescanned from every opener, so a target is bounded (a longer one is left as written).
   return replaceOutsideCode(body, (text) => text
-    .replace(/(\]\()(\/[^\s)]+)(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
-    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]+)\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
+    .replace(/(\]\()(\/[^\s)]{1,2048}|https?:\/\/[^\s)]{1,2048})(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
+    .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]{1,2048}|https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
 /** Preserve source fragments that resolve to a unique heading or table row. */
@@ -5111,6 +5215,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return { locale, navigationId, id: isDefaultLocale ? navigationId : `${locale}/${navigationId}` }
   }
   const routeAliases: NonNullable<MigrationDocsConfig['redirects']> = []
+  // The projected config names a library only for Mintlify (see `projectMintlifyNavigation`); every other site gets the runtime's default.
+  const siteIconLibrary = docsConfig.icons?.library ?? RUNTIME_DEFAULT_ICON_LIBRARY
   const pageFiles = [...files].sort((left, right) => {
     const leftOrder = referenceOrder.get(normalizedReferenceKey(left.relativePath)) ?? Number.MAX_SAFE_INTEGER
     const rightOrder = referenceOrder.get(normalizedReferenceKey(right.relativePath)) ?? Number.MAX_SAFE_INTEGER
@@ -5333,9 +5439,33 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     // Relative to `componentRoot`, like the component warnings for this page, so one page has one label.
     const pageWarningSource = relative(componentRoot, file.absolutePath).replace(/\\/g, '/')
+    // The analysis failed on this page and it had something to do: it must not be kept on a brace repair the analysis never read.
+    let componentAnalysisLeftWork = false
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
+      const analysisFailed = (): boolean => warnings.slice(warningsBeforeTransform).some((warning) => warning.message.startsWith(COMPONENT_ANALYSIS_FAILED)
+        && warning.source !== undefined && resolvePath(componentRoot, warning.source) === file.absolutePath)
+      const beforeTransform = raw
       raw = componentMigrator.transform(raw, file.absolutePath)
+      if (analysisFailed()) {
+        // A page that does not parse cannot be analysed, so a prose brace acorn rejects (or an unmatched closing tag) would leave its
+        // inline components unextracted. Repair it first, as the page would be below, and run the analysis again on the result.
+        // Math is protected first, as the page is below: the braces of a `$$\begin{align*}` block are not prose braces.
+        // HTML comments are converted first too, as the analysis does on its own copy, since they stop a page compiling.
+        const { front, body } = splitFrontmatterBlock(protectMathBlocks(beforeTransform).body)
+        const repair = repairUncompilableMdx(normalizeHtmlComments(body))
+        if (repair) {
+          const failed = warnings.splice(warningsBeforeTransform)
+          const retried = componentMigrator.transform(front + repair.body, file.absolutePath)
+          if (analysisFailed()) {
+            warnings.splice(warningsBeforeTransform, warnings.length, ...failed)
+          } else {
+            raw = retried
+            warnings.push(...repairWarnings(repair, file.relativePath))
+          }
+        }
+      }
+      componentAnalysisLeftWork = analysisFailed() && pageHasComponentWork(beforeTransform)
       // `transform` excludes a page itself (pushing a 'skipped-file' warning
       // for it) when it references an unsupported npm import outside JSX —
       // keeping that import would fail `next build` for the whole site. Skip
@@ -5385,6 +5515,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       navigationId,
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
+      siteIconLibrary,
       raw,
       platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
@@ -5484,27 +5615,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // throw "Expected component X to be defined" at render. Warn once per
       // component name and neutralize it: keep a paired tag's children,
       // drop a self-closing one outright.
-      page.body = replaceUnknownComponents(page.body, (name) => {
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
-          source: file.relativePath,
-        })
-      })
+      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) })
     }
     if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
     if (mdxError) {
-      // Fail closed: only keep a repair that actually compiles.
-      const repaired = escapeUnmatchedClosingTags(page.body)
-      if (repaired.lines.length > 0 && invalidMdxReason(repaired.body) === null) {
-        page.body = repaired.body
-        mdxError = null
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Escaped unmatched closing tag(s) on line ${repaired.lines.join(', ')} so the page compiles; they render as literal text.`,
-          source: file.relativePath,
-        })
+      // Fail closed: only keep a repair that actually compiles. A page whose component analysis failed and had work to do
+      // (an import, an export, an event handler: see `pageHasComponentWork`) is left to the exclusion when a brace had to be
+      // escaped, as the analysis cannot be told to read the repaired page now. One with nothing for it to do loses nothing.
+      const repair = repairUncompilableMdx(page.body)
+      if (repair && (repair.braces.length === 0 || !componentAnalysisLeftWork)) {
+        // The passes that read the page's syntax tree did nothing while it did not parse: give it them now, in the order the
+        // page normally gets them, and keep the repair only if it still compiles.
+        const settledWarnings: Array<MigrationWarning> = []
+        let settled = escapeFernLiteralBraces(repair.body)
+        settled = normalizeFlowParagraphContainers(settled)
+        settled = removeUndefinedExpressions(settled, (message) => { settledWarnings.push({ code: 'unsupported-config', message, source: pageWarningSource }) })
+        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+        if (invalidMdxReason(settled) === null) {
+          page.body = settled
+          mdxError = null
+          warnings.push(...repairWarnings(repair, file.relativePath), ...settledWarnings)
+        }
       }
     }
     if (mdxError) {
@@ -6436,7 +6568,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ...pages.map((page) => page.id),
       ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, '')),
     ])
-    for (const page of pages) page.body = rewriteMintlifyMountedLinks(page.body, reachablePaths)
+    const sourceSite = mintlifySourceSite(mintlifyConfig)
+    for (const page of pages) page.body = rewriteMintlifyMountedLinks(page.body, reachablePaths, sourceSite)
   }
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
@@ -6673,6 +6806,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (source) page.body = rewriteFernRelativePageLinks(page.body, source, routes)
     }
   }
+  if (platform === 'mintlify') {
+    // Page ids are final here, and an id is the route Mintlify served the page at. This runs after the mount pass above:
+    // a relative href is exact, so it must not be read as a link with a mount prefix to strip.
+    for (const page of pages) page.body = rewriteRelativeJsxHrefs(page.body, page.id)
+  }
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
   preserveLinkedAnchors(pages)
   if (platform === 'fern' && fernRawConfig) {
@@ -6861,7 +6999,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const assetPaths = new Set(assets.map((asset) => asset.path))
   const publicBrandPath = (value: unknown): string | undefined => {
     if (typeof value !== 'string' || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return undefined
-    const normalized = fernBrandAssetPaths.get(value) ?? normalizeAssetPath(value)
+    // `normalizeAssetPath` rejects every `.` segment, but docs.json writes `./logo/x.svg`: drop a leading `./` run only.
+    const normalized = fernBrandAssetPaths.get(value) ?? normalizeAssetPath(value.replace(/^(?:\.[/\\]+)+/, ''))
     return normalized && assetPaths.has(normalized) ? `/${normalized}` : undefined
   }
   const brandVariants = (value: unknown): { light?: string; dark?: string; showTitle?: boolean } => {
