@@ -3,6 +3,7 @@
  * plain `.mp4` src. YouTube/Vimeo URLs render as a lazy 16:9 iframe styled
  * like `Frame`; `.mp4` renders a native `<video controls>`.
  */
+import { isSafeRootPath } from '@/lib/safe-root-path'
 
 interface VideoProps {
   src: string
@@ -45,7 +46,7 @@ function embedUrlFor(src: string): string | null {
 
 /** Only a web URL or a site path may become an iframe source; `javascript:` and `data:` URLs run in the embedding page's origin. */
 function isEmbeddableSource(src: string): boolean {
-  return /^https?:\/\//i.test(src) || (src.startsWith('/') && !src.startsWith('//'))
+  return /^https?:\/\//i.test(src) || isSafeRootPath(src)
 }
 
 export function Video({ src, title = 'Embedded video', controls = true, poster, ...playback }: VideoProps) {
