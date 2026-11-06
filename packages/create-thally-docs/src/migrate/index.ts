@@ -39,6 +39,7 @@ import { assertMigrationDestination, assertSeparateMigrationDirectories, snapsho
 import { migrationExistingConfig } from './into.js'
 import { materializeMigration } from './materialize.js'
 import { reportUnresolvedMigrationLinks } from './links.js'
+import { engineProvenance, gitCommit, gitHead, redactArgv, type SourceProvenance } from './provenance.js'
 
 export interface MigrateOptions {
   sourceUrl: string
@@ -65,6 +66,8 @@ export interface MigrateOptions {
   skipValidation?: boolean
   /** Mintlify `sourceRef` repositories to import, from `--source-ref owner/repo=<path>`. */
   sourceRefs?: Array<SourceRefMapping>
+  /** Command line of this run, recorded in the report with credentials removed. Absent for library callers. */
+  argv?: ReadonlyArray<string>
 }
 
 export interface MigrateResult {
@@ -120,8 +123,15 @@ function resetFreshMigrationContent(projectDir: string): void {
   }
 }
 
-/** Clone each mapped sourceRef repository (github.com only) and prepare it as a sub-site; a failed clone is a warning, not a crash. */
-async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnings: Array<MigrationWarning>): Promise<Array<SourceRefImport>> {
+/** The address the report shows for the source: never a private checkout path, credential, query or fragment. */
+function publicSourceUrl(options: MigrateOptions): string {
+  if (options.sourceDirectory) return 'local-directory'
+  const url = new URL(options.sourceUrl)
+  return `${url.origin}${url.pathname}`
+}
+
+/** Clone each mapped sourceRef repository (github.com only) and prepare it as a sub-site; a failed clone is a warning, not a crash. Each cloned commit is added to `sources`. */
+async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnings: Array<MigrationWarning>, sources: Array<SourceProvenance>): Promise<Array<SourceRefImport>> {
   const imports: Array<SourceRefImport> = []
   for (const mapping of mappings) {
     const root = mkdtempSync(join(tmpdir(), 'thally-source-ref-'))
@@ -131,7 +141,10 @@ async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnin
       if (tooLarge) throw new Error(tooLarge)
       const cloneDir = join(root, 'repository')
       await cloneGitHubRepository(source, cloneDir, warnings, { skipSubmodules: true })
+      // Read before the import: it deletes dot-directories when the docs root is the repository root.
+      const commit = gitCommit(cloneDir, { atRoot: true })
       imports.push(importSourceRef(mapping, cloneDir))
+      sources.push({ role: 'sourceRef', url: `https://github.com/${source.owner}/${source.repo}`, ref: source.branch, mountPath: mapping.mountPath, commit })
     } catch (error) {
       warnings.push({ code: 'fetch-failed', message: `sourceRef ${mapping.repo} was not imported: ${error instanceof Error ? error.message : String(error)}` })
     } finally {
@@ -141,12 +154,15 @@ async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnin
   return imports
 }
 
-async function discoverMigration(options: MigrateOptions): Promise<MigrationBundle> {
+async function discoverMigration(options: MigrateOptions): Promise<{ bundle: MigrationBundle; sources: Array<SourceProvenance> }> {
+  const sources: Array<SourceProvenance> = []
   if (options.sourceDirectory) {
     assertSeparateMigrationDirectories(options.sourceDirectory, options.projectDir)
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'thally-local-migrate-'))
     try {
       const snapshot = join(temporaryRoot, 'source')
+      const head = gitHead(options.sourceDirectory)
+      sources.push({ role: 'primary', url: publicSourceUrl(options), commit: head?.commit ?? null, ...(head ? { dirty: head.dirty } : {}) })
       snapshotLocalMigration(options.sourceDirectory, snapshot, options.docsDir)
       const bundle = await terminal.step('Converting local documentation', () => convertRepository({
         repositoryDir: snapshot,
@@ -156,7 +172,7 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
         docsDir: options.docsDir,
         platform: options.platform,
       }), 'Local documentation converted')
-      return hydrateRemoteApiSpecs(bundle, options.fetcher)
+      return { bundle: await hydrateRemoteApiSpecs(bundle, options.fetcher), sources }
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true })
     }
@@ -164,7 +180,9 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   const url = new URL(options.sourceUrl)
   if (url.hostname.toLowerCase() !== 'github.com') {
     if (options.sourceRefs?.length) terminal.warn('--source-ref applies only to GitHub repository sources and was ignored.')
-    return terminal.step('Discovering public documentation', () => {
+    // A live site has no commit; say so rather than leave the source out.
+    sources.push({ role: 'primary', url: publicSourceUrl(options), commit: null })
+    const bundle = await terminal.step('Discovering public documentation', () => {
       const discovery = {
         sourceUrl: options.sourceUrl,
         platform: options.platform,
@@ -178,6 +196,7 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
         ? migrateUrl({ ...discovery, fetcher: options.fetcher })
         : discoverUrl(discovery)
     }, 'Public documentation discovered')
+    return { bundle, sources }
   }
 
   const source = parseGitHubRepositoryUrl(options.sourceUrl)
@@ -187,8 +206,9 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   try {
     const cloneWarnings: Array<MigrationWarning> = []
     await terminal.step(`Cloning ${source.owner}/${source.repo}`, () => cloneGitHubRepository(source, cloneDir, cloneWarnings, { docsDir: options.docsDir }), 'Source repository cloned')
+    sources.push({ role: 'primary', url: `https://github.com/${source.owner}/${source.repo}`, ref: source.branch, commit: gitCommit(cloneDir, { atRoot: true }) })
     const sourceRefs = options.sourceRefs?.length
-      ? await terminal.step('Importing sourceRef repositories', () => fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings), 'sourceRef repositories imported')
+      ? await terminal.step('Importing sourceRef repositories', () => fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings, sources), 'sourceRef repositories imported')
       : []
     const bundle = await terminal.step('Converting repository documentation', () => convertRepository({
       sourceRefs,
@@ -198,7 +218,7 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
       platform: options.platform,
     }), 'Repository documentation converted')
     const hydrated = await terminal.step('Loading remote API specifications', () => hydrateRemoteApiSpecs(bundle, options.fetcher), 'Remote API specifications loaded')
-    return cloneWarnings.length > 0 ? { ...hydrated, warnings: [...cloneWarnings, ...hydrated.warnings] } : hydrated
+    return { bundle: cloneWarnings.length > 0 ? { ...hydrated, warnings: [...cloneWarnings, ...hydrated.warnings] } : hydrated, sources }
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
@@ -227,7 +247,7 @@ function publicSpecWarning(projectDir: string, bundle: MigrationBundle): Migrati
 export async function migrateDocs(options: MigrateOptions): Promise<MigrateResult> {
   const projectDir = resolve(options.projectDir)
   assertMigrationDestination(projectDir)
-  const bundle = await discoverMigration(options)
+  const { bundle, sources } = await discoverMigration(options)
   reportUnresolvedMigrationLinks(bundle)
 
   if (!options.into) {
@@ -359,7 +379,12 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   const reportPath = projectPath(projectDir, 'migration-report.json')
   writeFileSync(reportPath, `${JSON.stringify({
     version: 1,
-    sourceUrl: options.sourceDirectory ? 'local-directory' : `${new URL(options.sourceUrl).origin}${new URL(options.sourceUrl).pathname}`,
+    sourceUrl: publicSourceUrl(options),
+    provenance: {
+      ...(options.argv ? { argv: redactArgv(options.argv) } : {}),
+      engine: engineProvenance(),
+      sources,
+    },
     platform: bundle.platform,
     pages: bundle.pages.length,
     assets: bundle.assets.length,
