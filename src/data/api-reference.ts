@@ -180,7 +180,9 @@ export type FrontmatterOperationLookup =
  */
 const getRevealedSpec = cache(async (specId: string, keys: string): Promise<NormalizedSpec> => {
   const config = getSpecConfig(apiReferenceConfig, specId)
-  const operationOverrides = { ...config.operationOverrides, ...Object.fromEntries(keys.split('\n').map((key) => [key, { hidden: false }])) }
+  // Revealing changes visibility only; authored labels, descriptions and slugs
+  // must stay identical to the normal operation lookup.
+  const operationOverrides = { ...config.operationOverrides, ...Object.fromEntries(keys.split('\n').map((key) => [key, { ...config.operationOverrides?.[key], hidden: false }])) }
   const document = sanitizeSpecForPublication(await loadAuthoredSpecDocument(config), { overrides: operationOverrides })
   return normalizeSpec({ config: { ...config, operationOverrides }, document })
 })

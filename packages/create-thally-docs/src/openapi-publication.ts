@@ -165,8 +165,14 @@ export function hiddenOperationDescription(ref: DocReference, specs: ReadonlyArr
   const hiding = (ref.specRef ? [pinned] : specs).find((spec): spec is CheckSpec => spec !== undefined && referenceState(ref, spec) === 'hidden')
   if (!hiding) return undefined
   const key = (method: string) => `${ref.webhook ? 'WEBHOOK ' : ''}${method.toUpperCase()} ${ref.path}`
-  const revealed = Object.fromEntries((ref.webhook ? METHODS : [ref.method]).map((method) => [key(method), { hidden: false }]))
-  return operationDescription(ref, [{ ...hiding, overrides: { ...(isObj(hiding.overrides) ? hiding.overrides : {}), ...revealed } }])
+  const overrides = isObj(hiding.overrides) ? hiding.overrides : {}
+  // Preserve the same per-operation metadata as the site's revealed lookup,
+  // including the group/title overrides that order a webhook's methods.
+  const revealed = Object.fromEntries((ref.webhook ? METHODS : [ref.method]).map((method) => {
+    const operationKey = key(method)
+    return [operationKey, { ...(isObj(overrides[operationKey]) ? overrides[operationKey] : {}), hidden: false }]
+  }))
+  return operationDescription(ref, [{ ...hiding, overrides: { ...overrides, ...revealed } }])
 }
 
 function resolveLocalRef(document: unknown, ref: string): unknown {

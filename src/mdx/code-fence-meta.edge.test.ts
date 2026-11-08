@@ -133,6 +133,50 @@ describe('applyCodeNotation edge cases', () => {
     expect(applyCodeNotation("const s = '# [!code --]'")).toBeNull()
   })
 
+  it.each([
+    'const s = /* explanation */ "[!code ++]"',
+    'const s = /* explanation */ "// [!code ++] trailing"',
+    '<!-- explanation --> <span title="[!code --]">text</span>',
+  ])('preserves literal markers after a closed comment: %s', (code) => {
+    expect(applyCodeNotation(code)).toBeNull()
+  })
+
+  it('removes only the markers inside separate block comments', () => {
+    const r = applyCodeNotation('x /* note [!code ++] */ + "[!code --]" /* next [!code focus] */')!
+    expect(r.code).toBe('x /* note */ + "[!code --]" /* next */')
+    expect([...r.marks.add]).toEqual([1])
+    expect([...r.marks.remove]).toEqual([])
+    expect([...r.marks.focus]).toEqual([1])
+  })
+
+  it('keeps a block intact when its text contains another comment opener', () => {
+    const r = applyCodeNotation('x /* note // [!code ++] */')!
+    expect(r.code).toBe('x /* note // */')
+    expect([...r.marks.add]).toEqual([1])
+  })
+
+  it.each([
+    ['const/* [!code ++] */value = 1', 'const/* */value = 1'],
+    ['before<!--[!code ++]-->after', 'before<!---->after'],
+  ])('preserves a separating comment between adjacent tokens: %s', (code, expected) => {
+    const r = applyCodeNotation(code)!
+    expect(r.code).toBe(expected)
+    expect([...r.marks.add]).toEqual([1])
+  })
+
+  it('marks code after a closed block on the same line', () => {
+    const r = applyCodeNotation('/* note [!code ++] */ const x = 1')!
+    expect(r.code).toBe('/* note */ const x = 1')
+    expect([...r.marks.add]).toEqual([1])
+  })
+
+  it('preserves a literal marker between a closed comment and a real trailing notation', () => {
+    const r = applyCodeNotation('const s = /* note */ "[!code --]" // [!code ++]')!
+    expect(r.code).toBe('const s = /* note */ "[!code --]"')
+    expect([...r.marks.remove]).toEqual([])
+    expect([...r.marks.add]).toEqual([1])
+  })
+
   it('handles a marker on the last line (no trailing newline)', () => {
     const r = applyCodeNotation('a\nb // [!code ++]')!
     expect(r.code).toBe('a\nb')

@@ -65,6 +65,13 @@ describe('ids of the rows of a generated API page', () => {
     expect(ids(list)).toEqual(['response-item-one-of-0', 'response-item-one-of-0-name', 'response-tags-one-of-0', 'response-tags-one-of-0-items-label'])
   })
 
+  it('keeps a nullable field type and anchor when its union is wrapped in allOf', () => {
+    const html = response({ type: 'object', properties: { item: { allOf: [{ anyOf: [{ type: 'null' }, { type: 'object', properties: { name: { type: 'string' } } }] }] } } })
+    expect(html).toContain('null | object')
+    expect(html).not.toContain('aria-label="Variants"')
+    expect(ids(html)).toEqual(['response-item-one-of-0', 'response-item-one-of-0-name'])
+  })
+
   it('name the fields of each member of a union by its number, as one list of tabs', () => {
     const html = response({ oneOf: [{ type: 'object', properties: { status: { type: 'string' } } }, { type: 'object', properties: { message: { type: 'string' } } }] })
     expect(ids(html)).toEqual(['response-one-of-0-status'])

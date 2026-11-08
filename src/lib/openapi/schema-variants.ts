@@ -13,10 +13,10 @@ function listedMembers(schema: Record<string, unknown>): Array<Record<string, un
 }
 
 /**
- * The object members of a schema's `oneOf` (else `anyOf`); null when it has none. A `{type: "null"}` member is left out
- * unless `keepNull` asks for it: it is no variant to list, only the fact that the value may be null (see `allowsNull`).
+ * The object members of a schema's `oneOf` (else `anyOf`); null when it has none. Structural merging keeps null:
+ * dropping it while flattening an allOf would change the schema's accepted values. Presentation callers may omit it.
  */
-function unionMembers(schema: Record<string, unknown>, keepNull = false): Array<Record<string, unknown>> | null {
+function unionMembers(schema: Record<string, unknown>, keepNull = true): Array<Record<string, unknown>> | null {
   const members = listedMembers(schema)?.filter((member) => keepNull || !isNullMember(member))
   return members?.length ? members : null
 }

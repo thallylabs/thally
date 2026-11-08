@@ -12,7 +12,11 @@ vi.mock('@/config/api-reference', () => ({
   apiReferenceConfig: {
     defaultSpecId: 'default',
     specs: [
-      { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' } },
+      { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' }, operationOverrides: {
+        'GET /hidden': { hidden: true, title: 'Legacy endpoint', description: 'Use the replacement endpoint.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-endpoint'] },
+        'GET /excluded': { hidden: false, description: 'Excluded text must stay withheld.' },
+        'WEBHOOK POST quietHook': { hidden: true, title: 'Legacy hook', description: 'Use the replacement hook.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-hook'] },
+      } },
       { id: 'b', label: 'B', source: { type: 'file', path: '/openapi-b.yaml' } },
       { id: 'c', label: 'C', source: { type: 'file', path: '/specs/c.json' } },
     ],
@@ -91,6 +95,15 @@ describe('lookupApiOperationForFrontmatter', () => {
     // The generated lookups and listings keep hiding it.
     expect(await resolve('GET /hidden')).toBeNull()
     expect((await getAllApiOperationNodes()).map((node) => node.operation.path)).not.toContain('/hidden')
+  })
+
+  it('preserves authored metadata while revealing an operation or webhook', async () => {
+    const operation = (await lookup('GET /hidden')).node?.operation
+    expect(operation).toMatchObject({ hidden: false, title: 'Legacy endpoint', description: 'Use the replacement endpoint.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-endpoint'] })
+    const webhook = (await lookup('webhook quietHook')).node?.operation
+    expect(webhook).toMatchObject({ hidden: false, title: 'Legacy hook', description: 'Use the replacement hook.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-hook'] })
+    expect(await lookup('GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+    expect(await resolve('GET /hidden')).toBeNull()
   })
 
   it('reports an unknown spec or operation as unresolved', async () => {

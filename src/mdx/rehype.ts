@@ -399,23 +399,25 @@ function isCommentOpener(line: string, index: number): boolean {
   return (before === undefined || before === ' ' || before === '\t') && (after === undefined || after === ' ' || after === '\t')
 }
 
+interface NotationComment {
+  start: number
+  end: number
+  isBlock: boolean
+  markers: Array<RegExpMatchArray>
+}
+
 /**
- * Where the comment that holds a line's first marker starts, or -1: the nearest
- * opener before that marker, not the first one on the line, which can be code
- * (`#include <a.h> // old [!code --]`). An opener inside a string literal is not
- * one: `"https://x.test"` holds no comment. A single pass, so a hostile line
- * costs no more than its length.
+ * Comment ranges outside quoted strings, with only the markers each range
+ * actually contains. A closed block/HTML comment gives control back to code;
+ * neither its following string nor a later comment belongs to that range.
+ * Both the source and marker list advance only forwards.
  */
-function commentStart(line: string, markers: Array<RegExpMatchArray>): number {
+function notationComments(line: string): Array<NotationComment> {
+  const found = [...line.matchAll(NOTATION_MARKER)]
+  const comments: Array<NotationComment> = []
   let quote = ''
-  let opener = -1
   let next = 0
-  for (let index = 0; index < line.length && next < markers.length; index += 1) {
-    if (index >= markers[next].index!) {
-      // A marker with no comment before it sits in a string or in code: look at the next.
-      if (opener >= 0) return opener
-      next += 1
-    }
+  for (let index = 0; index < line.length; index += 1) {
     const char = line[index]
     if (quote) {
       if (char === '\\') index += 1
@@ -423,41 +425,56 @@ function commentStart(line: string, markers: Array<RegExpMatchArray>): number {
     } else if (char === '"' || char === "'" || char === '`') {
       quote = char
     } else if (isCommentOpener(line, index)) {
-      opener = index
+      const closer = line.startsWith('/*', index) ? '*/' : line.startsWith('<!--', index) ? '-->' : undefined
+      const close = closer ? line.indexOf(closer, index + (closer === '*/' ? 2 : 4)) : -1
+      const end = close < 0 ? line.length : close + closer!.length
+      const markers: Array<RegExpMatchArray> = []
+      while (next < found.length && found[next].index! < end) {
+        if (found[next].index! >= index) markers.push(found[next])
+        next += 1
+      }
+      comments.push({ start: index, end, isBlock: closer !== undefined, markers })
+      index = end - 1
     }
   }
-  return -1
+  return comments
 }
 
 /**
- * Take every marker out of the comment that holds the first marker on a line,
- * wherever the marker sits in it, and keep the comment's other text
- * (`x // [!code --] v1` becomes `x // v1`). Null when the line has no comment
- * outside a string, or no marker in it. `commentOnly` is true when nothing but
- * the comment is on the line, as Shiki reads it, whatever the comment says:
- * such a marker marks the line below.
+ * Strip markers only inside their own comment ranges, preserving intervening
+ * code and strings. Comment-only lines mark the next line; code after a closed
+ * comment makes it an inline annotation instead.
  */
 function stripCommentMarkers(line: string): { text: string; markers: Array<RegExpMatchArray>; commentOnly: boolean } | null {
-  const found = [...line.matchAll(NOTATION_MARKER)]
-  const start = commentStart(line, found)
-  if (start < 0) return null
-  const comment = line.slice(start)
-  const markers = found.filter((marker) => marker.index! >= start)
-  let kept = ''
+  const comments = notationComments(line)
+  const markers = comments.flatMap((comment) => comment.markers)
+  if (markers.length === 0) return null
+  let text = ''
+  let outside = ''
   let last = 0
-  for (const marker of markers) {
-    kept += comment.slice(last, marker.index! - start)
-    last = marker.index! - start + marker[0].length
-    // `// [!code ++] note` leaves one space, not two.
-    if (kept.endsWith(' ') || kept.endsWith('\t')) while (comment[last] === ' ' || comment[last] === '\t') last += 1
+  const contentEnd = line.trimEnd().length
+  for (const comment of comments) {
+    const before = line.slice(last, comment.start)
+    outside += before
+    text += before
+    let kept = ''
+    let cursor = comment.start
+    for (const marker of comment.markers) {
+      kept += line.slice(cursor, marker.index!)
+      cursor = marker.index! + marker[0].length
+      // `// [!code ++] note` leaves one space, not two.
+      if (kept.endsWith(' ') || kept.endsWith('\t')) while (line[cursor] === ' ' || line[cursor] === '\t') cursor += 1
+    }
+    kept += line.slice(cursor, comment.end)
+    // An inline block can separate tokens (`const/* marker */value`), so
+    // retain its delimiters when more code follows instead of joining code.
+    const canDrop = !comment.isBlock || comment.end >= contentEnd
+    text += canDrop && comment.markers.length > 0 && EMPTY_COMMENT.test(kept.trimEnd()) ? '' : kept
+    last = comment.end
   }
-  kept = (kept + comment.slice(last)).trimEnd()
-  const before = line.slice(0, start)
-  return {
-    text: EMPTY_COMMENT.test(kept) ? before.trimEnd() : before + kept,
-    markers,
-    commentOnly: ['', '{'].includes(before.trim()),
-  }
+  outside += line.slice(last)
+  text += line.slice(last)
+  return { text: text.trimEnd(), markers, commentOnly: /^(?:\{\s*\})?$/.test(outside.trim()) }
 }
 
 /**
@@ -514,11 +531,18 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
       if (!range) ranges.set(key, { target: kinds[kind], from, count: length })
       else if (length > range.count) range.count = length
     }
+    // The trailing fast path must share the lexical guard: an opener inside
+    // a string, or before a closed block, cannot turn literal text into a mark.
+    const commentByMarker = new Map(notationComments(line).flatMap((comment) => comment.markers.map((marker) => [marker.index!, comment] as const)))
     let rest = line
     let carriageReturn = ''
     for (let from = trailingSearchStart(rest); from < rest.length; from = trailingSearchStart(rest)) {
       const match = CODE_NOTATION.exec(rest.slice(from))
       if (!match) break
+      const comment = commentByMarker.get(from + match.index + match[0].indexOf('[!code'))
+      // A `//` written inside a block is comment text, not a new opener
+      // whose removal may strand the surrounding block's opening delimiter.
+      if (!comment || (comment.isBlock && from + match.index > comment.start)) break
       found = true
       if (rest === line) carriageReturn = match[3]
       mark(match[1] as keyof typeof kinds, out.length + 1, match[2])

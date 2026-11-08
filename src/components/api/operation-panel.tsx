@@ -1,7 +1,7 @@
 'use client'
 
 /** Generated API documentation keeps schema behavior while sharing handoff code/field focus. */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ParameterLinkProvider } from '@/components/api/parameter-link'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
 import type { PageActionsConfig } from '@/lib/page-actions'
@@ -427,12 +427,55 @@ function NestedFields({ schema, depth, parent, taken }: { schema: Record<string,
 function SchemaVariants({ variants, depth, nullable = false, parent, taken }: { variants: Array<SchemaVariant>; depth: number; nullable?: boolean; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
   const [active, setActive] = useState(0)
+  const content = useRef<HTMLDivElement>(null)
+  const pendingHash = useRef<string | null>(null)
+
+  // Only the active branch is mounted: rendering every branch can multiply a large spec's rows at every nesting level.
+  // Select from the field's numbered path after hydration; nested unions do the same when their branch mounts.
+  useEffect(() => {
+    if (!parent) return
+    let frame = 0
+    const scroll = () => {
+      if (frame || !pendingHash.current) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        const target = pendingHash.current ? document.getElementById(pendingHash.current) : null
+        // An Expandable may still be opening around a newly mounted field. Its hidden-attribute mutation retries this.
+        if (!target || !content.current?.contains(target) || target.closest('[hidden]')) return
+        target.scrollIntoView()
+        pendingHash.current = null
+      })
+    }
+    const select = () => {
+      pendingHash.current = null
+      let id: string
+      try { id = decodeURIComponent(window.location.hash.slice(1)) } catch { return }
+      const prefix = `${parent}-one-of-`
+      if (!id.startsWith(prefix)) return
+      const member = /^(0|[1-9]\d*)(?:-|$)/.exec(id.slice(prefix.length))?.[1]
+      const index = member === undefined ? -1 : Number(member)
+      if (!Number.isSafeInteger(index) || index < 0 || index >= variants.length) return
+      pendingHash.current = id
+      setActive(index)
+      scroll()
+    }
+    const observer = new MutationObserver(scroll)
+    if (content.current) observer.observe(content.current, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] })
+    select()
+    window.addEventListener('hashchange', select)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('hashchange', select)
+      window.cancelAnimationFrame(frame)
+    }
+  }, [parent, variants.length])
+
   const current = variants[active] ?? variants[0]
   const description = typeof current.schema.description === 'string' ? current.schema.description : undefined
   const hasFields = getNestedProperties(current.schema)
 
   return (
-    <div>
+    <div ref={content}>
       {variants.length > 1 ? (
         <div role="tablist" aria-label={t('variants')} className="mb-3 flex flex-wrap gap-1.5">
           {variants.map((variant, index) => (
@@ -441,7 +484,7 @@ function SchemaVariants({ variants, depth, nullable = false, parent, taken }: { 
               type="button"
               role="tab"
               aria-selected={index === active}
-              onClick={() => setActive(index)}
+              onClick={() => { pendingHash.current = null; setActive(index) }}
               className={cn(
                 'rounded-md border px-2 py-1 text-xs font-medium transition',
                 index === active ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border text-foreground/60 hover:text-foreground',
@@ -454,7 +497,7 @@ function SchemaVariants({ variants, depth, nullable = false, parent, taken }: { 
       ) : null}
       {description ? <Markdown className={cn(markdownProse, 'mb-2 text-sm text-foreground/70')}>{description}</Markdown> : null}
       {hasFields ? (
-        <SchemaAsResponseFields schema={getNestedSchema(current.schema)} depth={depth} parent={memberParent(parent, active, current.schema)} taken={taken} />
+        <SchemaAsResponseFields key={active} schema={getNestedSchema(current.schema)} depth={depth} parent={memberParent(parent, active, current.schema)} taken={taken} />
       ) : (
         <p className="text-xs text-foreground/60">
           {t('type')}: <code>{nullable && variants.length === 1 ? 'null | ' : ''}{resolveSchemaType(current.schema) ?? 'any'}</code>
