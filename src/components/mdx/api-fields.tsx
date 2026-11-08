@@ -170,12 +170,18 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
       setOpen(true)
     }
     reveal()
+    // A hash may first select a lazy API union branch. Its field does not exist until that branch mounts, after this effect.
+    const observer = new MutationObserver(reveal)
+    if (content.current) observer.observe(content.current, { childList: true, subtree: true })
     window.addEventListener('hashchange', reveal)
-    return () => window.removeEventListener('hashchange', reveal)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('hashchange', reveal)
+    }
   }, [])
   // The browser could not scroll to a hidden field when the page loaded; once it has a box, go there.
   useEffect(() => {
-    if (!open || !target.current) return
+    if (!open || !target.current || target.current.closest('[hidden]')) return
     target.current.scrollIntoView()
     target.current = null
   }, [open])

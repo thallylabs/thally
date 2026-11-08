@@ -1,6 +1,6 @@
 'use client'
 
-import { Children, isValidElement, useId, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Children, isValidElement, useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils'
 
 interface TabProps {
   title: string
+  /** Fragment id of the tab, set by the MDX heading pass from the title (`#bitcoin`); a link to it selects the tab. */
+  id?: string
   children: ReactNode
 }
 
@@ -32,6 +34,21 @@ export function Tabs({ children, className }: TabsProps) {
 
   const [activeIndex, setActiveIndex] = useState(0)
   const baseId = useId()
+  const tabIds = tabs.map((tab, index) => (isValidElement(tab) ? (tab.props as TabProps).id : undefined) || `${baseId}-tab-${index}`)
+  const tabIdsKey = tabIds.join('\n')
+
+  // A link to a tab's id selects the tab, on load and when the fragment changes.
+  useEffect(() => {
+    const select = () => {
+      let hash: string
+      try { hash = decodeURIComponent(window.location.hash.slice(1)) } catch { return }
+      const index = hash ? tabIdsKey.split('\n').indexOf(hash) : -1
+      if (index >= 0) setActiveIndex(index)
+    }
+    select()
+    window.addEventListener('hashchange', select)
+    return () => window.removeEventListener('hashchange', select)
+  }, [tabIdsKey])
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
@@ -61,7 +78,7 @@ export function Tabs({ children, className }: TabsProps) {
               key={index}
               type="button"
               role="tab"
-              id={`${baseId}-tab-${index}`}
+              id={tabIds[index]}
               aria-selected={isActive}
               aria-controls={`${baseId}-panel-${index}`}
               tabIndex={isActive ? 0 : -1}
@@ -88,7 +105,7 @@ export function Tabs({ children, className }: TabsProps) {
           key={index}
           role="tabpanel"
           id={`${baseId}-panel-${index}`}
-          aria-labelledby={`${baseId}-tab-${index}`}
+          aria-labelledby={tabIds[index]}
           hidden={index !== activeIndex}
           className="pt-4"
         >

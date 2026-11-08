@@ -594,3 +594,41 @@ describe('the blank lines set around a folded block carry no trailing whitespace
     expect(blocks(folded)).toBe(outline)
   })
 })
+
+describe('a component snippet binds a destructured prop the call leaves out to undefined', () => {
+  const card = [
+    'export const Card = ({ img, imgDark, title, model, size = "md" }) => (',
+    '  <a>',
+    '    <img src={img} alt={title} />',
+    '    <img src={imgDark || img} alt={size} />',
+    '    {model && <span className="badge">{model}</span>}',
+    '  </a>',
+    ')',
+    '',
+  ].join('\n')
+  const named = (usage: string) => `---\ntitle: Home\n---\n\nimport { Card } from '/snippets/card.mdx'\n\n${usage}\n`
+  const imageSources = (body: string) => [...body.matchAll(/<img src=\{"([^"]*)"\}/g)].map((match) => match[1])
+
+  it('falls back to the prop it does pass, and leaves nothing for a condition on a missing one', () => {
+    const { body, warnings } = migrate({ 'home.mdx': named('<Card img="/a.png" title="T" />'), 'snippets/card.mdx': card })
+    expect(imageSources(body)).toEqual(['/a.png', '/a.png'])
+    expect(body).not.toMatch(/imgDark|model|badge|undefined/)
+    expect(warnings.map((warning) => warning.message).join('\n')).not.toContain('Expressions that use')
+  })
+
+  it('uses the prop when the call passes it, and a default the destructuring declares', () => {
+    const { body } = migrate({ 'home.mdx': named('<Card img="/a.png" imgDark="/d.png" model="Pro" size="lg" />'), 'snippets/card.mdx': card })
+    expect(imageSources(body)).toEqual(['/a.png', '/d.png'])
+    expect(body).toContain('alt={"lg"}')
+    expect(body).toContain('Pro')
+    const { body: defaulted } = migrate({ 'home.mdx': named('<Card img="/a.png" />'), 'snippets/card.mdx': card })
+    expect(defaulted).toContain('alt={"md"}')
+  })
+
+  it('does not treat a prop the call passes as an expression, or a spread, as missing', () => {
+    const dynamic = migrate({ 'home.mdx': named('export const dark = "/d.png"\n\n<Card img="/a.png" imgDark={dark} />'), 'snippets/card.mdx': card })
+    expect(imageSources(dynamic.body)).toEqual(['/a.png'])
+    const spread = migrate({ 'home.mdx': named('export const rest = { imgDark: "/d.png" }\n\n<Card img="/a.png" {...rest} />'), 'snippets/card.mdx': card })
+    expect(imageSources(spread.body)).toEqual(['/a.png'])
+  })
+})

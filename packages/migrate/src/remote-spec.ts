@@ -6,7 +6,7 @@ import { isIP } from 'node:net'
 import { createGunzip, type Gunzip } from 'node:zlib'
 import type { MigrationFetcher } from './types.js'
 
-/** The same extension flags the runtime uses to withhold an operation. */
+/** The same extension flags the runtime reads to keep an operation out of generated endpoint pages. */
 const isWithheld = (node: Record<string, unknown>): boolean => [node['x-hidden'], node['x-excluded']].some((value) => value === true || value === 'true')
 
 const MAX_SPEC_BYTES = 25_000_000

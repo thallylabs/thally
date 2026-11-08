@@ -121,7 +121,7 @@ export const FONT_AWESOME_PRO_FALLBACKS: Readonly<Record<string, string>> = {
   'square-code': 'lucide:square-code', 'shield-check': 'lucide:shield-check',
   'rectangle-terminal': 'lucide:square-terminal', 'messages-question': 'lucide:message-circle-question',
   'message-bot': 'lucide:bot-message-square', books: 'lucide:library',
-  'code-change': 'code-compare',
+  'code-change': 'code-compare', mountains: 'mountain',
   // Names the Dub docs use.
   'arrow-progress': 'lucide:arrow-right-to-line', 'grid-2': 'table-cells-large', window: 'lucide:app-window',
   'user-crown': 'lucide:user-star',
@@ -129,6 +129,19 @@ export const FONT_AWESOME_PRO_FALLBACKS: Readonly<Record<string, string>> = {
   'gauge-simple-low': 'lucide:gauge', 'message-lines': 'lucide:message-square-text', 'microchip-ai': 'lucide:cpu',
   'rectangle-history': 'lucide:gallery-vertical-end', snake: 'lucide:worm', 'spinner-third': 'lucide:loader',
   'wave-pulse': 'lucide:activity',
+  // Names the Particle Network docs use.
+  'atom-simple': 'lucide:atom', 'paper-plane-top': 'lucide:send', 'file-user': 'lucide:file-user',
+  'block-question': 'circle-question', coin: 'lucide:coins', 'coin-front': 'lucide:coins',
+  'chart-candlestick': 'lucide:chart-candlestick', binary: 'lucide:binary', 'honey-pot': 'jar',
+  'arrow-down-to-bracket': 'lucide:download',
+  // Names the Blockscout docs use. `trian-balbot` is a Pro alias of `user-hair-mullet`, a person.
+  'rectangle-pro': 'rectangle-list', 'person-running-fast': 'person-running', 'user-chef': 'lucide:chef-hat',
+  'hat-chef': 'lucide:chef-hat', 'arrow-up-right': 'lucide:arrow-up-right', 'signal-bars': 'lucide:signal',
+  'magnifying-glass-arrows-rotate': 'magnifying-glass', bird: 'lucide:bird', 'page-caret-up': 'lucide:file-up',
+  'traffic-light-go': 'traffic-light', notes: 'lucide:notebook-text', 'alien-8bit': 'lucide:ghost',
+  'light-switch': 'lucide:toggle-right', 'gear-api': 'gear', 'trian-balbot': 'lucide:user', whale: 'fish',
+  blueberries: 'lucide:grape', 'link-horizontal': 'lucide:link-2', 'book-open-cover': 'lucide:book-open',
+  'code-pull-request-closed': 'lucide:git-pull-request-closed',
   // Pro names that are bundled as Lucide glyphs, so they stay visible when Font Awesome is selected.
   'rocket-launch': 'lucide:rocket', 'party-horn': 'lucide:party-popper', 'brackets-curly': 'lucide:braces',
   'code-simple': 'lucide:code', 'grid-round': 'lucide:grid-3x3', 'link-simple': 'lucide:link-2', 'circle-x': 'lucide:circle-x',

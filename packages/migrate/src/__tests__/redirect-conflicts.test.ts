@@ -11,7 +11,7 @@ import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match.js'
 import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination.js'
 import { describe, expect, it } from 'vitest'
 
-import { migrateRepository, migrateUrl, type MigrationFetcher } from '../index.js'
+import { migrateRepository, migrateUrl, renderMigrationFiles, type MigrationFetcher } from '../index.js'
 import { dropConflictingRedirects, dropUnroutableRedirects } from '../redirects.js'
 import type { MigrationBundle, MigrationDocsConfig, MigrationWarning } from '../types.js'
 
@@ -238,6 +238,116 @@ describe('Mintlify redirect status through a repository migration', () => {
     expect(redirects).toContainEqual({ source: '/docs/examples', destination: 'https://github.com/dubinc/examples', permanent: true })
     // The route aliases the migrator creates on its own keep the flag they were made with.
     expect(redirects).toContainEqual({ source: '/section', destination: '/section/overview', permanent: false })
+  })
+})
+
+describe('Mintlify redirects whose source is also a page', () => {
+  const navigation = { groups: [{ group: 'Start', pages: ['index', 'guide', 'old', 'section'] }] }
+  const pages = {
+    index: '---\ntitle: Home\n---\n\nWelcome.',
+    guide: '---\ntitle: Guide\n---\n\nBody.',
+    old: '---\ntitle: Old\n---\n\nThe page that was moved.',
+    // An empty page that only heads a sidebar section.
+    section: '---\ntitle: Section\n---\n',
+  }
+
+  it('keeps the redirect, which wins over the page on Mintlify, and keeps the page as a noindex stub', () => {
+    const bundle = mintlify({
+      redirects: [{ source: '/old', destination: '/guide' }, { source: '/section', destination: '/guide' }],
+      navigation,
+    }, pages)
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/old', destination: '/guide', permanent: true },
+      { source: '/section', destination: '/guide', permanent: true },
+    ]))
+    expect(bundle.pages.find((page) => page.id === 'old')).toMatchObject({ noindex: true, body: 'The page that was moved.' })
+    expect(bundle.pages.find((page) => page.id === 'section')?.noindex).toBe(true)
+    expect(bundle.pages.find((page) => page.id === 'guide')?.noindex).toBeUndefined()
+    expect(JSON.stringify(bundle.docsConfig.tabs)).toContain('"section"')
+    expect(messages(bundle)).toContain('Kept 2 redirects from /old, /section: those URLs are also pages in this site. Mintlify follows a redirect and never shows the page, so the pages were marked noindex and their files stay. Delete a page and its navigation entry if you do not need it.')
+    expect(messages(bundle)).not.toMatch(/Skipped/)
+    const rendered = renderMigrationFiles(bundle).find((file) => file.path === 'src/content/old.mdx')?.content.toString() ?? ''
+    expect(rendered).toContain('noindex: true')
+  })
+
+  it('says so in the singular for one page', () => {
+    const bundle = mintlify({ redirects: [{ source: '/old/', destination: '/guide' }], navigation }, pages)
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
+    expect(messages(bundle)).toContain('Kept 1 redirect from /old: that URL is also a page in this site. Mintlify follows a redirect and never shows the page, so the page was marked noindex and its file stays. Delete the page and its navigation entry if you do not need it.')
+  })
+
+  it('leaves a page alone when its redirect is dropped for closing a loop', () => {
+    const bundle = mintlify({ redirects: [{ source: '/old', destination: '/guide' }, { source: '/guide', destination: '/old' }], navigation }, pages)
+    const redirects = bundle.docsConfig.redirects ?? []
+    expect(redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
+    expect(redirects.some((redirect) => redirect.source === '/guide')).toBe(false)
+    expect(redirectCycle(redirects)).toBeNull()
+    expect(bundle.pages.find((page) => page.id === 'old')?.noindex).toBe(true)
+    expect(bundle.pages.find((page) => page.id === 'guide')?.noindex).toBeUndefined()
+  })
+
+  it('still drops a redirect from the home page, which the redirect would not take over at /', () => {
+    const bundle = mintlify({ redirects: [{ source: '/introduction', destination: '/guide' }], navigation }, pages)
+    expect((bundle.docsConfig.redirects ?? []).some((redirect) => redirect.source === '/introduction')).toBe(false)
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.noindex).toBeUndefined()
+    expect(messages(bundle)).toContain('Skipped 1 redirect from /introduction: that URL is also a page in this site')
+  })
+
+  it('also drops a redirect from the home page of another language, which is not a page Mintlify serves there', () => {
+    const bundle = mintlify({
+      redirects: [{ source: '/fr/introduction', destination: '/fr/guide' }],
+      navigation: { languages: [
+        { language: 'en', groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+        { language: 'fr', groups: [{ group: 'Start', pages: ['fr/index', 'fr/guide'] }] },
+      ] },
+    }, {
+      index: pages.index,
+      guide: pages.guide,
+      'fr/index': '---\ntitle: Accueil\n---\n\nBienvenue.',
+      'fr/guide': '---\ntitle: Guide fr\n---\n\nCorps.',
+    })
+    expect((bundle.docsConfig.redirects ?? []).some((redirect) => redirect.source === '/fr/introduction')).toBe(false)
+    expect(bundle.pages.find((page) => page.id === 'fr/introduction')?.noindex).toBeUndefined()
+    expect(messages(bundle)).toContain('Skipped 1 redirect from /fr/introduction: that URL is also a page in this site')
+  })
+
+  it('does not turn a page into a stub for a redirect the migrator added itself', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['index', 'section/overview'] }] } }, {
+      index: pages.index,
+      'section/overview': '---\ntitle: Overview\n---\n\nBody.',
+      section: '---\ntitle: Section\n---\n\nA page of its own.',
+    })
+    expect(bundle.docsConfig.redirects?.some((redirect) => redirect.source === '/section') ?? false).toBe(false)
+    expect(bundle.pages.find((page) => page.id === 'section')?.noindex).toBeUndefined()
+  })
+})
+
+describe('Mintlify root index page', () => {
+  const what = '---\ntitle: What\n---\n\nWhat it is.'
+  const home = '---\ntitle: Home\nmode: custom\n---\n\nWelcome.'
+  const rootRedirect = (bundle: MigrationBundle) => (bundle.docsConfig.redirects ?? []).filter((redirect) => redirect.source === '/')
+
+  it('is served at /, so the root is not redirected to the first page even when docs.json does not list it', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
+    expect(rootRedirect(bundle)).toEqual([])
+    expect(bundle.pages.find((page) => page.id === 'introduction')).toMatchObject({ title: 'Home', source: expect.stringMatching(/#index\.mdx$/) })
+  })
+
+  it('is not redirected either when docs.json lists it first', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['index', 'what'] }] } }, { index: home, what })
+    expect(rootRedirect(bundle)).toEqual([])
+  })
+
+  it('is written as the introduction page, which the runtime serves at /, and is not hidden when docs.json does not list it', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { index: home, what, other: what })
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.hidden).toBeUndefined()
+    expect(renderMigrationFiles(bundle).map((file) => file.path)).toContain('src/content/introduction.mdx')
+    expect(rootRedirect(bundle)).toEqual([])
+  })
+
+  it('is not a reason to skip the root redirect for an introduction page that is not an index page', () => {
+    const bundle = mintlify({ navigation: { groups: [{ group: 'Start', pages: ['what', 'other'] }] } }, { introduction: home, what, other: what })
+    expect(rootRedirect(bundle)).toEqual([{ source: '/', destination: '/what', permanent: true }])
   })
 })
 

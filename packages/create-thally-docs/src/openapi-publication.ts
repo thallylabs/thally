@@ -1,7 +1,7 @@
 /**
  * Whether the operation an MDX page documents (`openapi: "[<spec>] GET /path"`) is
- * published. A page bound to a hidden or excluded operation 404s in the site,
- * so `thally check` reports it. Mirrors the site's path-item rules
+ * published. A page bound to an excluded operation 404s in the site, so
+ * `thally check` reports it; a hidden operation is rendered by the page that names it. Mirrors the site's path-item rules
  * (src/lib/openapi/path-items.ts, publication.ts); a parity test keeps the
  * two in step.
  */
@@ -75,9 +75,7 @@ function pinnedSpec(specRef: string, specs: ReadonlyArray<CheckSpec>): CheckSpec
  * src/lib/openapi/publication.ts.
  */
 export function pageState(ref: DocReference, specs: ReadonlyArray<CheckSpec>): 'published' | 'hidden' | 'excluded' | 'unknown' {
-  const judge = (spec: CheckSpec) => spec.document === undefined
-    ? 'unknown'
-    : ref.webhook ? webhookState(spec.document, ref.path, spec.overrides) : operationState(spec.document, ref.method, ref.path, spec.overrides)
+  const judge = (spec: CheckSpec) => referenceState(ref, spec)
   if (ref.specRef) {
     const spec = pinnedSpec(ref.specRef, specs)
     return spec ? judge(spec) : 'unknown'
@@ -86,6 +84,12 @@ export function pageState(ref: DocReference, specs: ReadonlyArray<CheckSpec>): '
   if (states.includes('published')) return 'published'
   if (specs.some((spec) => spec.document === undefined)) return 'unknown'
   return states.find((state) => state === 'hidden' || state === 'excluded') ?? 'unknown'
+}
+
+function referenceState(ref: DocReference, spec: CheckSpec): State {
+  return spec.document === undefined
+    ? 'unknown'
+    : ref.webhook ? webhookState(spec.document, ref.path, spec.overrides) : operationState(spec.document, ref.method, ref.path, spec.overrides)
 }
 
 /** A method of a `paths` or `webhooks` entry the site lists, with the override that applies to it. */
@@ -149,6 +153,26 @@ export function operationDescription(ref: DocReference, specs: ReadonlyArray<Che
     return typeof description === 'string' && description.trim() ? description : undefined
   }
   return undefined
+}
+
+/**
+ * The description of the hidden operation a page names, as the site shows it: the page renders the operation as if its
+ * `x-hidden` were off (every method of a webhook), in the spec that hides it, the pinned one else the first in route order.
+ * Undefined when no spec hides it, or it has no description.
+ */
+export function hiddenOperationDescription(ref: DocReference, specs: ReadonlyArray<CheckSpec>): string | undefined {
+  const pinned = ref.specRef ? pinnedSpec(ref.specRef, specs) : undefined
+  const hiding = (ref.specRef ? [pinned] : specs).find((spec): spec is CheckSpec => spec !== undefined && referenceState(ref, spec) === 'hidden')
+  if (!hiding) return undefined
+  const key = (method: string) => `${ref.webhook ? 'WEBHOOK ' : ''}${method.toUpperCase()} ${ref.path}`
+  const overrides = isObj(hiding.overrides) ? hiding.overrides : {}
+  // Preserve the same per-operation metadata as the site's revealed lookup,
+  // including the group/title overrides that order a webhook's methods.
+  const revealed = Object.fromEntries((ref.webhook ? METHODS : [ref.method]).map((method) => {
+    const operationKey = key(method)
+    return [operationKey, { ...(isObj(overrides[operationKey]) ? overrides[operationKey] : {}), hidden: false }]
+  }))
+  return operationDescription(ref, [{ ...hiding, overrides: { ...overrides, ...revealed } }])
 }
 
 function resolveLocalRef(document: unknown, ref: string): unknown {

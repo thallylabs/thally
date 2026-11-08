@@ -330,7 +330,7 @@ describe('thally check image references', () => {
 
 describe('thally check pages bound to unpublished operations', () => {
   const ok = { responses: { 200: { description: 'ok' } } }
-  async function run(pages: Record<string, string>, overrides?: Record<string, unknown>, source = 'openapi/api.json') {
+  async function run(pages: Record<string, string>, overrides?: Record<string, unknown>, source = 'openapi/api.json', description = 'description: d\n') {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-unpublished-'))
     mkdirSync(join(projectDir, 'openapi'), { recursive: true })
     mkdirSync(join(projectDir, 'src/content'), { recursive: true })
@@ -339,18 +339,20 @@ describe('thally check pages bound to unpublished operations', () => {
       openapi: '3.1.0', info: { title: 'T', version: '1' },
       paths: {
         '/hidden': { get: { 'x-hidden': true, ...ok } },
+        '/hidden-described': { get: { 'x-hidden': true, description: 'Shown text.', ...ok } },
         '/excluded': { $ref: '#/components/pathItems/E' },
         '/visible': { get: ok },
       },
       webhooks: {
         orderUpdated: { post: { 'x-hidden': true, ...ok } },
+        hookDescribed: { post: { 'x-hidden': true, summary: 'Shown summary.', ...ok } },
         refunded: { $ref: '#/components/pathItems/E' },
         shipped: { post: ok },
       },
       components: { pathItems: { E: { 'x-excluded': true, get: ok } } },
     }))
     for (const [id, operation] of Object.entries(pages)) {
-      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\n${description}openapi: "${operation}"\n---\n`)
     }
     const output: Array<string> = []
     const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
@@ -362,26 +364,39 @@ describe('thally check pages bound to unpublished operations', () => {
     return output.join('\n')
   }
 
-  it('warns for each page whose operation is hidden or excluded, naming the page and operation', async () => {
+  it('warns for each page whose operation is excluded, naming the page and operation', async () => {
     const output = await run({ 'hidden-endpoint': 'GET /hidden', 'excluded-endpoint': 'GET /excluded', 'visible-endpoint': 'GET /visible', 'typo-endpoint': 'GET /typo' })
-    expect(output).toContain('page src/content/hidden-endpoint.mdx points at hidden operation GET /hidden and is not published')
     expect(output).toContain('page src/content/excluded-endpoint.mdx points at excluded operation GET /excluded and is not published')
+    // A hidden operation is rendered by the page that names it, with the description the check does not read.
+    expect(output).not.toContain('hidden-endpoint.mdx points')
     expect(output).not.toContain('visible-endpoint.mdx points')
     expect(output).not.toContain('typo-endpoint.mdx points')
     expect(output).toContain('0 error(s)')
   })
 
-  it('warns for pages bound to hidden or excluded webhooks, bare or spec-prefixed', async () => {
+  it('reads the description of a page bound to a hidden operation from the operation the site renders', async () => {
+    const missing = 'Missing "description" in frontmatter'
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, undefined, '')).toContain(missing)
+    expect(await run({ 'hook-hidden': 'webhook orderUpdated' }, undefined, undefined, '')).toContain(missing)
+    expect(await run({ 'hidden-described': 'GET /hidden-described' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hook-described': 'webhook hookDescribed' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hidden-endpoint': 'openapi/api.json GET /hidden-described' }, undefined, undefined, '')).not.toContain(missing)
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' })).not.toContain(missing)
+  })
+
+  it('warns for pages bound to excluded webhooks, and not for hidden ones, bare or spec-prefixed', async () => {
     const output = await run({
       'hook-hidden': 'webhook orderUpdated',
       'hook-prefixed': 'openapi/api.json webhook orderUpdated',
       'hook-excluded': 'webhook refunded',
+      'hook-prefixed-excluded': 'openapi/api.json webhook refunded',
       'hook-shown': 'webhook shipped',
       'hook-typo': 'webhook nope',
     })
-    expect(output).toContain('page src/content/hook-hidden.mdx points at hidden operation WEBHOOK orderUpdated and is not published')
-    expect(output).toContain('page src/content/hook-prefixed.mdx points at hidden operation openapi/api.json WEBHOOK orderUpdated and is not published')
+    expect(output).not.toContain('hook-hidden.mdx points')
+    expect(output).not.toContain('hook-prefixed.mdx points')
     expect(output).toContain('page src/content/hook-excluded.mdx points at excluded operation WEBHOOK refunded and is not published')
+    expect(output).toContain('page src/content/hook-prefixed-excluded.mdx points at excluded operation openapi/api.json WEBHOOK refunded and is not published')
     expect(output).not.toContain('hook-shown.mdx points')
     expect(output).not.toContain('hook-typo.mdx points')
   })
@@ -395,8 +410,8 @@ describe('thally check pages bound to unpublished operations', () => {
       { tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source: 'openapi/api.json' } },
       { tab: 'Admin', api: { source: 'openapi/admin.yaml' } },
     ] }))
-    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/moved': { get: { 'x-hidden': true, ...ok } } } }))
-    writeFileSync(join(projectDir, 'openapi/admin.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /secret:\n    get: { x-hidden: true, responses: { "200": { description: ok } } }\n  /moved:\n    get: { responses: { "200": { description: ok } } }\n')
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/moved': { get: { 'x-excluded': true, ...ok } } } }))
+    writeFileSync(join(projectDir, 'openapi/admin.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /secret:\n    get: { x-excluded: true, responses: { "200": { description: ok } } }\n  /moved:\n    get: { responses: { "200": { description: ok } } }\n')
     for (const [id, operation] of Object.entries(pages)) {
       writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
     }
@@ -408,16 +423,16 @@ describe('thally check pages bound to unpublished operations', () => {
       log.mockRestore()
     }
     const text = output.join('\n')
-    expect(text).toContain('page src/content/admin-secret.mdx points at hidden operation admin.yaml GET /secret and is not published')
-    expect(text).toContain('page src/content/main-moved.mdx points at hidden operation openapi/api.json GET /moved and is not published')
+    expect(text).toContain('page src/content/admin-secret.mdx points at excluded operation admin.yaml GET /secret and is not published')
+    expect(text).toContain('page src/content/main-moved.mdx points at excluded operation openapi/api.json GET /moved and is not published')
     // A bare reference renders from the Admin spec, which publishes it.
     expect(text).not.toContain('bare-moved.mdx points')
     expect(text).not.toContain('admin-moved.mdx points')
   })
 
-  it('honours docs.json overrides and does not judge a remote spec', async () => {
-    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, { 'GET /hidden': { hidden: false } })).not.toContain('is not published')
-    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
+  it('lets no override show an excluded operation, and does not judge a remote spec', async () => {
+    expect(await run({ 'excluded-endpoint': 'GET /excluded' }, { 'GET /excluded': { hidden: false } })).toContain('excluded-endpoint.mdx points')
+    expect(await run({ 'excluded-endpoint': 'GET /excluded' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
   })
 })
 

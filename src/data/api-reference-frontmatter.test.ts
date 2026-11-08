@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const docs = vi.hoisted(() => ({
-  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} }, '/hidden': { get: { 'x-hidden': true } }, '/excluded': { get: { 'x-excluded': true } } }, webhooks: { orderUpdated: { post: {} } } },
+  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} }, '/hidden': { get: { 'x-hidden': true } }, '/excluded': { get: { 'x-excluded': true } } }, webhooks: { orderUpdated: { post: {} }, quietHook: { post: { 'x-hidden': true } }, privateHook: { post: { 'x-excluded': true } } } },
   b: { openapi: '3.0.0', paths: { '/widgets/{id}': { get: { summary: 'B widget' } }, '/dup': { get: {} } } },
   c: { openapi: '3.0.0', paths: { '/dup': { get: {} }, '/only-c': { get: {} } } },
 }))
@@ -12,7 +12,11 @@ vi.mock('@/config/api-reference', () => ({
   apiReferenceConfig: {
     defaultSpecId: 'default',
     specs: [
-      { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' } },
+      { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' }, operationOverrides: {
+        'GET /hidden': { hidden: true, title: 'Legacy endpoint', description: 'Use the replacement endpoint.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-endpoint'] },
+        'GET /excluded': { hidden: false, description: 'Excluded text must stay withheld.' },
+        'WEBHOOK POST quietHook': { hidden: true, title: 'Legacy hook', description: 'Use the replacement hook.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-hook'] },
+      } },
       { id: 'b', label: 'B', source: { type: 'file', path: '/openapi-b.yaml' } },
       { id: 'c', label: 'C', source: { type: 'file', path: '/specs/c.json' } },
     ],
@@ -28,7 +32,7 @@ vi.mock('@/lib/openapi/fetch', () => ({
   loadAuthoredSpecDocument: async (config: { id: string }) => (config.id === 'default' ? docs.a : config.id === 'b' ? docs.b : docs.c),
 }))
 
-import { getApiOperationForFrontmatter, lookupApiOperationForFrontmatter } from '@/data/api-reference'
+import { getAllApiOperationNodes, getApiOperationForFrontmatter, lookupApiOperationForFrontmatter } from '@/data/api-reference'
 import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
 
 async function resolve(value: string) {
@@ -74,10 +78,32 @@ describe('lookupApiOperationForFrontmatter', () => {
     expect((await lookup('POST /things')).node?.operation.specId).toBe('default')
   })
 
-  it('reports a hidden or excluded operation as withheld', async () => {
-    expect(await lookup('GET /hidden')).toEqual({ node: null, reason: 'withheld' })
+  it('reports an excluded operation as withheld', async () => {
     expect(await lookup('GET /excluded')).toEqual({ node: null, reason: 'withheld' })
     expect(await lookup('openapi-a.json GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+    expect(await lookup('webhook privateHook')).toEqual({ node: null, reason: 'withheld' })
+  })
+
+  it('renders a hidden operation for a page that names it, and only for that page', async () => {
+    for (const value of ['GET /hidden', 'openapi-a.json GET /hidden']) {
+      const { node } = await lookup(value)
+      expect(node?.operation).toMatchObject({ method: 'GET', path: '/hidden', hidden: false })
+    }
+    expect(await lookup('GET /hidden')).toMatchObject({ revealed: true })
+    expect(await lookup('POST /things')).not.toHaveProperty('revealed')
+    expect((await lookup('webhook quietHook')).node?.operation).toMatchObject({ isWebhook: true, path: 'quietHook' })
+    // The generated lookups and listings keep hiding it.
+    expect(await resolve('GET /hidden')).toBeNull()
+    expect((await getAllApiOperationNodes()).map((node) => node.operation.path)).not.toContain('/hidden')
+  })
+
+  it('preserves authored metadata while revealing an operation or webhook', async () => {
+    const operation = (await lookup('GET /hidden')).node?.operation
+    expect(operation).toMatchObject({ hidden: false, title: 'Legacy endpoint', description: 'Use the replacement endpoint.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-endpoint'] })
+    const webhook = (await lookup('webhook quietHook')).node?.operation
+    expect(webhook).toMatchObject({ hidden: false, title: 'Legacy hook', description: 'Use the replacement hook.', badge: 'Deprecated', group: 'Legacy', slug: ['legacy-hook'] })
+    expect(await lookup('GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+    expect(await resolve('GET /hidden')).toBeNull()
   })
 
   it('reports an unknown spec or operation as unresolved', async () => {

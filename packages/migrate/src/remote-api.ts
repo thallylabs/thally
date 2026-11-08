@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { downloadSpec, parseOpenApi } from './remote-spec.js'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
-import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, pagesRedirectedFrom, servedRoutes } from './redirects.js'
 import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, DEFAULT_ENDPOINT_DIRECTORY, linkApiMounts, mintlifyEndpointUrls, mountPrefix, parseOpenApiOperationsForLinking, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments, titleOperationPages } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
@@ -284,7 +284,9 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const links = (withDirectories.redirects ?? []).filter(isLinkRedirect)
   const unchecked = links.length > 0 ? { ...withDirectories, redirects: withDirectories.redirects!.filter((redirect) => !isLinkRedirect(redirect)) } : withDirectories
   // Redirects added above meet the same checks as any other: none may fail the build, hide a page that exists, or loop.
-  const checked = dropConflictingRedirects(dropUnroutableRedirects(unchecked, warnings), pages, warnings)
+  // A Mintlify page marked noindex that a redirect starts from stands in for it: the repository migration kept the redirect over the page.
+  const standIns = bundle.platform === 'mintlify' ? pagesRedirectedFrom(unchecked.redirects ?? [], pages.filter((page) => page.noindex)) : []
+  const checked = dropConflictingRedirects(dropUnroutableRedirects(unchecked, warnings), standIns.length > 0 ? pages.filter((page) => !standIns.includes(page)) : pages, warnings)
   // The links come back after those checks, so the redirects the download added meet them again: a link that closes a loop with the
   // redirects before it is dropped and reported. No pages are passed because a link hides its own page on purpose.
   const checkedWithLinks = links.length > 0 ? dropConflictingRedirects({ ...checked, redirects: [...(checked.redirects ?? []), ...links] }, [], warnings) : checked

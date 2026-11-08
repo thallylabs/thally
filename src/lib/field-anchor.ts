@@ -9,6 +9,9 @@
  * `uniqueFieldId`, `numberFieldIds`, `accordionAnchorId`, `accordionChildrenId`,
  * `componentIds` and `constantString` in `@thallylabs/core` (packages/core/src/slugify.ts):
  * `thally check` uses that copy, and a mismatch breaks links to a heading or field.
+ * `numberTabIds` is the one exception: `thally check` carries its own copy
+ * (`numberTabIds` in packages/create-thally-docs/src/check.ts), and
+ * field-anchor-parity.test.ts keeps the two identical.
  */
 
 import { plainInlineText } from './inline-code'
@@ -135,6 +138,21 @@ export function numberFieldIds(bases: Iterable<string>, used: Set<string>, autho
   return [...bases].map((base) => uniqueFieldId(base, used))
 }
 
+/**
+ * The ids of a page's `<Tab>`s, in document order, as Mintlify serves them: the
+ * slug of the title (`bitcoin`), and `-2`, `-3` for a repeat. `used` holds every
+ * id the page has already given, which a tab never takes; each id given is
+ * recorded in it.
+ */
+export function numberTabIds(bases: Iterable<string>, used: Set<string>): Array<string> {
+  return [...bases].map((base) => {
+    let id = base
+    for (let occurrence = 2; used.has(id); occurrence++) id = `${base}-${occurrence}`
+    used.add(id)
+    return id
+  })
+}
+
 /** ASCII-only kebab case, how an `<Accordion>` spells an id from its title and an `<Update>` from its label. */
 function asciiAnchor(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -166,7 +184,8 @@ function updateAnchorId(props: { id?: string; label?: string; date?: string }): 
  * in `fieldAnchorName`; a value MDX computes is unknown here, so the id it would
  * make is not listed. No other built-in component derives an id from text: the
  * rest set none or take a React `useId()` (`:r1:`, `_R_0_`), which never reads
- * like a field's `param-…`.
+ * like a field's `param-…`. A `<Tab>` also derives its id from its title, but
+ * `numberTabIds` numbers those after the fields, so it reserves none here.
  */
 export function componentIds(tag: string, attribute: (name: string) => string | null | undefined): Array<string> {
   const literal = (name: string): string | undefined => {

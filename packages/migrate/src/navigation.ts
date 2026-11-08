@@ -117,16 +117,6 @@ export function addMintlifyDirectoryRedirects(
       return match ? route === match[1] || route.startsWith(`${match[1]}/`) : false
     })
   }
-  for (const page of pages) {
-    if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
-    const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
-    if (!parent || pageIds.has(parent.toLowerCase())) continue
-    const source = `/${parent}`
-    if (hasAuthoredRedirect(source)) continue
-    redirects.push({ source, destination: `/${page.id}`, permanent: false })
-    redirectSources.add(source.toLowerCase())
-  }
-
   const navigationOrder: Array<string> = []
   function collectPages(nodes: Array<string | MigrationNavigationGroup>): void {
     for (const node of nodes) {
@@ -154,6 +144,17 @@ export function addMintlifyDirectoryRedirects(
       }
     }
   }
+  for (const page of pages) {
+    if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
+    const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
+    // Mintlify redirects a directory its navigation reaches; a directory with only unlisted pages under it (even an `overview`) is a 404 there.
+    if (!parent || pageIds.has(parent.toLowerCase()) || !firstDescendantByDirectory.has(parent)) continue
+    const source = `/${parent}`
+    if (hasAuthoredRedirect(source)) continue
+    redirects.push({ source, destination: `/${page.id}`, permanent: false })
+    redirectSources.add(source.toLowerCase())
+  }
+
   // Mintlify 307s *any* nav-shaped directory path with no page of its own to
   // its first descendant page in navigation order — not only ones an
   // overview/introduction page or an authored redirect already pointed at
@@ -177,9 +178,18 @@ export function addMintlifyDirectoryRedirects(
 }
 
 /**
+ * A root `index.mdx`: the page Mintlify serves at `/` itself, whether or not docs.json lists it. The runtime serves the page
+ * that holds its `introduction` id at `/` too. An `introduction.mdx` is no evidence of that; Mintlify sends `/` to the first page then.
+ */
+function isMintlifyRootIndex(page: Pick<MigrationPage, 'id' | 'locale' | 'source'>, defaultLocale?: string): boolean {
+  return page.id === 'introduction' && (!page.locale || page.locale === defaultLocale) && /(?:^|[/#])index\.mdx?$/i.test(page.source)
+}
+
+/**
  * Keep authored page URLs while resolving bare documentation roots to the
  * first visible navigation page. An unrelated `home.mdx` is not evidence that
- * Mintlify served it at `/`; explicit source redirects always take priority.
+ * Mintlify served it at `/`; explicit source redirects always take priority,
+ * and a root `index.mdx` keeps the root.
  */
 export function addMintlifyHomepageRedirects(
   config: MigrationDocsConfig,
@@ -214,8 +224,9 @@ export function addMintlifyHomepageRedirects(
   // A home document with its own `url` takes over the root (the link step redirects `/` to that address),
   // so a root redirect to the first page would hide the link.
   const homeLinksElsewhere = pages.some((page) => page.id === 'introduction' && page.externalUrl)
+  const rootIsIndexPage = pages.some((page) => isMintlifyRootIndex(page, config.i18n?.defaultLocale))
   for (const locale of roots) {
-    if (!locale && homeLinksElsewhere) continue
+    if (!locale && (homeLinksElsewhere || rootIsIndexPage)) continue
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source.toLowerCase())) continue
     const destination = `${locale ? `/${locale}` : ''}/${homepage}`
@@ -1312,12 +1323,54 @@ function convertContainerToTabs(
     : []
 }
 
+/** A name from the source config, without control characters and cut to a length a warning can hold. */
+function named(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 60)
+}
+
 function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
   // Aspen rounds its sidebar highlight (12px) and search box like Maple, not like Sharp's 3px corners.
   if (value === 'maple' || value === 'aspen') return 'maple'
   if (['luma', 'sequoia'].includes(String(value))) return 'sharp'
   if (['almond', 'palm'].includes(String(value))) return 'minimal'
   return typeof value === 'string' ? 'default' : undefined
+}
+
+/**
+ * Mintlify's theme by name. `maple` is a Thally theme of the same name and `mint` is Thally's `default`; every other theme is the
+ * closest one, and the warning says so.
+ */
+function projectedThemeWithWarning(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['theme'] {
+  const theme = projectedTheme(value)
+  if (theme && value !== theme && value !== 'mint') {
+    warnings.push({ code: 'unsupported-config', message: `theme ${JSON.stringify(named(String(value)))} has no exact Thally equivalent, so ${JSON.stringify(theme)} was used, which is the closest. Compare the look of the migrated site with the live one.`, source: 'docs.json' })
+  }
+  return theme
+}
+
+/**
+ * Mintlify `errors`: only `404.redirect` (a boolean) is carried. Every other setting under `errors` is named in one warning.
+ */
+function projectedErrors(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['errors'] {
+  const errors = objectValue(value)
+  if (!errors) return undefined
+  const notCarried: Array<string> = []
+  let redirect: boolean | undefined
+  for (const [status, entry] of Object.entries(errors)) {
+    const settings = status === '404' ? objectValue(entry) : null
+    if (!settings) {
+      notCarried.push(named(`errors.${status}`))
+      continue
+    }
+    for (const [key, setting] of Object.entries(settings)) {
+      if (key === 'redirect' && typeof setting === 'boolean') redirect = setting
+      else notCarried.push(named(`errors.404.${key}`))
+    }
+  }
+  if (notCarried.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: `docs.json ${notCarried.slice(0, 10).join(', ')}${notCarried.length > 10 ? ', ...' : ''} ${notCarried.length === 1 ? 'was' : 'were'} not carried over: Thally carries only errors.404.redirect (true or false).`, source: 'docs.json' })
+  }
+  return redirect === undefined ? undefined : { '404': { redirect } }
 }
 
 /**
@@ -1529,6 +1582,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   }
   const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
   const projectedColorsValue = projectedColors(config.colors, warnings)
+  const theme = projectedThemeWithWarning(config.theme, warnings)
+  const errors = projectedErrors(config.errors, warnings)
   const iconLibrary = objectValue(config.icons)?.library
   // Mintlify's default icon library is Font Awesome when docs.json names none.
   const projectedIconLibrary = iconLibrary === undefined
@@ -1572,7 +1627,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     smartQuotes: true,
     // `styling.eyebrows: "breadcrumbs"` shows the whole group path; "section" (the default) shows the nearest group.
     ...(objectValue(config.styling)?.eyebrows === 'breadcrumbs' ? { eyebrow: 'path' as const } : {}),
-    ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(theme ? { theme } : {}),
+    ...(errors ? { errors } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
     ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),
     ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),

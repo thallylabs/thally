@@ -160,6 +160,19 @@ passes. Review them before publishing. Use `--skip-validation` for an explicit
 import-only run; its report is marked unverified. An existing `--into` project
 without a build script is also reported as unverified.
 
+The report's `provenance` block records what produced the import so a later run
+can be compared with one input changed. `argv` is the command line as typed, with
+`--api-key` values and URL credentials, queries and fragments removed and a local
+source shown as `local-directory`; other paths are kept as typed, and library
+callers that pass no command line get no `argv`. `sources` lists the primary
+repository and each `--source-ref` repository with the `ref` requested and the
+`commit` that was cloned, or the commit of a local source checkout (`dirty: true`
+when it has uncommitted changes or its status cannot be read; ignored files are
+not seen). `commit` is `null` for a live site and for a folder that is not a git
+checkout. `engine` is the version of `create-thally-docs` and, when it runs from a
+Thally checkout, that checkout's commit and `dirty` state; an installed package
+reports its version only.
+
 Migration is a local build workflow for projects you own or trust. Dependency
 installation and builds execute project code, including imported MDX and
 JSX/TSX; they are not sandboxed. No additional confirmation or execution flag

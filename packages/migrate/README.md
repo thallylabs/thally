@@ -128,6 +128,9 @@ versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
 compatible page frontmatter, site identity, and OpenAPI configuration.
+A page `icon` written as an object (`name`, `style`, `library`) maps to the page's
+`icon` and `iconType`; Thally has one icon library per site, so a page `library`
+other than the site's `icons.library` (Font Awesome when unset) is reported.
 A page with no `description`, other than one that names an API operation, gets
 one from its first paragraph, which keeps it for search and metadata but marks it
 `descriptionPlacement: body`, so the runtime does not print the same sentence under
@@ -236,10 +239,12 @@ is bound once per spec file in a hidden tab (`OpenAPI: <spec>`, the same as for 
 spec only a page names), which is what the pages' `openapi:` frontmatter resolves
 against; the renderer serves no `/api/` page, sitemap entry or search record for it. A remote spec's pages
 and tab are made by `hydrateRemoteApiSpecs` once it is downloaded; a download
-that fails leaves no tab and no page, as before. An operation the spec withholds
-(`x-hidden`, `x-excluded`) gets no page, nor does one listed only under a
+that fails leaves no tab and no page, as before. An operation the spec marks
+`x-hidden` or `x-excluded` gets no generated page, nor does one listed only under a
 `hidden` group or an access-restricted container (such groups are left out of
-the tab, as above). Of two operations with the same tag and
+the tab, as above). A page the source wrote that names an `x-hidden` operation
+(`openapi: post /quote`) still renders it, without Try it, as on Mintlify; a page
+that names an `x-excluded` operation is not served. Of two operations with the same tag and
 summary the first listed keeps the URL and one warning names the others; an
 authored page at that URL keeps it. Nothing is redirected from these URLs and a
 link to one stays as written; a link to a tag folder or to an address under the
@@ -273,7 +278,8 @@ Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
 Mintlify sources also get `smartQuotes: true`, because Mintlify renders straight
 quotes in prose as curly ones; the setting leaves code, heading ids, Markdown and
-`llms.txt` as written.
+`llms.txt` as written, and so does the destination of a Markdown link with its
+quoted title (a Docusaurus heading ends in `[](#id "Direct link to ...")`).
 
 Thally leaves out the sidebar heading of a group named after its tab or dropdown, because
 the collection already names it. Mintlify keeps that heading, so a source with such a group
@@ -335,6 +341,12 @@ without regard to a trailing slash, so a redirect whose source is a page of the
 migrated site would hide that page, and two redirects that send a visit back to
 each other never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
+Mintlify redirect from the source's own config is the exception: Mintlify
+follows it even when a page has that address, so the redirect is kept, the page
+is marked `noindex` and stays as a stub (its navigation entry follows the
+redirect), and a warning lists the first ten and says to delete the page and its
+navigation entry if it is not needed. The home page (each language's too), and an
+address that differs from a page only in letter case, are still left out. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still
 reachable there. These checks ignore letter case, because a site can run on
@@ -368,6 +380,14 @@ purpose; a `url` that is not an `http(s)` address is ignored. The home page
 (`index.mdx` or `introduction.mdx`) is served at `/` and at `/introduction`, so
 both redirect, and the redirect from `/` replaces the generated one to the first
 page. A redirect for `/` that the source site wrote stays, and a warning says so.
+
+A Mintlify root `index.mdx` is the page Mintlify serves at `/`, listed in
+docs.json or not, so the root is not redirected to the first navigation page
+for it (an `introduction.mdx` gets that redirect). An `index.mdx` that docs.json
+does not list stays out of the navigation, as it is on Mintlify. A section path (`/guides`) is redirected to its `overview` or `introduction` page
+only when the navigation lists pages under that directory, which is when
+Mintlify redirects it too; with only unlisted pages under it Mintlify answers
+404, and so does the migrated site.
 
 An authored redirect (Mintlify and Fern `redirects`, Docusaurus
 `plugin-client-redirects`) starts at a path on the site and ends at another
@@ -598,6 +618,29 @@ homepage and explicit redirects. Locale tags and recognized locale-prefixed
 sections are normalized without discarding original URL redirects.
 Mintlify's generated `param-*` links for settings headings and named fields
 become explicit anchors in migrated MDX.
+A `<video autoPlay>` gets the `muted`, `loop` and `playsInline` it lacks, as
+Mintlify renders it, so browsers let it start; a video without `autoPlay` is
+left as written.
+A component `href` that starts with `./` or `../` (`<Card href="./lesson-1">`) is
+rewritten to the root-absolute path the browser reaches from the page's own route
+(`/ua-course/lesson-1` on `ua-course/intro`; a directory index is served at its
+parent route), keeping any query and fragment, so Thally's cards render it and
+`thally check` validates it. A `href` that climbs above the site root stops at the
+root, as the browser does. Markdown links and code are left alone.
+A link to the source site's own host becomes root-relative when it reaches an
+imported page. The host is `seo.metatags.canonical` when set (a link outside the path
+that address names, such as `/docs`, is left alone), else the
+`integrations.plausible.domain` when its first label is `docs`, `developer` or
+`developers`, because Plausible is often set up for the marketing apex, whose pages
+are not docs pages. Separately, a leading mount path such as `/docs/` is dropped from
+a link, whatever its host, when what remains is an imported page. Another host, port
+or login, a path that is no imported page, and a target longer than 2048 characters
+keep the URL as written.
+Mintlify pages converted from Docusaurus keep `<Tabs values>` and `<TabItem>`: they
+become `<Tabs>` and `<Tab title>`, titled by the item's `label`, else the `values`
+label for its `value`, else the `value`. A
+`<TabItem>` outside any `<Tabs>` is mapped only when it has its own `</TabItem>`, so
+one named in prose is escaped as text and the page is kept.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
 For a copied client component that receives a simple page-authored JSX callback,
@@ -638,6 +681,12 @@ over a same-named built-in. If any dependency cannot run in a client module
 (server-only APIs such as `process` or `await`, an undeclared name, a package
 the migration removed, a dynamic `import()`), the component is left where it
 is and a warning names it and the blocker.
+A component that reads `window`, `document` or another browser global while it
+renders (`if (typeof window === "undefined") return null`, a `fetch` that fills
+the DOM by hand) is moved the same way, and its module renders it only after the
+client has mounted, so the server HTML and the first client render agree; the
+list or table it builds appears once the page has loaded. A component with JSX event
+handlers is left to the interactive-block extraction above.
 `<Snippet file="...">` accepts the documented `snippets/`-relative path as well
 as a `/snippets/...` or page-relative one. A multi-line snippet keeps the
 indentation of the tag it replaces on every line (aligned with the item text
@@ -664,7 +713,11 @@ written in text and as the child of an element inside an expression
 (`{mode === "x" && <Note>{children}</Note>}`) alike. A `{name}` inside a fenced code
 block is never replaced, and a fence closes only as CommonMark closes it (the same
 character, at least as long, nothing after it), so a three-backtick block inside a
-four-backtick one stays code. An outer code fence that contains a
+four-backtick one stays code. A prop that a component snippet destructures
+(`({ img, imgDark, size = "md" }) => ...`) and the call leaves out is its string
+default, or `undefined` without one, as in the component: `{imgDark || img}` keeps
+`img` and `{model && ...}` leaves nothing. A call that spreads props, or passes the
+prop as an expression, leaves it as it was. An outer code fence that contains a
 same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.
@@ -696,11 +749,30 @@ Other relative imports of a copied file are handled the same way: a namespace
 import (`import * as X from './comp.jsx'`) and a dynamic `import('./comp.jsx')`
 point at the copied module, and a relative side-effect import
 (`import './styles.css'`) is removed with a warning, like one from an npm
-package. A page is excluded only when the relative target is not copied (for
+package. An `import` line inside a template literal of the page's JavaScript (an
+`export`, an expression or a JSX attribute value: a code sample held in a string) is
+text, so it stays in the string and is not hoisted. That needs the page to parse as
+MDX at that point, with the frontmatter set aside, HTML comments blanked, and unmatched
+closing tags and prose braces acorn rejects escaped for the read; a page that still
+does not parse (an HTML tag that is never closed, say) is hoisted as before. A page is excluded only when the relative target is not copied (for
 example a Next.js `./metadata` module, or an `export ... from` re-export), with
 a single warning naming it. An MDX expression that names an identifier the page
 never defines (`{missing}`) is removed with a warning, since it would throw at
 render; define the name or escape the braces as `\{ \}` to keep the text.
+Prose braces that are not a valid expression at all (a path placeholder such as
+`/{chainId?}`) are escaped as literal text, which is how Mintlify shows them, and
+one warning per page quotes up to three of the escaped spans (the same goes for
+unmatched closing tags). A bare URL needs no escape: the runtime compiles with
+remark-gfm, which autolinks it, braces included, and every check of whether a page
+compiles reads it that way. The page is kept only if it then compiles, and a page
+that needs more than 50 repairs is not repaired: a broken expression in a JSX
+attribute, a broken `export`, or a brace that never closes still excludes the page.
+A page the component analysis could not parse is repaired first (its HTML comments
+converted for the read) and analysed again, so its inline components are still
+extracted. If the analysis still fails on a page that needed a brace repair, the page
+is excluded as before when it has an `import` or `export` line, an event handler or
+an asset `require(` outside code for the analysis to act on, and kept when it has
+none (a licence text with `<COPYRIGHT HOLDER>`, say).
 A value import from a local snippet (`import { FEE, fee } from
 '/snippets/c.mdx'`) is inlined when each name is a static value (string,
 number, boolean, `null`, or an object/array of those) or a self-contained
@@ -736,6 +808,17 @@ YouTube-embed package (e.g. a custom `LiteYouTube` wrapping
 `react-lite-youtube-embed`) gets the same working `<iframe>` fallback as a
 page that imports that package directly, instead of losing the embed to the
 generic unknown-component fallback.
+
+A quoted frontmatter value that goes on over unindented lines (the closing quote
+alone on the next line, say) is read as Mintlify reads it, with each line break
+folded into a space, though strict YAML rejects it. A quote that is never
+closed, or text after the closing quote, is still reported as invalid YAML.
+
+A Mintlify page without a frontmatter `title` is titled from its file name
+(`RelayBridge.mdx` is "RelayBridge") and keeps a leading `# Heading` in its body
+as an ordinary heading, as Mintlify shows it; a page that names an OpenAPI
+operation still takes that heading as its title. Docusaurus and Fern pages take
+the leading heading as the title and drop it from the body.
 
 ### Access-restricted pages
 
@@ -813,7 +896,9 @@ page. Those files are copied to `public/` (tooling config such as
 output, dot-directories, and `node_modules` are not) under the normal asset
 size limits. Scripts are added to `docs.json` `customScripts` (URL-encoded),
 except modules that pages import as components, which are copied as components
-instead. Thally loads a local stylesheet that `docs.json` lists under
+instead. A script that loads or names a known tracker (PostHog, Intercom,
+Segment, Hotjar, Google Tag Manager or Analytics, Mixpanel, Amplitude) is still
+carried, with one warning for that file naming the trackers. Thally loads a local stylesheet that `docs.json` lists under
 `stylesheets`, but the migrator does not list the `.css` files it copies, since
 their rules likely target Mintlify's DOM: each is preserved with a warning that it
 is not applied. Fonts named by
@@ -876,6 +961,11 @@ Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 (`showToggle: false`), and legacy `modeToggle.default` / `isHidden` map to
 `appearance`; invalid values are skipped with a warning. Mintlify sources set
 `markdown.enabled: true`, matching Mintlify's default Markdown mirrors.
+`errors.404.redirect` (a boolean) is written to `docs.json` as
+`"errors": { "404": { "redirect": true } }`; one warning names every other
+setting under `errors`, which is not carried. `theme: "maple"` keeps its name and
+`"mint"` becomes Thally's `default` theme; any other `theme` is mapped to the
+closest Thally theme, and a warning says so.
 
 ## Branding
 
@@ -899,6 +989,8 @@ are copied into `public/`, but Thally's site configuration has no static
 field for them — branding is managed from the admin dashboard at runtime —
 so each site gets one warning naming the copied files and pointing at the
 dashboard's branding settings instead of leaving the loss silent.
+A `docs.json` logo or favicon path written with a leading `./` (`./logo/icon.svg`)
+counts like `logo/icon.svg`; one that climbs out with `../` is not imported.
 
 ## Cloning a GitHub repository
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { operationPublicationState, pageReferenceState, type RoutedSpec } from '../publication'
+import { hiddenOperationSpec, operationPublicationState, pageReferenceState, revealedOperations, type RoutedSpec } from '../publication'
 import { parseOpenApiFrontmatter } from '../page-frontmatter'
 
 const ok = { responses: { 200: { description: 'ok' } } }
@@ -111,5 +111,34 @@ describe('operationPublicationState', () => {
     expect(state('GET /secret', [main, admin, remote])).toBe('unknown')
     expect(state('openapi/admin.yaml GET /secret', [main, admin, remote])).toBe('hidden')
     expect(state('https://example.com/spec.json GET /secret', [main, admin, remote])).toBe('unknown')
+  })
+})
+
+describe('a hidden operation named by a page', () => {
+  const spec = (id: string, document: unknown): RoutedSpec => ({ config: { id, label: id, source: { type: 'file', path: `openapi/${id}.json` } }, document })
+  const main = spec('default', doc({ '/shared': { get: { 'x-hidden': true, ...ok } }, '/private': { get: { 'x-excluded': true, ...ok } }, '/public': { get: ok } }))
+  const admin = spec('admin', doc({ '/shared': { get: { 'x-hidden': true, ...ok } }, '/private': { get: { 'x-hidden': true, ...ok } }, '/secret': { get: { 'x-hidden': true, ...ok } } }))
+  const found = (raw: string, specs = [main, admin]) => hiddenOperationSpec(parseOpenApiFrontmatter(raw)!, specs)?.config.id
+
+  it('is rendered from the pinned spec, else from the first spec that hides it', () => {
+    expect(found('GET /shared')).toBe('default')
+    expect(found('openapi/admin.json GET /shared')).toBe('admin')
+    expect(found('GET /secret')).toBe('admin')
+  })
+
+  it('never reveals an excluded or a published operation, or one nothing hides', () => {
+    expect(found('GET /private')).toBeUndefined()
+    expect(found('openapi/admin.json GET /private')).toBe('admin')
+    expect(found('openapi/main.json GET /private')).toBeUndefined()
+    expect(found('GET /public')).toBeUndefined()
+    expect(found('GET /typo')).toBeUndefined()
+    expect(found('GET /secret', [main, admin, { config: { id: 'remote', label: '', source: { type: 'url', url: 'https://example.com/spec.json' } } }])).toBeUndefined()
+  })
+
+  it('shows every method of a webhook, and the one method of an operation', () => {
+    expect(revealedOperations(parseOpenApiFrontmatter('GET /shared')!)).toEqual({ 'GET /shared': { hidden: false } })
+    const hook = revealedOperations(parseOpenApiFrontmatter('webhook paid')!)
+    expect(Object.keys(hook)).toContain('WEBHOOK POST paid')
+    expect(Object.keys(hook)).toHaveLength(8)
   })
 })

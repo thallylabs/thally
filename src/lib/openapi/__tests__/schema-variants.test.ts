@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flattenSchema, unionVariants } from '@/lib/openapi/schema-variants'
+import { allowsNull, flattenSchema, unionVariants } from '@/lib/openapi/schema-variants'
 
 // The shapes a generated spec gives a connection endpoint: the credentials sit in a union (one member or several) that
 // is one fragment of an allOf, the name and description in another.
@@ -16,6 +16,20 @@ const accessKey = {
 }
 
 describe('flattenSchema with a union inside allOf', () => {
+  it.each(['anyOf', 'oneOf'])('preserves null in an allOf-wrapped %s without adding a visible null option', (kind) => {
+    const flat = flattenSchema({ allOf: [{ [kind]: [{ type: 'null' }, { type: 'string', title: 'Value' }] }] })
+    expect(allowsNull(flat)).toBe(true)
+    expect(unionVariants(flat, true)?.map(({ schema }) => schema.type)).toEqual(['null', 'string'])
+    expect(unionVariants(flat)?.map(({ label }) => label)).toEqual(['Value'])
+  })
+
+  it('keeps null through nested allOf wrappers around a nullable object', () => {
+    const flat = flattenSchema({ allOf: [{ allOf: [{ anyOf: [{ type: 'null' }, assumeRole] }] }] })
+    expect(allowsNull(flat)).toBe(true)
+    expect(unionVariants(flat)).toHaveLength(1)
+    expect(unionVariants(flat)?.[0].schema).toMatchObject(assumeRole)
+  })
+
   it('merges a union that has one variant, so its properties are listed with the rest', () => {
     const flat = flattenSchema({ allOf: [{ anyOf: [assumeRole] }, shared] })
     expect(Object.keys(flat.properties as object)).toEqual(['method', 'credentials', 'name', 'description'])

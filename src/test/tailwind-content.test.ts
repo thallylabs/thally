@@ -41,3 +41,10 @@ describe('tailwind content scanning of MDX prose', () => {
     expect(content.transform.mdx('x text-[length:var(--text-*)] y')).toBe('x  y')
   })
 })
+
+describe('tailwind content globs', () => {
+  it('scan the client modules the migrator writes under src/mdx, and the custom components beside them', () => {
+    const files = (config.content as unknown as { files: Array<string> }).files
+    expect(files).toContain('./src/mdx/**/*.{js,mjs,jsx,ts,tsx}')
+  })
+})

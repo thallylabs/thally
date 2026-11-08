@@ -96,3 +96,39 @@ describe('field ids next to a heading that GitHub-flavored Markdown reads', () =
     expect(await brokenAnchorOutput(body, 'alpha-a')).toContain('Broken anchor')
   })
 })
+
+// A generated API page names its rows parameter-, body- and response- (src/lib/openapi/field-ids.ts); they are not in its MDX.
+describe('ids of the rows of a page that documents an operation', () => {
+  async function run(links: Array<string>): Promise<string> {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-api-field-ids-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', pages: ['guide', 'get-quote'] }] }))
+    const prose = 'This page has enough prose to avoid the short body notice.'
+    writeFileSync(join(projectDir, 'src/content/guide.mdx'), `---\ntitle: Guide\ndescription: A guide.\n---\n\n${prose}\n\n${links.map((link, index) => `[Link ${index}](${link})`).join('\n\n')}`)
+    writeFileSync(join(projectDir, 'src/content/get-quote.mdx'), `---\ntitle: Get quote\ndescription: A quote.\nopenapi: POST /quote\n---\n\n${prose}\n\n[Same page](#body-explicit-deposit) [Typo](#bodyexplicit)`)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('are valid targets on that page, from it and from other pages, and nothing else is', async () => {
+    const output = await run(['/get-quote#body-explicit-deposit', '/get-quote#response-requests-items-data-failed-tx-hash', '/get-quote#parameter-limit', '/get-quote#not-a-field', '#body-explicit-deposit'])
+    const lines = output.split('\n')
+    const about = (file: string) => lines.filter((line) => line.includes(`src/content/${file}.mdx`)).join('\n')
+    // From other pages, to the page: only an id the page does not generate is broken.
+    expect(about('guide')).not.toContain('"/get-quote#body-explicit-deposit"')
+    expect(about('guide')).not.toContain('"/get-quote#response-requests-items-data-failed-tx-hash"')
+    expect(about('guide')).not.toContain('"/get-quote#parameter-limit"')
+    expect(about('guide')).toContain('"/get-quote#not-a-field"')
+    // The guide documents no operation, so the same id is not generated there.
+    expect(about('guide')).toContain('"#body-explicit-deposit" not found on this page')
+    // From the page to itself.
+    expect(about('get-quote')).not.toContain('"#body-explicit-deposit"')
+    expect(about('get-quote')).toContain('"#bodyexplicit" not found on this page')
+  })
+})

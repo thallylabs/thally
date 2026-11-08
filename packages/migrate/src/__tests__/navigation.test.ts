@@ -142,6 +142,14 @@ describe('Mintlify referenced directory landings', () => {
     expect(result.redirects?.some((redirect) => redirect.source === '/unlisted')).toBe(false)
   })
 
+  it('adds no landing for a directory whose pages the navigation does not list at all', () => {
+    // Mintlify answers /advanced/api/sign with a 404 when only unlisted pages sit under it, although `overview` is one of them.
+    const result = addMintlifyDirectoryRedirects({ tabs }, [
+      page('guides/examples/webhook'), page('advanced/api/sign/overview'), page('advanced/api/sign/usage'),
+    ])
+    expect(result.redirects?.map((redirect) => redirect.source)).toEqual(['/guides', '/guides/examples'])
+  })
+
   it('redirects a nav-group directory with no page of its own even with no authored redirect pointing at it', () => {
     // Mirrors the live-site behavior this fix targets: a Mintlify container
     // path (e.g. a `product`/`tab`/`group`, such as Upstash's `/redis`) 307s

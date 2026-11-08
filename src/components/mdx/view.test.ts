@@ -60,4 +60,10 @@ describe('Embed', () => {
     expect(renderToStaticMarkup(createElement(Embed, { src: '//evil.example/x' }))).toBe('')
     expect(renderToStaticMarkup(createElement(Embed, { src: 'javascript:alert(1)' }))).toBe('')
   })
+
+  it('refuses a root path that hides control characters', () => {
+    for (const src of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example']) {
+      expect(renderToStaticMarkup(createElement(Embed, { src }))).toBe('')
+    }
+  })
 })

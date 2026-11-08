@@ -22,8 +22,10 @@ import { createHash } from 'node:crypto'
 import { parseFrontmatter } from '../../src/lib/frontmatter'
 import { MAX_SEARCH_SHARD_BYTES, MAX_SEARCH_SHARDS, PREPARED_SEARCH_FORMAT, type PreparedSearchDescriptor, type PreparedSearchRecord } from '../../src/lib/search/prepared-content-contract'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { parseOpenApiFrontmatter } from '../../src/lib/openapi/page-frontmatter'
-import { UNPUBLISHED_PAGES_FILE, pageReferenceState, type RoutedSpec } from '../../src/lib/openapi/publication'
+import { parseOpenApiFrontmatter, type OpenApiFrontmatterRef } from '../../src/lib/openapi/page-frontmatter'
+import { UNPUBLISHED_PAGES_FILE, hiddenOperationSpec, pageReferenceState, revealedOperations, type RoutedSpec } from '../../src/lib/openapi/publication'
+import { HTTP_METHODS } from '../../src/lib/openapi/operation-keys'
+import { isObj, operationVisibility, viewPathEntry } from '../../src/lib/openapi/path-items'
 import { sanitizeSpecForPublication } from '../../src/lib/openapi/sanitize'
 import type { ApiSpecConfig, OpenAPIDocument, OperationOverride } from '../../src/lib/openapi/types'
 
@@ -112,6 +114,27 @@ function mergeOverrides(
 }
 
 /**
+ * A revealed operation stays in the copy so its page can render it, but the route must go on hiding it everywhere else.
+ * Filtering its neighbours can strip the flag it was hidden by (one on its path item), so flag it on the operation itself.
+ */
+function keepRevealedHidden(
+  document: OpenAPIDocument,
+  revealed: Record<string, OperationOverride>,
+  overrides?: Record<string, OperationOverride>,
+): void {
+  for (const key of Object.keys(revealed)) {
+    const [, webhook, method, name] = /^(WEBHOOK )?(\S+) (.+)$/.exec(key) ?? []
+    if (!method) continue
+    const entry = (webhook ? document.webhooks : document.paths) as Record<string, unknown> | undefined
+    const item = entry && Object.hasOwn(entry, name) ? entry[name] : undefined
+    const verb = method.toLowerCase() as (typeof HTTP_METHODS)[number]
+    const operation = isObj(item) ? item[verb] : undefined
+    if (!isObj(item) || typeof item.$ref === 'string' || !isObj(operation)) continue
+    if (operationVisibility(viewPathEntry(document, item), verb, overrides?.[key]) === 'visible') operation['x-hidden'] = true
+  }
+}
+
+/**
  * Managed assets are served verbatim from `/_thally/content/…`, so a spec
  * copied there must already be publication-safe (excluded operations removed).
  * The runtime re-sanitizes on load, which is idempotent.
@@ -121,6 +144,7 @@ function addSpecFile(
   sources: RuntimeSourceMap,
   filePath: string,
   overrides?: Record<string, OperationOverride>,
+  revealed?: Record<string, OperationOverride>,
 ): void {
   addTextFile(projectRoot, sources, filePath)
   const entry = sources[projectPath(projectRoot, filePath)]
@@ -143,8 +167,9 @@ function addSpecFile(
     console.warn(`[thally] OpenAPI source is not an object and was left out of the build: ${projectPath(projectRoot, filePath)}`)
     return
   }
-  const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides })
+  const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides: { ...overrides, ...revealed } })
   if (sanitized === document) return
+  if (revealed) keepRevealedHidden(sanitized, revealed, overrides)
   entry.content = isJson ? `${JSON.stringify(sanitized, null, 2)}\n` : stringifyYaml(sanitized)
 }
 
@@ -180,15 +205,16 @@ export interface UnpublishedOpenApiPage {
   id: string
   /** The `openapi:` reference as authored, without quotes. */
   operation: string
-  state: 'hidden' | 'excluded'
+  state: 'excluded'
 }
 
 /**
  * The specs the docs route serves operations from, in route order: every
- * visible API tab, the first being the default (src/config/api-reference.ts).
+ * visible API tab, the first being the default (src/config/api-reference.ts);
+ * `hidden` gives those of the hidden tabs, which the route consults after them.
  * A remote or unreadable spec keeps its place with no document.
  */
-function loadRoutedSpecs(projectRoot: string): Array<RoutedSpec> {
+function loadRoutedSpecs(projectRoot: string, hidden = false): Array<RoutedSpec> {
   const docsJsonPath = path.join(projectRoot, 'docs.json')
   if (!existsSync(docsJsonPath)) return []
   let tabs: Array<{ hidden?: boolean; api?: { source?: unknown; overrides?: Record<string, OperationOverride> } }>
@@ -199,7 +225,7 @@ function loadRoutedSpecs(projectRoot: string): Array<RoutedSpec> {
   }
   if (!Array.isArray(tabs)) return []
   return tabs
-    .filter((tab) => !tab?.hidden && typeof tab?.api?.source === 'string')
+    .filter((tab) => Boolean(tab?.hidden) === hidden && typeof tab?.api?.source === 'string')
     .map((tab, index) => {
       const source = tab.api!.source as string
       const isUrl = /^https?:\/\//i.test(source)
@@ -221,18 +247,17 @@ function loadRoutedSpecs(projectRoot: string): Array<RoutedSpec> {
     })
 }
 
-/**
- * Pages whose `openapi:` frontmatter resolves only to hidden or excluded
- * operations, judged with the docs route's own lookup (`pageReferenceState`).
- * Such a page is not published: its route 404s and it is left out of every
- * listing. Remote specs cannot be judged here, and unknown operations are not
- * reported.
- */
-export function findUnpublishedOpenApiPages(projectRoot: string): Array<UnpublishedOpenApiPage> {
-  const specs = loadRoutedSpecs(projectRoot)
-  if (specs.length === 0) return []
+interface OpenApiPage {
+  file: string
+  /** Page id, as the docs route and `isDocPublished` key it. */
+  id: string
+  reference: OpenApiFrontmatterRef
+}
+
+/** The pages under `src/content` whose `openapi:` frontmatter names an operation, in file order. */
+function openApiPages(projectRoot: string): Array<OpenApiPage> {
   const contentRoot = path.join(projectRoot, 'src/content')
-  const pages: Array<UnpublishedOpenApiPage> = []
+  const pages: Array<OpenApiPage> = []
   const scan = (directory: string): void => {
     if (!existsSync(directory)) return
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -251,14 +276,11 @@ export function findUnpublishedOpenApiPages(projectRoot: string): Array<Unpublis
         continue
       }
       if (!reference) continue
-      const state = pageReferenceState(reference, specs)
-      if (state !== 'hidden' && state !== 'excluded') continue
       const relative = path.relative(contentRoot, filePath).split(path.sep).join('/').replace(/\.mdx?$/, '')
       pages.push({
         file: projectPath(projectRoot, filePath),
         id: relative.endsWith('/index') ? relative.slice(0, -'/index'.length) : relative,
-        operation: `${reference.specRef ? `${reference.specRef} ` : ''}${reference.method} ${reference.path}`,
-        state,
+        reference,
       })
     }
   }
@@ -266,11 +288,43 @@ export function findUnpublishedOpenApiPages(projectRoot: string): Array<Unpublis
   return pages.sort((a, b) => a.file.localeCompare(b.file))
 }
 
+/**
+ * Pages whose `openapi:` frontmatter resolves only to excluded operations,
+ * judged with the docs route's own lookup (`pageReferenceState`). Such a page
+ * is not published: its route 404s and it is left out of every listing. A
+ * hidden operation does not withhold its page, which renders it (see
+ * `revealedOperationsBySource`). Remote specs cannot be judged here, and
+ * unknown operations are not reported.
+ */
+export function findUnpublishedOpenApiPages(projectRoot: string): Array<UnpublishedOpenApiPage> {
+  const specs = loadRoutedSpecs(projectRoot)
+  if (specs.length === 0) return []
+  return openApiPages(projectRoot).flatMap(({ file, id, reference }) => pageReferenceState(reference, specs) === 'excluded'
+    ? [{ file, id, operation: `${reference.specRef ? `${reference.specRef} ` : ''}${reference.method} ${reference.path}`, state: 'excluded' as const }]
+    : [])
+}
+
+/**
+ * The hidden operations pages name, by the `api.source` they are read from. A page that names a hidden operation
+ * renders it, so the spec copy the build embeds keeps that operation and no other hidden one; the route still reads
+ * the spec without it for everything generated. Judged like the route does: visible tabs first, then hidden tabs.
+ */
+function revealedOperationsBySource(projectRoot: string): Map<string, Record<string, OperationOverride>> {
+  const specs = [...loadRoutedSpecs(projectRoot), ...loadRoutedSpecs(projectRoot, true)]
+  const revealed = new Map<string, Record<string, OperationOverride>>()
+  for (const { reference } of openApiPages(projectRoot)) {
+    const source = hiddenOperationSpec(reference, specs)?.config.source
+    if (source?.type === 'file') revealed.set(source.path, { ...revealed.get(source.path), ...revealedOperations(reference) })
+  }
+  return revealed
+}
+
 function addConfiguredOpenApiFile(
   projectRoot: string,
   sources: RuntimeSourceMap,
   configuredPath: string,
   overrides?: Record<string, OperationOverride>,
+  revealed?: Record<string, OperationOverride>,
 ): void {
   const filePath = configuredPath.startsWith('/')
     ? path.resolve(projectRoot, 'public', configuredPath.slice(1))
@@ -289,7 +343,7 @@ function addConfiguredOpenApiFile(
     throw new Error(`Configured OpenAPI source resolves outside the project: ${configuredPath}`)
   }
 
-  addSpecFile(projectRoot, sources, filePath, overrides)
+  addSpecFile(projectRoot, sources, filePath, overrides, revealed)
 }
 
 function walkTextFiles(
@@ -329,8 +383,9 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
   addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
   addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
   addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
+  const revealed = revealedOperationsBySource(projectRoot)
   for (const { source, overrides } of configuredOpenApiSources(projectRoot)) {
-    addConfiguredOpenApiFile(projectRoot, sources, source, overrides)
+    addConfiguredOpenApiFile(projectRoot, sources, source, overrides, revealed.get(source))
   }
   // The copy above is already filtered, so the runtime can no longer tell a
   // withheld operation from a typo: record which pages the build withholds.

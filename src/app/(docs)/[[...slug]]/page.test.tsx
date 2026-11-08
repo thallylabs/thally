@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', descriptionPlacement: undefined as 'body' | 'operation' | undefined, header: vi.fn(), og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
+const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, redirect404: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', descriptionPlacement: undefined as 'body' | 'operation' | undefined, header: vi.fn(), og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
 
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => { throw new Error(`NEXT_REDIRECT:${path}`) },
@@ -35,6 +35,7 @@ vi.mock('@/data/docs', () => ({
   getEyebrowMode: () => fixtures.eyebrowMode,
   getSeoConfig: () => ({ titleSeparator: ' - ' }),
   isDocPublished: () => true,
+  getNotFoundRedirect: () => fixtures.redirect404,
   canReaderViewPage: async () => true,
   loadNavContext: async () => ({ group: 'Capacity', groupPath: ['Errors', 'Capacity'], breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
@@ -44,8 +45,8 @@ vi.mock('@/components/docs/doc-header', () => ({ DocHeader: ({ eyebrow, showDesc
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 vi.mock('@/components/api/operation-panel', async () => {
   const { Markdown } = await import('@/components/mdx/markdown')
-  return { OperationPanel: ({ children, operation, showDescription = true }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean }) => (
-    <section>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
+  return { OperationPanel: ({ children, operation, showDescription = true, playground }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean; playground?: string }) => (
+    <section data-playground={playground}>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
   ) }
 })
 vi.mock('@/components/api/manual-api-endpoint', () => ({ ManualApiEndpoint: () => null }))
@@ -68,7 +69,7 @@ vi.mock('@/lib/json-ld', () => ({ buildDocPageJsonLd: (input: unknown) => fixtur
 
 import DocsPage, { generateMetadata } from './page'
 
-beforeEach(() => { fixtures.header.mockClear(); fixtures.descriptionPlacement = undefined; fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
+beforeEach(() => { fixtures.header.mockClear(); fixtures.descriptionPlacement = undefined; fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.redirect404 = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
 
 const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) }))
 
@@ -83,7 +84,7 @@ describe('docs page with an unresolved openapi spec', () => {
   it('renders the page body inside the operation panel when the operation resolves', async () => {
     fixtures.lookup = { node: { operation: {} } }
     const html = await render()
-    expect(html).toContain('<section><p>Authored scrape body</p></section>')
+    expect(html).toContain('<p>Authored scrape body</p></section>')
     expect(html).not.toContain('role="note"')
     expect(html).toContain('Previous page')
   })
@@ -95,9 +96,18 @@ describe('docs page with an unresolved openapi spec', () => {
     expect(await render()).toContain('data-eyebrow="[&quot;Errors&quot;,&quot;Capacity&quot;]"')
   })
 
-  it('404s a hidden or excluded operation even when the page is listed as published', async () => {
+  it('404s an excluded operation even when the page is listed as published', async () => {
     fixtures.lookup = { node: null, reason: 'withheld' }
     await expect(render()).rejects.toThrow('NEXT_NOT_FOUND')
+  })
+
+  it('renders a hidden operation without the playground, which only forwards requests to listed operations', async () => {
+    fixtures.lookup = { node: { operation: {} } }
+    expect(await render()).toContain('data-playground="interactive"')
+    fixtures.lookup = { node: { operation: {} }, revealed: true }
+    const html = await render()
+    expect(html).toContain('data-playground="simple"')
+    expect(html).toContain('<p>Authored scrape body</p>')
   })
 })
 
@@ -129,6 +139,47 @@ it('retains no-visible-document 404 and private-by-default login behavior', asyn
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_NOT_FOUND')
   fixtures.privateDefault = true
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_REDIRECT:/api/reader/login?redirect=%2F')
+})
+
+describe('docs.json errors.404.redirect', () => {
+  const visit = (slug: Array<string>) => DocsPage({ params: Promise.resolve({ slug }) })
+
+  it('sends an address with no page to the home page, and renders the 404 otherwise', async () => {
+    fixtures.missing = true
+    await expect(visit(['no', 'such-page'])).rejects.toThrow('NEXT_NOT_FOUND')
+    fixtures.redirect404 = true
+    await expect(visit(['no', 'such-page'])).rejects.toThrow('NEXT_REDIRECT:/')
+  })
+
+  it('keeps the home of a locale for an address under that locale', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true
+    await expect(visit(['fr', 'no-such-page'])).rejects.toThrow('NEXT_REDIRECT:/fr')
+  })
+
+  it('treats a page the reader may not see and an operation that is not published like an address with no page', async () => {
+    fixtures.redirect404 = true; fixtures.privateIntro = true
+    await expect(visit(['api-reference', 'endpoint', 'scrape'])).rejects.toThrow('NEXT_REDIRECT:/')
+    fixtures.privateIntro = false; fixtures.lookup = { node: null, reason: 'withheld' }
+    await expect(visit(['api-reference', 'endpoint', 'scrape'])).rejects.toThrow('NEXT_REDIRECT:/')
+  })
+
+  it('leaves the home page and a file name alone, so nothing can loop and an image stays a 404', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true
+    fixtures.root.mockResolvedValue(null)
+    await expect(visit([])).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(visit(['fr'])).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(visit(['images', 'missing.png'])).rejects.toThrow('NEXT_NOT_FOUND')
+  })
+
+  it('still sends an anonymous reader of a private site to sign in first', async () => {
+    fixtures.missing = true; fixtures.redirect404 = true; fixtures.privateDefault = true
+    await expect(visit(['no-such-page'])).rejects.toThrow('NEXT_REDIRECT:/api/reader/login?redirect=%2Fno-such-page')
+  })
+
+  it('renders a page that exists as before', async () => {
+    fixtures.redirect404 = true
+    expect(await render()).toContain('Authored scrape body')
+  })
 })
 
 describe('a description with inline code', () => {

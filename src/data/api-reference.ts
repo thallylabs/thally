@@ -6,7 +6,8 @@ import { API_GROUPS_MAX_DEPTH, operationKeyFromRef } from '@/lib/openapi/operati
 import type { DocsJsonApiGroup, NavigationGroup, NavigationItem, NavigationNode, NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
-import { pageReferenceState } from '@/lib/openapi/publication'
+import { hiddenOperationSpec, pageReferenceState, revealedOperations } from '@/lib/openapi/publication'
+import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
 import type { SupplementalSearchRecord } from '@thallylabs/core/search'
 
 export interface ApiNavigationItem {
@@ -63,15 +64,13 @@ const getSpecOperationNodes = cache(async (specId?: string): Promise<Array<ApiOp
   const spec = await getNormalizedSpec(specId)
   return spec.operations
     .filter((operation) => !operation.hidden)
-    .map((operation) => {
-      const slug = [operation.specId, ...(operation.slug ?? [])]
-      return {
-        operation,
-        slug,
-        href: `/api/${slug.join('/')}`,
-      }
-    })
+    .map(toOperationNode)
 })
+
+function toOperationNode(operation: NormalizedOperation): ApiOperationNode {
+  const slug = [operation.specId, ...(operation.slug ?? [])]
+  return { operation, slug, href: `/api/${slug.join('/')}` }
+}
 
 const isPageOnlySpec = (specId?: string) =>
   apiReferenceConfig.specs.find((spec) => spec.id === resolveSpecId(specId))?.pageOnly === true
@@ -165,15 +164,33 @@ export async function getApiOperationForFrontmatter(ref: OpenApiFrontmatterRef):
 }
 
 /**
- * `withheld`: the operation exists but is hidden or excluded on purpose, so its
- * page is not published. `unresolved`: no spec or operation matches (a missing
- * file, a typo, a spec this build cannot read); the page keeps its authored body.
+ * `withheld`: the operation exists but is excluded on purpose, so its page is
+ * not published. A hidden operation is not withheld: it stays out of generated
+ * navigation and pages, but a page that names it renders it. `unresolved`: no
+ * spec or operation matches (a missing file, a typo, a spec this build cannot
+ * read); the page keeps its authored body.
  */
 export type FrontmatterOperationLookup =
-  | { node: ApiOperationNode }
+  | { node: ApiOperationNode; /** A hidden operation: the playground only forwards requests to listed ones, so its page has no Try it. */ revealed?: true }
   | { node: null; reason: 'withheld' | 'unresolved' }
 
-/** Like `getApiOperationForFrontmatter`, but says why nothing was found. */
+/**
+ * The spec with the one operation a page names shown, for a page that names a hidden operation. Only that page gets it:
+ * the spec the rest of the site reads still hides the operation.
+ */
+const getRevealedSpec = cache(async (specId: string, keys: string): Promise<NormalizedSpec> => {
+  const config = getSpecConfig(apiReferenceConfig, specId)
+  // Revealing changes visibility only; authored labels, descriptions and slugs
+  // must stay identical to the normal operation lookup.
+  const operationOverrides = { ...config.operationOverrides, ...Object.fromEntries(keys.split('\n').map((key) => [key, { ...config.operationOverrides?.[key], hidden: false }])) }
+  const document = sanitizeSpecForPublication(await loadAuthoredSpecDocument(config), { overrides: operationOverrides })
+  return normalizeSpec({ config: { ...config, operationOverrides }, document })
+})
+
+/**
+ * Like `getApiOperationForFrontmatter`, but says why nothing was found, and renders a hidden operation (Mintlify's
+ * `x-hidden` only keeps it out of generated navigation). An excluded one is withheld.
+ */
 export async function lookupApiOperationForFrontmatter(ref: OpenApiFrontmatterRef): Promise<FrontmatterOperationLookup> {
   const node = await getApiOperationForFrontmatter(ref)
   if (node) return { node }
@@ -183,8 +200,14 @@ export async function lookupApiOperationForFrontmatter(ref: OpenApiFrontmatterRe
     config,
     document: await loadAuthoredSpecDocument(config).catch(() => undefined),
   })))
-  const state = pageReferenceState(ref, specs)
-  return { node: null, reason: state === 'hidden' || state === 'excluded' ? 'withheld' : 'unresolved' }
+  const hidden = hiddenOperationSpec(ref, specs)
+  if (hidden) {
+    const spec = await getRevealedSpec(hidden.config.id, Object.keys(revealedOperations(ref)).join('\n'))
+    const key = buildOperationKey(ref.method, ref.path, ref.webhook)
+    const revealed = spec.operations.find((operation) => ref.webhook ? operation.isWebhook && operation.path === ref.path : operation.key === key)
+    if (revealed) return { node: toOperationNode(revealed), revealed: true }
+  }
+  return { node: null, reason: pageReferenceState(ref, specs) === 'excluded' ? 'withheld' : 'unresolved' }
 }
 
 /**

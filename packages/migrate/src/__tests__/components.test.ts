@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -1354,6 +1354,30 @@ describe('repository component migration', () => {
     expect(body).toContain('const [count] = useState(0)')
   })
 
+  it.each([
+    "import React, { useState, useEffect } from 'react'",
+    "import React from 'react'",
+    "import { Fragment, useState } from 'react'",
+  ])('removes an unused react import that has a default or a non-hook name: %s', (statement) => {
+    const root = fixture({})
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const body = migrator.transform(`${statement}\n\nHello\n`, join(root, 'index.mdx'))
+    expect(body).not.toContain('react')
+    expect(body).toContain('Hello')
+  })
+
+  it.each([
+    ["import React, { useState } from 'react'\n\n{React.version}", '{React.version}'],
+    ["import { Fragment, useState } from 'react'\n\n<Fragment>x</Fragment>", '<Fragment>x</Fragment>'],
+    ["import React from 'react'\n\nexport const V = () => React.version\n\n{V()}", 'React.version'],
+  ])('keeps a react import the page uses: %s', (source, used) => {
+    const root = fixture({})
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).toContain("from 'react'")
+    expect(body).toContain(used)
+  })
+
   it('keeps imports inside an indented JSX code fence as part of the example', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
@@ -1990,6 +2014,34 @@ describe('repository component migration', () => {
   })
 })
 
+describe('pageHasComponentWork', () => {
+  it('sees what the component analysis acts on: import and export lines, event handlers and asset require()', () => {
+    for (const page of [
+      "import X from './x.jsx'\n\n<X />",
+      'export const A = () => <b>a</b>\n\n<A />',
+      '  import X from "x"',
+      '<button onClick={() => go()}>go</button>',
+      '<img src={require("./a.png")} />',
+    ]) expect(pageHasComponentWork(page), page).toBe(true)
+  })
+
+  it('does not let a fence opened inside a template literal hide a real import after it', () => {
+    expect(pageHasComponentWork("<CodeBlock code={`\n~~~\n`} />\n\nimport { A, B } from 'some-npm-pkg'\n\n<A />")).toBe(true)
+    expect(pageHasComponentWork('Text.\n\n```js\nnever closed\n\nimport x from "x"')).toBe(true)
+  })
+
+  it('finds nothing in prose, other tags and expressions, or in code', () => {
+    for (const page of [
+      'Set <Feature> here and call /x/{chainId?}',
+      'We import data and export it; the important part is onclick, not onClickable',
+      '<Card title="T" href="/a" />',
+      '```jsx\nimport X from "x"\n<b onClick={go}>go</b>\n```\n\nUse `export const a = 1` and `require("x")`.',
+      'Text.\n\n```js\nconst a = require("x")\n```\n\nMore text.',
+      '---\nimport: x\n---\n\ntext',
+    ]) expect(pageHasComponentWork(page), page).toBe(false)
+  })
+})
+
 describe('propsTargetExtractedClientComponent', () => {
   it('is true when a declared name is passed as a bare prop to a Migrated<hash> tag', () => {
     const body = '<Migrated0123456789ab RenderComponent={CustomBlock} />'
@@ -2104,7 +2156,7 @@ describe('scaffold-provided imports are kept untouched', () => {
     ['next/link used both as JSX and referenced from a declaration', "import Link from 'next/link'\n\nexport const Nav = () => <Link href=\"/a\">A</Link>\n\n<Nav />", "import Link from 'next/link'"],
     ['clsx used only in an expression', "import clsx from 'clsx'\n\n<div className={clsx('a', 'b')}>hi</div>", "import clsx from 'clsx'"],
     ['lucide-react icon passed as a prop', "import { Rocket } from 'lucide-react'\n\n<Card icon={Rocket}>x</Card>", "import { Rocket } from 'lucide-react'"],
-    ['react-dom used in a declaration', "import { createPortal } from 'react-dom'\n\nexport const P = ({children}) => createPortal(children, document.body)\n\n<P>x</P>", "import { createPortal } from 'react-dom'"],
+    ['react-dom used in a declaration', "import { createPortal } from 'react-dom'\n\nexport const P = ({children, target}) => createPortal(children, target)\n\n<P>x</P>", "import { createPortal } from 'react-dom'"],
     ['lucide-react subpath', "import { DynamicIcon } from 'lucide-react/dynamic'\n\n<DynamicIcon name=\"x\" />", "import { DynamicIcon } from 'lucide-react/dynamic'"],
     ['clsx subpath used in an expression', "import clsx from 'clsx/lite'\n\n<div className={clsx('a')}>x</div>", "import clsx from 'clsx/lite'"],
   ])('%s', (_label, source, expectedImport) => {

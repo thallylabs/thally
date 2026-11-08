@@ -343,6 +343,8 @@ export interface DocsJsonConfig {
     shortcuts?: Array<DocsNavigationShortcut>
   }
   redirects?: Array<DocsJsonRedirect>
+  /** Mintlify `errors`: with `404.redirect` an address that has no page goes to the home page instead of the 404 page. */
+  errors?: { '404'?: { redirect?: boolean } }
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
   /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`, `llms-full`, `mcp`, `cursor`, `vscode`) in display order. */
@@ -821,8 +823,8 @@ let _allEntries: Array<DocEntry> | null = null
 // ---------------------------------------------------------------------------
 
 /**
- * A page whose `openapi:` frontmatter resolves only to hidden or excluded
- * operations 404s (see the docs page route), so no listing may offer it. The
+ * A page whose `openapi:` frontmatter resolves only to excluded operations
+ * 404s (see the docs page route), so no listing may offer it. The
  * build decides this with the route's own lookup, spec prefixes included, and
  * records the withheld page ids (see `UNPUBLISHED_PAGES_FILE`). Self-hosted
  * builds read that record synchronously from the embedded sources, so the
@@ -853,7 +855,7 @@ function recordedUnpublishedPages(): ReadonlySet<string> {
 }
 
 /**
- * False for a page whose documented operation is hidden or excluded. A
+ * False for a page whose documented operation is excluded. A
  * secondary-locale route renders its own translation when one exists (the
  * build records it as `<locale>/<id>`) and the primary page otherwise, so
  * `locale` judges the file that route would render.
@@ -1691,6 +1693,11 @@ export function getFontsConfig(): DocsJsonFonts {
 
 export function getRedirectsConfig(): Array<DocsJsonRedirect> {
   return docsConfig().redirects ?? []
+}
+
+/** Whether docs.json sets `errors.404.redirect`: an address with no page goes to the home page instead of the 404 page. */
+export function getNotFoundRedirect(): boolean {
+  return docsConfig().errors?.['404']?.redirect === true
 }
 
 /** Raw, unvalidated `integrations` block; callers must run it through `resolveAnalyticsConfig`. */

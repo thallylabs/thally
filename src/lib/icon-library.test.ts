@@ -86,6 +86,10 @@ describe('Font Awesome icon resolution', () => {
     })
   })
 
+  it('maps a Pro-only name to the Free solid icon that matches it', () => {
+    for (const style of STYLES) expect(resolution('mountains', style), String(style)).toEqual({ kind: 'solid', file: 'mountain' })
+  })
+
   it('keeps Pro names that are bundled Lucide glyphs visible under Font Awesome', () => {
     expect(Object.fromEntries(['rocket-launch', 'party-horn', 'brackets-curly', 'code-simple', 'grid-round', 'link-simple', 'circle-x'].map((name) => [name, resolution(name, 'regular')]))).toEqual({
       'rocket-launch': { kind: 'lucide', file: 'rocket' },
@@ -159,6 +163,29 @@ describe('Font Awesome icon resolution', () => {
       window: { kind: 'lucide', file: 'app-window' },
       'user-crown': { kind: 'lucide', file: 'user-star' },
     })
+  })
+
+  // Pro-only names the Particle Network and Blockscout docs use: the mapped glyphs were checked to exist in the pinned Free 7.3.1 and Lucide 1.47.0 packages.
+  it('maps the Pro-only names the Particle Network and Blockscout docs use to a glyph that exists', () => {
+    const lucide = (file: string) => ({ kind: 'lucide', file })
+    const solid = (file: string) => ({ kind: 'solid', file })
+    const expected = {
+      'atom-simple': lucide('atom'), 'paper-plane-top': lucide('send'), 'file-user': lucide('file-user'),
+      'block-question': solid('circle-question'), coin: lucide('coins'), 'coin-front': lucide('coins'),
+      'chart-candlestick': lucide('chart-candlestick'), binary: lucide('binary'), 'honey-pot': solid('jar'),
+      'arrow-down-to-bracket': lucide('download'),
+      'rectangle-pro': solid('rectangle-list'), 'person-running-fast': solid('person-running'),
+      'user-chef': lucide('chef-hat'), 'hat-chef': lucide('chef-hat'), 'arrow-up-right': lucide('arrow-up-right'),
+      'signal-bars': lucide('signal'), 'magnifying-glass-arrows-rotate': solid('magnifying-glass'), bird: lucide('bird'),
+      'page-caret-up': lucide('file-up'), 'traffic-light-go': solid('traffic-light'), notes: lucide('notebook-text'),
+      'alien-8bit': lucide('ghost'), 'light-switch': lucide('toggle-right'), 'gear-api': solid('gear'),
+      // A Pro alias of `user-hair-mullet`, so a person, not the robot the Blockscout content used instead.
+      'trian-balbot': lucide('user'), whale: solid('fish'), blueberries: lucide('grape'), 'link-horizontal': lucide('link-2'),
+      'book-open-cover': lucide('book-open'), 'code-pull-request-closed': lucide('git-pull-request-closed'),
+    }
+    for (const style of STYLES) {
+      expect(Object.fromEntries(Object.keys(expected).map((name) => [name, resolution(name, style)]))).toEqual(expected)
+    }
   })
 
   it('resolves all 91 names to an asset that exists or a glyph, whatever style is requested', () => {

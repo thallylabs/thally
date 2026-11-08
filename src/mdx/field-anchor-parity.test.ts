@@ -13,8 +13,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { builtinMdxComponents } from '@/components/mdx/builtin-components'
 import { PageSlotsProvider } from '@/components/mdx/page-slots'
 import { componentIds as coreComponentIds, constantString as coreConstantString, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, numberHeadingIds as coreNumberHeadings, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
-import { extractHeadingAnchors, runCheck } from '../../packages/create-thally-docs/src/check'
-import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '../lib/field-anchor'
+import { extractHeadingAnchors, numberTabIds as checkNumberTabIds, runCheck } from '../../packages/create-thally-docs/src/check'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, numberTabIds, uniqueFieldId } from '../lib/field-anchor'
 import { rehypePlugins } from './rehype'
 import { remarkPlugins } from './remark'
 
@@ -63,6 +63,11 @@ describe('the runtime helpers read a field as @thallylabs/core does', () => {
     const runtime = new Set(['param-b-1'])
     const core = new Set(['param-b-1'])
     expect(bases.map((base) => uniqueFieldId(base, runtime))).toEqual(bases.map((base) => coreUnique(base, core)))
+  })
+
+  it('numbers tabs the same way', () => {
+    const bases = ['solana', 'solana', 'bitcoin', 'solana-2', 'solana']
+    expect(numberTabIds(bases, new Set(['bitcoin']))).toEqual(checkNumberTabIds(bases, new Set(['bitcoin'])))
   })
 
   it('numbers headings the same way', () => {
@@ -320,7 +325,7 @@ describe('field ids next to a component that gives itself an id', () => {
   })
 
   it('reserves no id for a component whose id is a React one or has no literal title', async () => {
-    const page = '<Accordion title="日本語">\n\nText.\n\n</Accordion>\n\n<Tabs><Tab title="Param name">x</Tab></Tabs>\n\n<Expandable title="Param name">x</Expandable>'
+    const page = '<Accordion title="日本語">\n\nText.\n\n</Accordion>\n\n<Expandable title="Param name">x</Expandable>'
     expect(paramIds(await renderedHtmlIds(`${page}\n\n${field}`))).toEqual(['param-name'])
   })
 
@@ -467,5 +472,69 @@ describe('thally check and the renderer give a page the same ids', () => {
     expect(await renderedHtmlIds(pages[1][1])).toEqual(['param-name'])
     expect(await renderedHtmlIds(pages[10][1])).toEqual(['initialize-instance'])
     expect(await renderedHtmlIds('## Param a~b~c\n\n<ParamField body="abc" />')).toEqual(['param-abc', 'param-abc-1'])
+  })
+})
+
+describe('tab ids', () => {
+  const tabs = (...titles: Array<string>) => `<Tabs>${titles.map((title) => `<Tab title=${title}>x</Tab>`).join('')}</Tabs>`
+
+  /** The `id` of every tab button in the HTML the page renders, in document order. */
+  async function renderedTabIds(source: string): Promise<Array<string>> {
+    const { default: Content } = await evaluate(source, { ...jsxRuntime, remarkPlugins, rehypePlugins } as never)
+    const html = renderToStaticMarkup(createElement(PageSlotsProvider, null, createElement(Content, { components: builtinMdxComponents })))
+    return [...html.matchAll(/<button[^>]*\brole="tab"[^>]*>/g)].map((match) => /\bid="([^"]+)"/.exec(match[0])![1])
+  }
+
+  // Read from https://docs.reown.com/appkit/next/core/hooks and /advanced/api/sign/overview: Mintlify gives a tab the slug of its title, `-2` for a repeat.
+  it('gives a tab the slug of its title, and numbers a repeat -2', async () => {
+    const source = [tabs('"EVM (eip155)"', '"Ethers v5"', '".NET"', '"TON"'), tabs('"Solana"', '"Bitcoin"'), tabs('"Solana"')].join('\n\n')
+    expect(await renderedIds(source)).toEqual(['evm-eip155', 'ethers-v5', 'net', 'ton', 'solana', 'bitcoin', 'solana-2'])
+    expect(await renderedTabIds(source)).toEqual(['evm-eip155', 'ethers-v5', 'net', 'ton', 'solana', 'bitcoin', 'solana-2'])
+  })
+
+  it('reads a title written in braces as the string it is, and skips one that is not a constant', async () => {
+    expect(await renderedIds('<Tabs><Tab title={"Bitcoin"}>x</Tab><Tab title={`TON`}>x</Tab><Tab title={name}>x</Tab><Tab>x</Tab><Tab title="???">x</Tab></Tabs>')).toEqual(['bitcoin', 'ton'])
+  })
+
+  it('keeps an id the author gave a tab, which the other tabs skip', async () => {
+    const source = '<Tabs><Tab title="One" id="mine">x</Tab><Tab title="Mine">y</Tab><Tab title="Two" id={someId}>z</Tab></Tabs>'
+    expect(await renderedIds(source)).toEqual(['mine', 'mine-2'])
+  })
+
+  it('leaves a heading its own id when a tab would take the same one, wherever each sits on the page', async () => {
+    const heading = '## Solana\n\nText.'
+    expect(await renderedIds(`${heading}\n\n${tabs('"Solana"')}`)).toEqual(['solana', 'solana-2'])
+    expect(await renderedIds(`${tabs('"Solana"')}\n\n${heading}`)).toEqual(['solana-2', 'solana'])
+  })
+
+  it('leaves a field its own id when a tab would take the same one', async () => {
+    const field = '<ParamField body="name" type="string">The name.</ParamField>'
+    expect(await renderedIds(`${tabs('"Param name"')}\n\n${field}`)).toEqual(['param-name-2', 'param-name'])
+  })
+
+  it('skips an id authored on any other element, and one a component makes', async () => {
+    const source = `<Card title="Card" id="solana" />\n\n<Accordion title="TON">\n\nText.\n\n</Accordion>\n\n${tabs('"Solana"', '"TON"')}`
+    expect(await renderedIds(source)).toEqual(['solana', 'solana-2', 'ton-2'])
+  })
+
+  it.each([
+    ['tabs', tabs('"EVM (eip155)"', '"Solana"') + '\n\n' + tabs('"Solana"')],
+    ['a heading with the same slug', '## Solana\n\n' + tabs('"Solana"', '"Bitcoin"')],
+    ['a tab before the heading with its slug', tabs('"Solana"') + '\n\n## Solana'],
+    ['a field with the same slug', tabs('"Param name"') + '\n\n<ParamField body="name" />'],
+    ['an authored tab id', '<Tabs><Tab title="One" id="mine">x</Tab><Tab title="Mine">y</Tab></Tabs>'],
+    ['an Accordion with the same slug', '<Accordion title="Solana">\n\nText.\n\n</Accordion>\n\n' + tabs('"Solana"')],
+    ['tabs in a component', '<Accordion title="Setup">\n\n' + tabs('"npm"', '"yarn"') + '\n\n</Accordion>'],
+  ])('thally check accepts the ids the renderer gives %s', async (_name, source) => {
+    const ids = await renderedTabIds(source)
+    const anchors = extractHeadingAnchors(source)
+    for (const id of ids) expect(anchors.has(id), id).toBe(true)
+    for (const id of ids) expect(await brokenAnchorOutput(source, id), id).not.toContain('Broken anchor')
+  })
+
+  it('still reports a tab id no tab has', async () => {
+    expect(await brokenAnchorOutput(tabs('"Solana"'), 'solana')).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(tabs('"Solana"'), 'solana-2')).toContain('Broken anchor')
+    expect(await brokenAnchorOutput(tabs('"Solana"'), 'bitcoin')).toContain('Broken anchor')
   })
 })

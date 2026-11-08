@@ -311,6 +311,43 @@ describe('config mapping', () => {
     expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
   })
 
+  it('says when a Mintlify theme has no exact Thally equivalent, and stays quiet for the two that do', () => {
+    const themeWarnings = (name: string) => site({ 'docs.json': JSON.stringify({ ...nav, theme: name }), ...intro }).warnings.filter((warning) => /theme/.test(warning.message))
+    expect(themeWarnings('aspen').map((warning) => warning.message)).toEqual([
+      'theme "aspen" has no exact Thally equivalent, so "maple" was used, which is the closest. Compare the look of the migrated site with the live one.',
+    ])
+    expect(themeWarnings('luma')).toHaveLength(1)
+    expect(themeWarnings('maple')).toEqual([])
+    expect(themeWarnings('mint')).toEqual([])
+  })
+
+  it('cuts a long theme name in the warning', () => {
+    const [warning] = site({ 'docs.json': JSON.stringify({ ...nav, theme: 'x'.repeat(500) }), ...intro }).warnings.filter((entry) => /theme/.test(entry.message))
+    expect(warning.message).toContain(`theme "${'x'.repeat(60)}" has no exact`)
+  })
+
+  it('carries errors.404.redirect into docs.json and says which other errors settings were not carried', () => {
+    const errors = (value: unknown) => site({ 'docs.json': JSON.stringify({ ...nav, errors: value }), ...intro })
+    const carried = errors({ '404': { redirect: true } })
+    expect(carried.docsConfig.errors).toEqual({ '404': { redirect: true } })
+    expect(carried.warnings.filter((warning) => /errors/.test(warning.message))).toEqual([])
+    const config = JSON.parse(renderMigrationFiles(carried).find((file) => file.path === 'docs.json')!.content.toString())
+    expect(config.errors).toEqual({ '404': { redirect: true } })
+
+    const partly = errors({ '404': { redirect: true, title: 'Gone', description: 'Nothing here' }, '500': { redirect: true } })
+    expect(partly.docsConfig.errors).toEqual({ '404': { redirect: true } })
+    expect(partly.warnings.filter((warning) => /errors/.test(warning.message)).map((warning) => warning.message)).toEqual([
+      'docs.json errors.404.title, errors.404.description, errors.500 were not carried over: Thally carries only errors.404.redirect (true or false).',
+    ])
+
+    const notBoolean = errors({ '404': { redirect: 'yes' } })
+    expect(notBoolean.docsConfig.errors).toBeUndefined()
+    expect(notBoolean.warnings.filter((warning) => /errors/.test(warning.message)).map((warning) => warning.message)).toEqual([
+      'docs.json errors.404.redirect was not carried over: Thally carries only errors.404.redirect (true or false).',
+    ])
+    expect(errors(undefined).docsConfig.errors).toBeUndefined()
+  })
+
   it('redirects / to the introduction page like Mintlify does', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'guide'] } }), 'introduction.mdx': page('Intro'), 'guide.mdx': page('Guide') })
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: true })
@@ -323,6 +360,86 @@ describe('config mapping', () => {
       dark: { accent: '#ffffff', primary: '#ffffff' },
     })
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
+  })
+
+  describe('relative component hrefs', () => {
+    const body = (title: string, text: string) => `---\ntitle: ${title}\n---\n\n${text}\n`
+    const bodyOf = (bundle: MigrationBundle, id: string) => bundle.pages.find((candidate) => candidate.id === id)?.body
+
+    it('rewrites ./ and ../ hrefs to the root-absolute path the browser reaches, and leaves Markdown links', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'ua-course/overview', 'guides/index'] } }),
+        'intro.mdx': body('Intro', '<Card title="One" href="./lesson-1" />'),
+        'ua-course/overview.mdx': body('Overview', '<Card title="One" href="./lesson-1" />\n<Card title="Up" href={"../ref/x?tab=1#top"} />\n\n[kept](./lesson-2)\n\n```mdx\n<Card href="./code" />\n```'),
+        'guides/index.mdx': body('Guides', '<Card title="One" href="./x" />'),
+      })
+      expect(bodyOf(bundle, 'intro')).toContain('href="/lesson-1"')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('href="/ua-course/lesson-1"')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('href={"/ref/x?tab=1#top"}')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('[kept](./lesson-2)')
+      expect(bodyOf(bundle, 'ua-course/overview')).toContain('<Card href="./code" />')
+      // `guides/index.mdx` is the page `guides`, served at `/guides`: the browser resolves ./x against `/`.
+      expect(bodyOf(bundle, 'guides')).toContain('href="/x"')
+      expect(bundle.warnings.filter((warning) => /relative/i.test(warning.message))).toEqual([])
+    })
+
+    it('does not read a relative href as a mount prefix: a dead ./a stays under its own directory', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['a', 'guides/intro', 'fr/guides/a', 'guides/b'] } }),
+        'a.mdx': body('Root A', 'A.'),
+        'guides/b.mdx': body('B', 'B.'),
+        'guides/intro.mdx': body('Intro', '<Card href="./a" /> <Card href="./b.mdx" />'),
+        'fr/guides/a.mdx': body('Fr', '<Card href="./b" />'),
+      })
+      expect(bodyOf(bundle, 'guides/intro')).toContain('<Card href="/guides/a" /> <Card href="/guides/b.mdx" />')
+      expect(bodyOf(bundle, 'fr/guides/a')).toContain('<Card href="/fr/guides/b" />')
+    })
+
+    it('clamps a href that climbs above the site root at the root, silently, as the browser does', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'a/b'] } }),
+        'intro.mdx': body('Intro', '<Card href="../x" />\n<Card href="./ok" />'),
+        'a/b.mdx': body('B', '<Card href="../../z" />'),
+      })
+      expect(bodyOf(bundle, 'intro')).toContain('<Card href="/x" />\n<Card href="/ok" />')
+      expect(bodyOf(bundle, 'a/b')).toContain('<Card href="/z" />')
+      expect(bundle.warnings.filter((warning) => /relative|climb/i.test(warning.message))).toEqual([])
+    })
+  })
+
+  it('keeps a page that only names <TabItem> in prose', () => {
+    const bundle = site({ 'docs.json': JSON.stringify(nav), 'intro.mdx': '---\ntitle: Intro\n---\n\nThe <TabItem> tag is used.\n' })
+    expect(bundle.pages.map((candidate) => candidate.id)).toEqual(['intro'])
+    expect(bundle.pages[0].body).toContain('The &lt;TabItem&gt; tag is used.')
+    expect(codes(bundle, 'skipped-file')).toEqual([])
+  })
+
+  describe('object-form page icon', () => {
+    const icon = (library: string) => page('Intro', `icon:\n  name: rocket\n  style: solid\n  library: ${library}\n`)
+
+    it('carries name and style, silent when the page library is the one the site uses', () => {
+      for (const [config, library] of [[{}, 'fontawesome'], [{ icons: { library: 'lucide' } }, 'lucide']] as const) {
+        const bundle = site({ 'docs.json': JSON.stringify({ ...nav, ...config }), 'intro.mdx': icon(library) })
+        expect(bundle.pages[0]).toMatchObject({ icon: 'rocket', iconType: 'solid' })
+        expect(bundle.warnings.filter((warning) => /icon library/.test(warning.message))).toEqual([])
+      }
+    })
+
+    it('names the library the migrated site will use, not an unsupported docs.json value', () => {
+      const bundle = site({ 'docs.json': JSON.stringify({ ...nav, icons: { library: 'duotone' } }), 'intro.mdx': icon('fontawesome') })
+      expect(bundle.docsConfig.icons).toBeUndefined()
+      expect(bundle.warnings.find((warning) => /icon library/.test(warning.message))?.message).toMatch(/site uses "lucide"/)
+    })
+
+    it('warns, naming the page, when the page library differs from docs.json icons.library', () => {
+      const bundle = site({ 'docs.json': JSON.stringify({ ...nav, icons: { library: 'lucide' } }), 'intro.mdx': icon('fontawesome') })
+      expect(bundle.pages[0]).toMatchObject({ icon: 'rocket', iconType: 'solid' })
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        code: 'unsupported-config',
+        source: 'intro.mdx',
+        message: expect.stringMatching(/Page "intro".*"fontawesome".*site uses "lucide"/),
+      }))
+    })
   })
 
   describe('brand logo, favicon and background', () => {
@@ -390,6 +507,29 @@ describe('config mapping', () => {
       })
       expect(bundle.docsConfig.favicon).toEqual({ light: '/icons/dark.png', dark: '/icons/dark.png' })
       expect(brandWarning(bundle)[0].message).toMatch(/imported favicon \(\/icons\/dark\.png\) is used for both/)
+    })
+
+    it('imports a logo and favicon written with a leading ./ (Blockscout)', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: './logo/light.png', dark: '././logo/dark.png' }, favicon: './logo/Color_BS_symbol.svg' }),
+        'logo/light.png': png,
+        'logo/dark.png': png,
+        'logo/Color_BS_symbol.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+        ...intro,
+      })
+      expect(bundle.docsConfig.favicon).toEqual({ light: '/logo/Color_BS_symbol.svg' })
+      expect(bundle.docsConfig.navbar?.logo).toMatchObject({ light: '/logo/light.png', dark: '/logo/dark.png' })
+      expect(brandWarning(bundle)).toEqual([])
+    })
+
+    it('still rejects a favicon that climbs out of the site with ../', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, favicon: '../favicon.png' }),
+        'favicon.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.favicon).toBeUndefined()
+      expect(brandWarning(bundle)[0].message).toContain('../favicon.png')
     })
 
     it('warns that logo.href is dropped because the header logo always links home', () => {
@@ -884,6 +1024,40 @@ describe('script hardening', () => {
       'my scripts/a b#c.js': 'console.log(1)',
     })
     expect(bundle.docsConfig.customScripts).toEqual([{ src: '/my%20scripts/a%20b%23c.js', strategy: 'afterInteractive' }])
+  })
+})
+
+describe('tracking scripts carried over from the content directory', () => {
+  const trackers = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => /tracks visitors/.test(warning.message))
+  const withScripts = (scripts: Record<string, string>) => site({ 'docs.json': JSON.stringify({ navigation: { pages: ['intro'] } }), 'intro.mdx': page('Intro'), ...scripts })
+
+  it('warns once per script that loads or names a known tracker, naming the trackers, and still carries the script', () => {
+    const bundle = withScripts({
+      'posthog.js': '!function(t,e){e.posthog=e}(document,window);posthog.init("phc_x",{api_host:"https://us.i.posthog.com"})',
+      'content/intercom-opener.js': 'window.Intercom("show")',
+      'analytics.js': 'var s=document.createElement("script");s.src="https://www.googletagmanager.com/gtag/js?id=G-X";window.mixpanel=1',
+      'plain.js': 'document.querySelector(".segment").remove()',
+    })
+    expect(bundle.docsConfig.customScripts?.map((script) => script.src).sort()).toEqual(['/analytics.js', '/content/intercom-opener.js', '/plain.js', '/posthog.js'])
+    expect(trackers(bundle).map((warning) => warning.message).sort()).toEqual([
+      'Script analytics.js loads or names Google Tag Manager/Analytics, Mixpanel, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+      'Script content/intercom-opener.js loads or names Intercom, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+      'Script posthog.js loads or names PostHog, which tracks visitors. It was carried over and now runs on every page of the migrated site. Delete the file and its docs.json customScripts entry if you do not want that.',
+    ])
+    expect(trackers(bundle).every((warning) => warning.code === 'unsupported-config')).toBe(true)
+  })
+
+  it.each([
+    ['Segment', 'analytics.load("x");var u="https://cdn.segment.com/analytics.js/v1/x/analytics.min.js"'],
+    ['Hotjar', 'h._hjSettings={hjid:1};a.src="https://static.hotjar.com/c/hotjar-1.js"'],
+    ['Amplitude', 'amplitude.getInstance().init("k")'],
+    ['Google Tag Manager/Analytics', 'window.dataLayer=[];function gtag(){}gtag("js",new Date())'],
+  ])('knows %s', (name, source) => {
+    expect(trackers(withScripts({ 'site.js': source })).map((warning) => warning.message)).toEqual([expect.stringContaining(`loads or names ${name},`)])
+  })
+
+  it('says nothing about a script that names no tracker', () => {
+    expect(trackers(withScripts({ 'site.js': 'console.log(1)' }))).toEqual([])
   })
 })
 

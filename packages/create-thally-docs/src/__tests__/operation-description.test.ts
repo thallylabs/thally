@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { operationDescription, parseDocReference, type CheckSpec } from '../openapi-publication.js'
+import { hiddenOperationDescription, operationDescription, parseDocReference, type CheckSpec } from '../openapi-publication.js'
 
 const ok = { responses: { 200: { description: 'ok' } } }
 const spec = (source: string, document: Record<string, unknown>, extra: Partial<CheckSpec> = {}): CheckSpec => ({
@@ -102,5 +102,34 @@ describe('operationDescription for a webhook with several methods', () => {
     expect(describe_('webhook order.updated', [hiddenPost])).toBeUndefined()
     const excludedPost = webhooks({ post: { operationId: 'alpha', 'x-excluded': true, description: 'Excluded text.', ...ok }, put: { operationId: 'zeta', description: 'Put text.', ...ok } })
     expect(describe_('webhook order.updated', [excludedPost])).toBe('Put text.')
+  })
+})
+
+
+describe('hidden operation description overrides', () => {
+  it('keeps the description override when a page reveals its operation', () => {
+    const only = spec('openapi.yaml', { paths: { '/legacy': { get: { 'x-hidden': true, description: 'Original text.', ...ok } } } }, {
+      overrides: { 'GET /legacy': { hidden: true, description: 'Use the replacement endpoint.' } },
+    })
+    expect(hiddenOperationDescription(parseDocReference('GET /legacy')!, [only])).toBe('Use the replacement endpoint.')
+    expect(describe_('GET /legacy', [only])).toBeUndefined()
+  })
+
+  it('keeps webhook title and group overrides that determine which method is described', () => {
+    const only = spec('openapi.yaml', { webhooks: { quiet: {
+      post: { 'x-hidden': true, summary: 'Alpha', description: 'Post text.', ...ok },
+      put: { 'x-hidden': true, summary: 'Zeta', description: 'Put text.', ...ok },
+    } } }, { overrides: {
+      'WEBHOOK POST quiet': { group: 'Z group', title: 'Zeta', description: 'Overridden post.' },
+      'WEBHOOK PUT quiet': { group: 'A group', title: 'Alpha', description: 'Overridden put.' },
+    } })
+    expect(hiddenOperationDescription(parseDocReference('webhook quiet')!, [only])).toBe('Overridden put.')
+  })
+
+  it('does not reveal an excluded operation even when an override supplies text', () => {
+    const only = spec('openapi.yaml', { paths: { '/excluded': { get: { 'x-excluded': true, ...ok } } } }, {
+      overrides: { 'GET /excluded': { hidden: false, description: 'Do not publish.' } },
+    })
+    expect(hiddenOperationDescription(parseDocReference('GET /excluded')!, [only])).toBeUndefined()
   })
 })

@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds } from '../lib/field-anchor'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, numberTabIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -380,11 +380,129 @@ function tokensToHast(lines: Array<Array<ThemedToken>>, marks: LineMarks): Array
 const CODE_NOTATION =
   /(?:\/\/|#|--|\/\*|<!--|\{[ \t]*\/\*)[ \t]*\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\](?:[ \t]*(?:\*\/[ \t]*\}|\*\/|-->))?[ \t]*(\r?)$/
 
+// A marker anywhere in a comment, which is how Shiki reads it: `// [!code --] v1`, `# now required [!code ++]`.
+const NOTATION_MARKER = /\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\]/g
+
+// What a comment is once its markers are taken out and nothing else is left.
+const EMPTY_COMMENT = /^(?:\/\/|#|--|\/\*\s*\*\/|<!--\s*-->)$/
+
+/** Whether a comment opener (`//`, `/*`, `<!--`, `#`, `--`) starts at `index`. */
+function isCommentOpener(line: string, index: number): boolean {
+  const char = line[index]
+  if (char === '/') return line[index + 1] === '/' || line[index + 1] === '*'
+  if (char === '<') return line.startsWith('<!--', index)
+  if (char !== '#' && !line.startsWith('--', index)) return false
+  // `#include`, `#main`, `--header`, `x--` are code as often as comments: a `#` or `--` is
+  // one only after whitespace and before whitespace (`# note`, `-- note`).
+  const before = line[index - 1]
+  const after = line[index + (char === '#' ? 1 : 2)]
+  return (before === undefined || before === ' ' || before === '\t') && (after === undefined || after === ' ' || after === '\t')
+}
+
+interface NotationComment {
+  start: number
+  end: number
+  isBlock: boolean
+  markers: Array<RegExpMatchArray>
+}
+
+/**
+ * Comment ranges outside quoted strings, with only the markers each range
+ * actually contains. A closed block/HTML comment gives control back to code;
+ * neither its following string nor a later comment belongs to that range.
+ * Both the source and marker list advance only forwards.
+ */
+function notationComments(line: string): Array<NotationComment> {
+  const found = [...line.matchAll(NOTATION_MARKER)]
+  const comments: Array<NotationComment> = []
+  let quote = ''
+  let next = 0
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (quote) {
+      if (char === '\\') index += 1
+      else if (char === quote) quote = ''
+    } else if (char === '"' || char === "'" || char === '`') {
+      quote = char
+    } else if (isCommentOpener(line, index)) {
+      const closer = line.startsWith('/*', index) ? '*/' : line.startsWith('<!--', index) ? '-->' : undefined
+      const close = closer ? line.indexOf(closer, index + (closer === '*/' ? 2 : 4)) : -1
+      const end = close < 0 ? line.length : close + closer!.length
+      const markers: Array<RegExpMatchArray> = []
+      while (next < found.length && found[next].index! < end) {
+        if (found[next].index! >= index) markers.push(found[next])
+        next += 1
+      }
+      comments.push({ start: index, end, isBlock: closer !== undefined, markers })
+      index = end - 1
+    }
+  }
+  return comments
+}
+
+/**
+ * Strip markers only inside their own comment ranges, preserving intervening
+ * code and strings. Comment-only lines mark the next line; code after a closed
+ * comment makes it an inline annotation instead.
+ */
+function stripCommentMarkers(line: string): { text: string; markers: Array<RegExpMatchArray>; commentOnly: boolean } | null {
+  const comments = notationComments(line)
+  const markers = comments.flatMap((comment) => comment.markers)
+  if (markers.length === 0) return null
+  let text = ''
+  let outside = ''
+  let last = 0
+  const contentEnd = line.trimEnd().length
+  for (const comment of comments) {
+    const before = line.slice(last, comment.start)
+    outside += before
+    text += before
+    let kept = ''
+    let cursor = comment.start
+    for (const marker of comment.markers) {
+      kept += line.slice(cursor, marker.index!)
+      cursor = marker.index! + marker[0].length
+      // `// [!code ++] note` leaves one space, not two.
+      if (kept.endsWith(' ') || kept.endsWith('\t')) while (line[cursor] === ' ' || line[cursor] === '\t') cursor += 1
+    }
+    kept += line.slice(cursor, comment.end)
+    // An inline block can separate tokens (`const/* marker */value`), so
+    // retain its delimiters when more code follows instead of joining code.
+    const canDrop = !comment.isBlock || comment.end >= contentEnd
+    text += canDrop && comment.markers.length > 0 && EMPTY_COMMENT.test(kept.trimEnd()) ? '' : kept
+    last = comment.end
+  }
+  outside += line.slice(last)
+  text += line.slice(last)
+  return { text: text.trimEnd(), markers, commentOnly: /^(?:\{\s*\})?$/.test(outside.trim()) }
+}
+
+/**
+ * Where a trailing marker's comment can start, so `CODE_NOTATION` need not scan the
+ * whole line for each of many markers: the last `[!code` is in it, with its opener
+ * and whitespace just before. Starts a little early, never late. Past the end when
+ * the line has no marker.
+ */
+function trailingSearchStart(line: string): number {
+  let at = line.lastIndexOf('[!code')
+  if (at < 0) return line.length
+  const skipSpaces = () => {
+    while (at > 0 && (line[at - 1] === ' ' || line[at - 1] === '\t')) at -= 1
+  }
+  skipSpaces()
+  at = Math.max(0, at - 4) // `<!--`
+  skipSpaces()
+  return Math.max(0, at - 1) // the `{` of `{/*`
+}
+
 /**
  * Strip notation comments from a fence and report which lines they mark.
  * Follows Shiki's notation rules: a marker after code marks that line (and,
  * with `:N`, the N-1 lines after it); a line that holds only a marker comment
  * is removed and marks the following line(s), counting `:N` from the next line.
+ * A marker among other comment text is stripped too, and the text stays: on a
+ * line of code it marks that line, on a line that is only a comment it marks
+ * the line below, and the comment line stays unmarked.
  * Mark sets, and any `{n}` / `focus={n}` authored in the fence meta, refer to
  * the RENDERED lines, i.e. after marker-only lines are removed.
  * Returns null when the fence has no markers, leaving plain fences
@@ -404,17 +522,50 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
     // Strip every trailing marker (`a // [!code ++] // [!code focus]`).
     // The current rendered line number is `out.length + 1`; when the line is
     // marker-only it is dropped, so that same number is the next line's.
+    // Ranges are added once per line below, so a line of many markers costs no more than its length.
+    const ranges = new Map<string, { target: Set<number>; from: number; count: number }>()
+    const mark = (kind: keyof typeof kinds, from: number, count: string | undefined) => {
+      const key = `${kind}@${from}`
+      const length = Math.min(Number(count ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
+      const range = ranges.get(key)
+      if (!range) ranges.set(key, { target: kinds[kind], from, count: length })
+      else if (length > range.count) range.count = length
+    }
+    // The trailing fast path must share the lexical guard: an opener inside
+    // a string, or before a closed block, cannot turn literal text into a mark.
+    const commentByMarker = new Map(notationComments(line).flatMap((comment) => comment.markers.map((marker) => [marker.index!, comment] as const)))
     let rest = line
     let carriageReturn = ''
-    for (let match = CODE_NOTATION.exec(rest); match; match = CODE_NOTATION.exec(rest)) {
+    for (let from = trailingSearchStart(rest); from < rest.length; from = trailingSearchStart(rest)) {
+      const match = CODE_NOTATION.exec(rest.slice(from))
+      if (!match) break
+      const comment = commentByMarker.get(from + match.index + match[0].indexOf('[!code'))
+      // A `//` written inside a block is comment text, not a new opener
+      // whose removal may strand the surrounding block's opening delimiter.
+      if (!comment || (comment.isBlock && from + match.index > comment.start)) break
       found = true
       if (rest === line) carriageReturn = match[3]
-      const count = Math.min(Number(match[2] ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
-      const target = kinds[match[1] as keyof typeof kinds]
-      for (let offset = 0; offset < count; offset += 1) target.add(out.length + 1 + offset)
-      let end = match.index
+      mark(match[1] as keyof typeof kinds, out.length + 1, match[2])
+      let end = from + match.index
       while (end > 0 && (rest[end - 1] === ' ' || rest[end - 1] === '\t')) end -= 1
       rest = rest.slice(0, end)
+    }
+    // What is left of a comment that holds more than the marker: `x // [!code --] v1`, `# text [!code ++]`.
+    // Outside any comment (a marker in a string literal) nothing changes.
+    if (rest.includes('[!code')) {
+      const body = rest.endsWith('\r') ? rest.slice(0, -1) : rest
+      const stripped = stripCommentMarkers(body)
+      if (stripped) {
+        found = true
+        if (!carriageReturn) carriageReturn = body === rest ? '' : '\r'
+        // A comment-only line stays when it has text, so the line below it is two ahead; with none left it is dropped, and the line below takes its place.
+        const target = out.length + 1 + (stripped.commentOnly && stripped.text.trim() !== '' ? 1 : 0)
+        for (const marker of stripped.markers) mark(marker[1] as keyof typeof kinds, target, marker[2])
+        rest = stripped.text
+      }
+    }
+    for (const { target, from, count } of ranges.values()) {
+      for (let offset = 0; offset < count; offset += 1) target.add(from + offset)
     }
     if (rest === line) out.push(line)
     else if (rest !== '') out.push(rest + carriageReturn)
@@ -844,11 +995,18 @@ interface HeadingTarget {
  * field, a Step whose title is plain text, a Card, an HTML element) and every one
  * a component makes from its text (an Accordion, an Update: `componentIds`) is
  * skipped, so a generated field id never repeats one.
+ *
+ * A `<Tab>` is given the id Mintlify serves for it, the slug of its title
+ * (`#bitcoin`), which the tab bar uses to select it. Tabs are numbered last
+ * (`numberTabIds`), after every heading and field and skipping every authored
+ * id, so a tab never takes an id another element has and shifts none. A tab
+ * with an `id` of its own keeps it.
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
     const targets: Array<HeadingTarget> = []
     const fields: Array<{ base: string; assign: (id: string) => void }> = []
+    const tabs: Array<{ base: string; assign: (id: string) => void }> = []
     const authoredIds = new Set<string>()
     const componentGeneratedIds = new Set<string>()
     const text = (node: Element): string => node.children.map((child) =>
@@ -903,6 +1061,11 @@ function rehypeUniqueHeadingIds() {
           // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
           if (base && jsxConstantAttribute(jsx, 'id') === undefined) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
         }
+        if (jsx.name === 'Tab') {
+          const title = jsxConstantAttribute(jsx, 'title')
+          const base = title ? slugify(plainInlineText(title)) : ''
+          if (base && jsxConstantAttribute(jsx, 'id') === undefined) tabs.push({ base, assign: (id) => setJsxId(jsx, id) })
+        }
       }
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)
     }
@@ -915,6 +1078,8 @@ function rehypeUniqueHeadingIds() {
     // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote or a component makes.
     const ids = numberFieldIds(fields.map((field) => field.base), usedIds, [...authoredIds, ...componentGeneratedIds])
     fields.forEach((field, index) => field.assign(ids[index]))
+    const tabIds = numberTabIds(tabs.map((tab) => tab.base), usedIds)
+    tabs.forEach((tab, index) => tab.assign(tabIds[index]))
   }
 }
 

@@ -51,6 +51,20 @@ describe('responseExamples', () => {
     }
   })
 
+  it('samples a nullable union by its first branch that is not null', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        first: { anyOf: [{ type: 'null' }, { type: 'object', properties: { id: { type: 'string' } } }] },
+        last: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+        list: { type: ['array', 'null'], items: { type: 'string' } },
+        count: { type: ['integer', 'null'] },
+      },
+    }
+    const [ok] = responses({ '200': { description: 'ok', ...json({ schema }) } })
+    expect(responseExamples(ok)[0].value).toEqual({ first: { id: '<string>' }, last: 123, list: ['<string>'], count: 123 })
+  })
+
   it('has no example for a response without a body', () => {
     expect(responseExamples(responses({ '204': { description: 'gone' } })[0])).toEqual([])
   })

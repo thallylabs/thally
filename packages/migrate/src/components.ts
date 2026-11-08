@@ -9,15 +9,16 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { basename, dirname, extname, posix, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
+import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, maskedOutsideCode, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments, splitFrontmatterBlock } from './mdx.js'
 import { resolveWithin } from './path.js'
-import { hoistedVarNames, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
+import { gateOnMount, hoistedVarNames, mountGateHelper, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
 interface MdxNode {
@@ -207,7 +208,22 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
   return undefined
 }
 
-const parser = unified().use(remarkParse).use(remarkMdx)
+/** The start of the warning for a page this analysis could not parse; the repository adapter looks for it. */
+export const COMPONENT_ANALYSIS_FAILED = 'Custom component analysis could not parse this MDX'
+
+/**
+ * Whether `createComponentMigrator().transform` has anything to do on a page, outside code: an `import` or `export` line (components,
+ * unavailable packages, inline declarations), a JSX event handler (an interactive root moves to a client component) or an asset
+ * `require(` in an attribute. A page with none loses nothing when the analysis cannot read it. A fence that is never closed hides the
+ * rest of the page from the scan, so such a page counts as having work.
+ */
+export function pageHasComponentWork(body: string): boolean {
+  const { text, openFence } = maskedOutsideCode(splitFrontmatterBlock(body).body)
+  return openFence || /^[ \t]*(?:import|export)\b|\bon[A-Z]\w*\s*=|\brequire\s*\(/m.test(text)
+}
+
+// remark-gfm, like the runtime's compile and `MDX_COMPILE_OPTIONS`: a page that compiles must also parse here.
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
 /**
@@ -1301,7 +1317,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     try {
       tree = parser.parse(content) as MdxNode
     } catch {
-      warn('Custom component analysis could not parse this MDX; its source was preserved for manual migration.', currentFile)
+      warn(`${COMPONENT_ANALYSIS_FAILED}; its source was preserved for manual migration.`, currentFile)
       // The AST walk below is how every `@site/...`/relative component
       // import normally gets copied or removed; none of that runs on a page
       // that can't even be parsed. Left alone, an import like that survives
@@ -1456,12 +1472,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
+            // `React`, a hook and any other name count as used where an
+            // expression reads them or a JSX tag is one (`<Fragment>`).
             const isUnusedReactHookImport = specifier === 'react' && bindings.length > 0
-              && bindings.every((binding) => REACT_GLOBALS.has(binding.imported))
-              && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)))
+              && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)), { includeDirectTags: true })
             if (!isUnusedReactHookImport) moduleImports.push(statement.getText(ast))
             // A shared React import is normally retained in server MDX. An
-            // unused hook import belongs only to a fenced example and would
+            // unused one (`import React, { useState } from 'react'` above a
+            // fenced example) would make the server page import a hook and
             // cause Next's server-component build to reject the whole page.
             if (isUnusedReactHookImport) edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
             else sharedImportEdits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
@@ -1715,7 +1733,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // Extract a page's own inline component that calls a React hook (Mintlify
     // treats hooks as pre-injected globals for such components, but Thally's
     // page module is a Server Component and cannot import a hook itself) into
-    // a client module, together with every page-local declaration it uses.
+    // a client module, together with every page-local declaration it uses. A
+    // component that reads a browser global moves the same way and renders
+    // only after mount, since it draws nothing the server could draw.
     // `planInlineExtraction` decides what moves, what the page keeps a copy
     // of, and whether the move is safe at all; an unsafe one is left in place
     // and reported. Whatever the page still renders is wired back as a
@@ -1730,13 +1750,23 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         unavailableImports: unsupportedImports,
         reactGlobals: REACT_GLOBALS,
       })
-      for (const { name, reason } of plan.blocked) {
+      for (const { name, reason, browser } of plan.blocked) {
         refusedInlineComponents.add(name)
-        warn(`Inline component "${name}" calls a React hook but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
+        warn(`Inline component "${name}" ${browser ? 'uses `window` or `document`, which only exist in the browser,' : 'calls a React hook'} but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
+      }
+      // A component that reads a browser global renders after mount only; the
+      // wrapper's name must not collide with anything the module spells.
+      const moduleIndexes = [...plan.moved, ...plan.copied].sort((a, b) => a - b)
+      const gated = new Set(plan.gated)
+      let gate = 'renderAfterMount'
+      if (gated.size > 0) {
+        const spelled = identifierNames(sourceFile([...plan.moduleImports, ...plan.moduleHelpers, ...moduleIndexes.map((index) => declarations[index].source)].join('\n'), 'inline.jsx'))
+        for (let suffix = 2; spelled.has(gate); suffix += 1) gate = `renderAfterMount${suffix}`
       }
       const moduleSource = plan.moved.length === 0 ? '' : [
         ...plan.moduleImports, ...plan.moduleHelpers,
-        ...[...plan.moved, ...plan.copied].sort((a, b) => a - b).map((index) => declarations[index].source),
+        ...moduleIndexes.map((index) => (gated.has(index) ? gateOnMount(declarations[index].source, gate) : undefined) ?? declarations[index].source),
+        ...(gated.size > 0 ? [mountGateHelper(gate)] : []),
       ].join('\n\n')
       if (plan.moved.length > 0
         && (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(moduleSource) > MAX_FILE_BYTES

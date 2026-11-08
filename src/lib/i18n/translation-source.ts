@@ -37,7 +37,7 @@ export async function hasDocTranslation(
     : []
   const candidate = await findDocSource(source, normalized.join('/'), locale)
   if (!candidate || candidate.isFallback) return false
-  // A translation bound to a hidden or excluded operation 404s: it does not exist for readers.
+  // A translation bound to an excluded operation 404s: it does not exist for readers.
   await ensureDocPublication()
   return isDocPublished(normalized.join('/'), locale)
 }

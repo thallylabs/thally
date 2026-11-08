@@ -5,6 +5,7 @@ import type * as acorn from 'acorn'
 import { analyze } from 'eslint-scope'
 import { posix } from 'node:path'
 import { compileSync } from '@mdx-js/mdx'
+import type { CompileOptions } from '@mdx-js/mdx'
 import { nameToEmoji } from 'gemoji'
 import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
@@ -18,6 +19,13 @@ import { parseFrontmatter } from './frontmatter.js'
 import { SOURCE_PAGE_ATTRIBUTE } from './source-styles.js'
 import { normalizeMintlifyCodeFences } from './fence-meta.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
+
+/**
+ * How every check of whether a page compiles reads it. The runtime compiles with remark-gfm
+ * (`src/mdx/remark.ts`), under which a bare URL is an autolink that swallows its braces, so a
+ * page compiles here exactly when it compiles there.
+ */
+export const MDX_COMPILE_OPTIONS: CompileOptions = { outputFormat: 'program', remarkPlugins: [remarkGfm] }
 
 export interface MarkdownPageIdentity {
   id: string
@@ -411,7 +419,9 @@ const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@%=<>|\u2019\u201c\u201d\u2014\u201
  * punctuation and emoji are dropped, and repeats are numbered `-2`, `-3`, ...
  * by the renderer. Read from other sites' ids: a `.` before a `,` makes a dash
  * (`e.g., x` is `e-g--x`), and `(s)` after a word is the plural (`domain(s)` is
- * `domains`).
+ * `domains`). A dash a space or `-` makes stays at the end of the id, after
+ * what writes nothing (`loadSkill({ name })` is `loadskill--name-`); one a `.`,
+ * `(` or `)` made does not (`dispatchEnvelope().` is `dispatchenvelope`).
  */
 export function mintlifyHeadingSlug(text: string): string {
   const chars = [...text.replace(/[\u200b*]/g, '').replace(/(?<=[\p{L}\p{M}\p{N}_])\(s\)(?![\p{L}\p{M}\p{N}_])/gu, 's').normalize('NFC').trim().toLowerCase()]
@@ -419,6 +429,8 @@ export function mintlifyHeadingSlug(text: string): string {
   let id = ''
   let afterDash = false
   let endsWithDash = false
+  // The id ends in a dash only a `.`, `(` or `)` made, and nothing has been written since.
+  let softDash = false
   chars.forEach((char, index) => {
     const before = chars[index - 1]
     const after = chars[index + 1]
@@ -426,12 +438,14 @@ export function mintlifyHeadingSlug(text: string): string {
     if (isWord(char)) {
       id += char
       afterDash = false
+      softDash = false
     } else if (
       /[\s-]/.test(char)
       || (char === '.' && (isWord(after) || after === ','))
       || (char === '(' && isWord(before) && (isWord(after) || after === '{'))
       || (char === ')' && after !== undefined && !/\s/.test(after))
     ) {
+      softDash = /[\s-]/.test(char) ? false : (id !== '' && !afterDash) || softDash
       if (id && !afterDash) id += '-'
       afterDash = true
       endsWithDash = true
@@ -439,7 +453,7 @@ export function mintlifyHeadingSlug(text: string): string {
       afterDash = false
     }
   })
-  return endsWithDash ? id.replace(/-$/, '') : id
+  return endsWithDash || softDash ? id.replace(/-$/, '') : id
 }
 
 /** Thally's own heading slug (`slugify` in `@thallylabs/core`), used to tell which headings already match. */
@@ -448,13 +462,21 @@ function thallyHeadingSlug(text: string): string {
 }
 
 /**
+ * A link's `](destination)` with one level of parentheses inside it, in the URL or the quoted title (Docusaurus headings end in
+ * `[\u200b](#id "Direct link to Interchain Security Module (ISM)")`). The alternatives never overlap, so it cannot backtrack badly.
+ */
+const LINK_DESTINATION = String.raw`\]\((?:[^()]|\([^()]*\))*\)`
+/** What typesetting leaves alone: code, tags and link destinations (`split` keeps these at the odd indexes). */
+const TYPESET_PROTECTED = new RegExp(`(\`[^\`]*\`|<[^>]*>|${LINK_DESTINATION})`)
+
+/**
  * Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. A heading that opens with a straight
  * double quote and does not end with one gets a closing quote first (2 of 2 such headings on a live site); one quoted from end to end
  * keeps its opening quote (another live site).
  */
 function typesetQuotes(text: string): string {
   const opensClosed = text.startsWith('"') && !text.trimEnd().endsWith('"')
-  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => {
+  return text.split(TYPESET_PROTECTED).map((part, index) => {
     if (index % 2) return part
     return part
       // The leading quote of such a heading is left straight here, so the next step closes it.
@@ -466,20 +488,23 @@ function typesetQuotes(text: string): string {
 
 /** Mintlify typesets `...` as an ellipsis in a heading's text, not in its code, and its id keeps it (`f(x, ...)` is `f-x-…`). */
 function typesetEllipses(text: string): string {
-  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => (index % 2 ? part : part.replace(/\.{3}/g, '\u2026'))).join('')
+  return text.split(TYPESET_PROTECTED).map((part, index) => (index % 2 ? part : part.replace(/\.{3}/g, '\u2026'))).join('')
 }
+
+const LINK_HOLDING_CODE = new RegExp(`(\`[^\`]*\`)|!?\\[((?:\`[^\`]*\`|[^\\]\`])*)${LINK_DESTINATION}`, 'g')
+const PLAIN_LINK = new RegExp(`!?\\[([^\\]]*)${LINK_DESTINATION}`, 'g')
 
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
   // A link's text can hold code (`[`Scrape`](/n8n)`), and the split below would cut the link in three and leave its target in the text,
   // so a link that holds code spans goes first. A code span is skipped whole: link syntax inside it is text.
   const unlinked = !source.includes('`') ? source
-    : source.replace(/(`[^`]*`)|!?\[((?:`[^`]*`|[^\]`])*)\]\([^)]*\)/g, (_match: string, code?: string, text = '') => code ?? text)
+    : source.replace(LINK_HOLDING_CODE, (_match: string, code?: string, text = '') => code ?? text)
   // What a code span holds is text, whatever it looks like: no comment, link, tag or emphasis is read inside it (`Option<T>` keeps its `<T>`).
   return unlinked.split(/(`[^`]*`)/).map((part, index) => (index % 2 ? part.slice(1, -1) : part
     // An authored MDX comment is not rendered, so Mintlify's id never sees it.
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(PLAIN_LINK, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
     .replace(/(?<!\\)(\*\*|__|~~|\*)/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
@@ -676,8 +701,8 @@ function estreeChildren(node: EstreeNode): Array<EstreeNode> {
     .filter((entry): entry is EstreeNode => Boolean(entry) && typeof entry === 'object' && typeof entry.type === 'string')
 }
 
-/** What a fully static expression comes to: a primitive, or the JSX element or fragment it selects. */
-type StaticValue = string | number | boolean | null | { jsx: EstreeNode }
+/** What a fully static expression comes to: a primitive (`undefined` for a prop the call left out), or the JSX element or fragment it selects. */
+type StaticValue = string | number | boolean | null | undefined | { jsx: EstreeNode }
 
 interface SourceEdit { start: number; end: number; value: string }
 
@@ -692,8 +717,8 @@ function applyEdits(text: string, edits: ReadonlyArray<SourceEdit>, offset = 0):
  * carried as the value an operator selects and never looked into. Both sides of an operator must be static even when one would
  * decide the result alone: a part that cannot be read is not guessed at.
  */
-function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string>): { value: StaticValue } | undefined {
-  const primitive = (child: EstreeNode | undefined): { value: string | number | boolean | null } | undefined => {
+function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string | undefined>): { value: StaticValue } | undefined {
+  const primitive = (child: EstreeNode | undefined): { value: string | number | boolean | null | undefined } | undefined => {
     const folded = child && foldStatic(child, literals)
     return folded && (typeof folded.value !== 'object' || folded.value === null) ? { value: folded.value } : undefined
   }
@@ -706,8 +731,8 @@ function foldStatic(node: EstreeNode, literals: ReadonlyMap<string, string>): { 
     }
     case 'Identifier':
     case 'MemberExpression': {
-      const bound = literals.get(`${node.start}:${node.end}`)
-      return bound === undefined ? undefined : { value: bound }
+      const span = `${node.start}:${node.end}`
+      return literals.has(span) ? { value: literals.get(span) } : undefined
     }
     case 'JSXElement':
     case 'JSXFragment':
@@ -764,9 +789,12 @@ const PLAIN_TEXT = /^\p{L}(?:[\p{L}\p{N} ,.;'?%$=+-]*[\p{L}\p{N}.])?$/u
  * `{children}` always becomes the children as written, inside an expression as well. Text no
  * expression covers (inline code, a link destination) has its `{name}` replaced as it always was,
  * except inside a fenced code block.
+ *
+ * `unset` names the props the snippet declares and the call leaves out. They are `undefined` where
+ * they are free, as in the component, so `{imgDark || img}` is decided and `{model && ...}` leaves nothing.
  */
-export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
-  if (properties.size === 0 || (!body.includes('props') && ![...properties.keys()].some((name) => body.includes(name)))) return body
+export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>, unset: ReadonlySet<string> = new Set()): string {
+  if ((properties.size === 0 && unset.size === 0) || (!body.includes('props') && ![...properties.keys(), ...unset].some((name) => body.includes(name)))) return body
   const isJsx = /<[A-Za-z][A-Za-z0-9]*/.test(body)
   let tree: unknown
   try { tree = descriptionParser.parse(body) } catch { tree = undefined }
@@ -783,7 +811,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
   }
   collectModuleNames(tree)
   /** Bind the props `program` reads without declaring them. A page's ESM binds only `props.name`: its own names are its own. */
-  const bindFreeReferences = (program: acorn.Program, variables: boolean, literals: Map<string, string>): void => {
+  const bindFreeReferences = (program: acorn.Program, variables: boolean, literals: Map<string, string | undefined>): void => {
     const parents = new Map<unknown, EstreeNode>()
     const link = (node: EstreeNode): void => {
       for (const child of estreeChildren(node)) { parents.set(child, node); link(child) }
@@ -806,6 +834,15 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         }
       }
       const bound = properties.get(name)
+      if (variables && bound === undefined && unset.has(name)) {
+        // `{ prop }` keeps its key; every other reference is replaced where it stands.
+        if (parent?.type === 'Property' && parent.shorthand) edits.push({ start: parent.start, end: parent.end, value: `${name}: undefined` })
+        else {
+          edits.push({ start, end, value: 'undefined' })
+          literals.set(`${start}:${end}`, undefined)
+        }
+        continue
+      }
       if (!variables || bound === undefined) continue
       if (name !== 'children') {
         // `{ mode }` keeps its key; every other reference is replaced where it stands.
@@ -848,7 +885,7 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
    * `jsx` as MDX content, bound. An expression in it that the binding made static (a child or an attribute, as in the page itself)
    * is decided in turn, and one that still has something to run, or that the page wrote static itself, stays as bound.
    */
-  const keepJsx = (jsx: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>): string => {
+  const keepJsx = (jsx: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>): string => {
     const folds: Array<SourceEdit> = []
     const within = (edit: SourceEdit, [from, to]: [number, number]): boolean => edit.start >= from && edit.end <= to
     const walk = (node: EstreeNode, inAttribute: boolean): void => {
@@ -871,17 +908,17 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
    * anything in it is still left to run. A text expression becomes the JSX it selects as MDX content, plain text, or nothing; an
    * attribute's expression becomes a literal and is left alone when it selects JSX. A `flow` expression stays a block.
    */
-  const foldExpression = (expression: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+  const foldExpression = (expression: EstreeNode, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>, [start, end]: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
     const folded = foldStatic(expression, literals)
     if (!folded) return undefined
     const { value } = folded
     const place = (text: string): SourceEdit => flow ? asBlock(text, start, end) : { start, end, value: text }
     if (typeof value === 'object' && value !== null) return inAttribute ? undefined : place(keepJsx(value.jsx, bound, literals))
-    if (inAttribute) return { start, end, value: `{${JSON.stringify(value)}}` }
-    if (typeof value === 'boolean' || value === null || value === '') return place('')
+    if (inAttribute) return { start, end, value: `{${value === undefined ? 'undefined' : JSON.stringify(value)}}` }
+    if (typeof value === 'boolean' || value === null || value === undefined || value === '') return place('')
     return place(typeof value === 'string' && PLAIN_TEXT.test(value) ? value : `{${JSON.stringify(value)}}`)
   }
-  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string>, span: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
+  const foldBound = (program: acorn.Program, bound: ReadonlyArray<SourceEdit>, literals: ReadonlyMap<string, string | undefined>, span: [number, number], inAttribute: boolean, flow: boolean): SourceEdit | undefined => {
     const [statement] = program.body
     return program.body.length === 1 && statement.type === 'ExpressionStatement'
       ? foldExpression(statement.expression as unknown as EstreeNode, bound, literals, span, inAttribute, flow) : undefined
@@ -900,13 +937,14 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
         ? statement.expression : undefined
       if (lone) {
         const bound = moduleNames.has(lone.name) ? undefined : properties.get(lone.name)
-        if (bound === undefined) {
+        const missing = bound === undefined && !moduleNames.has(lone.name) && unset.has(lone.name)
+        if (bound === undefined && !missing) {
           // Not a prop of this call, or the snippet's own name: it stays an expression.
-        } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: JSON.stringify(bound) })
-        else if (start !== undefined && end !== undefined) edits.push(node.type === 'mdxFlowExpression' ? asBlock(bound, start, end) : { start, end, value: bound })
+        } else if (span || (isJsx && lone.name !== 'children')) edits.push({ start: lone.start, end: lone.end, value: missing ? 'undefined' : JSON.stringify(bound) })
+        else if (start !== undefined && end !== undefined) edits.push(node.type === 'mdxFlowExpression' ? asBlock(bound ?? '', start, end) : { start, end, value: bound ?? '' })
       } else {
         const first = edits.length
-        const literals = new Map<string, string>()
+        const literals = new Map<string, string | undefined>()
         bindFreeReferences(program, node.type !== 'mdxjsEsm', literals)
         // An expression the binding has made static is its value; one that still has something to run stays as bound.
         const folded = node.type !== 'mdxjsEsm' && edits.length > first && start !== undefined && end !== undefined
@@ -1300,11 +1338,11 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   // original did, the conversion made things worse — keep the original and
   // let the caller warn, rather than silently excluding the page later.
   try {
-    compileSync(protectedBody, { outputFormat: 'program' })
+    compileSync(protectedBody, MDX_COMPILE_OPTIONS)
     return { body: protectedBody, converted }
   } catch {
     try {
-      compileSync(raw, { outputFormat: 'program' })
+      compileSync(raw, MDX_COMPILE_OPTIONS)
       return { body: raw, converted: false, guardTriggered: true }
     } catch {
       // The original didn't compile either (the usual case math protection
@@ -1380,7 +1418,7 @@ export function escapeFernLiteralBraces(raw: string): string {
  * frontmatter block verbatim (not parsed) because callers here only need to
  * avoid rewriting it, not read its values.
  */
-function splitFrontmatterBlock(raw: string): { front: string; body: string } {
+export function splitFrontmatterBlock(raw: string): { front: string; body: string } {
   const hasBom = raw.charCodeAt(0) === 0xfeff
   const bom = hasBom ? raw[0] : ''
   const source = hasBom ? raw.slice(1) : raw
@@ -1592,7 +1630,10 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
       }
       continue
     }
-    if (fenceMatch) {
+    // A backtick fence's info string cannot hold a backtick (CommonMark):
+    // "```bash npm install x ```" is inline code, and opening a fence on it
+    // would hide the rest of the page from every rename.
+    if (fenceMatch && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
       codeFence = fenceMatch[1]
       fenceBuffer = [line]
       continue
@@ -1658,6 +1699,15 @@ export function indentSnippetLines(snippet: string, indent: string): string {
       || fenced.some(([from, to]) => from < start + line.length + 1 && start < to)) return line
     return indent + line
   }).join('\n')
+}
+
+/**
+ * `body` as `replaceOutsideCode` hands it to a transform (fenced and inline code masked), and whether a fence is never closed,
+ * so that everything after it is masked: a line that starts with a fence mark inside a template literal does that.
+ */
+export function maskedOutsideCode(body: string): { text: string; openFence: boolean } {
+  const { masked, openFence } = maskCode(body)
+  return { text: masked, openFence: openFence !== null }
 }
 
 /**
@@ -1742,6 +1792,86 @@ export function rewriteFernRelativePageLinks(
       (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`)
     .replace(/(\b(?:href|to)\s*=\s*\{\s*)(["'])([^"'\n]+)\2(?=\s*\})/g,
       (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
+}
+
+/**
+ * Mintlify renders a component's `./x` or `../x` href as an anchor the browser
+ * resolves against the page URL, but Thally's Card keeps only root-absolute
+ * hrefs and `thally check` validates only those. Rewrite each to the path the
+ * browser reaches from `pagePath`, the route the page is served at. A
+ * directory index keeps its parent's route (`guides/index.mdx` has the id
+ * `guides` and is served at `/guides`, as on Mintlify), so `./x` there
+ * resolves to `/x`, as the author saw it. Markdown links stay browser-relative.
+ * A href that climbs above the site root stops at the root, as the browser
+ * does, so `../x` on a top-level page is `/x`.
+ */
+export function rewriteRelativeJsxHrefs(body: string, pagePath: string): string {
+  const rewrite = (target: string): string => {
+    if (!/^\.\.?\//.test(target) || target.includes('\\') || /[\u0000-\u001f\u007f]/.test(target)) return target
+    const suffixAt = target.search(/[?#]/)
+    const pathname = suffixAt < 0 ? target : target.slice(0, suffixAt)
+    // A percent-encoded dot or slash is read differently by the browser than by a plain split.
+    if (/%2e|%2f|%5c/i.test(pathname)) return target
+    const segments = pagePath.split('/').slice(0, -1)
+    for (const part of pathname.split('/')) {
+      if (part === '..') {
+        segments.pop()
+      } else if (part !== '.' && part !== '') {
+        segments.push(part)
+      }
+    }
+    return `/${segments.join('/')}${pathname.endsWith('/') && segments.length > 0 ? '/' : ''}${suffixAt < 0 ? '' : target.slice(suffixAt)}`
+  }
+  return replaceOutsideCodeAndComments(body, (text) => text
+    .replace(/((?<![\w-])href\s*=\s*)(["'])([^"'\n]+)\2/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`)
+    .replace(/((?<![\w-])href\s*=\s*\{\s*)(["'])([^"'\n]+)\2(?=\s*\})/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
+}
+
+/** `[start, end)` offsets of every template literal in the estrees of `body`'s ESM blocks, expressions and JSX attribute expressions, or null when it does not parse. */
+function templateLiteralRanges(body: string): Array<[number, number]> | null {
+  let tree: MdxOffsetNode
+  try {
+    tree = descriptionParser.parse(body) as MdxOffsetNode
+  } catch {
+    return null
+  }
+  const ranges: Array<[number, number]> = []
+  const scan = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as { type?: unknown; start?: unknown; end?: unknown }
+    if (node.type === 'TemplateLiteral' && typeof node.start === 'number' && typeof node.end === 'number') ranges.push([node.start, node.end])
+    for (const child of Object.values(node)) scan(child)
+  }
+  scan(tree)
+  return ranges.sort((left, right) => left[0] - right[0])
+}
+
+/**
+ * The `[start, end)` offsets in `body`, in document order, of every template literal the page's JavaScript holds
+ * (in an `export`, an expression or a JSX attribute): a code sample in a string, whose lines are text even when one
+ * reads `import x from 'y'`. The frontmatter is blanked first, as YAML is not MDX. What stops the parse and later
+ * passes repair anyway is set right for the read, by edits that only blank or insert, so the offsets map back: an HTML
+ * comment is blanked, and an unmatched closing tag and a prose brace that acorn rejects (`/{chainId?}`) get a backslash.
+ * Empty when the page still does not parse, for example with an HTML tag that is never closed.
+ */
+export function esmTemplateLiteralRanges(body: string): Array<[number, number]> {
+  const text = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, (frontmatter) => frontmatter.replace(/[^\r\n]/g, ' '))
+  const direct = templateLiteralRanges(text)
+  if (direct) return direct
+  const blanked = text.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\r\n]/g, ' '))
+  const repaired = escapeUnparseableExpressions(escapeUnmatchedClosingTags(blanked).body)
+  const ranges = templateLiteralRanges(repaired.body)
+  if (!ranges) return []
+  // Each escape only inserts a backslash before a `{` or `<`, so the inserted positions are where the two texts first differ.
+  const inserted: Array<number> = []
+  for (let at = 0, source = 0; at < repaired.body.length; at++) {
+    if (repaired.body[at] === blanked[source]) source++
+    else inserted.push(at)
+  }
+  const original = (offset: number): number => offset - inserted.filter((at) => at < offset).length
+  return ranges.map(([start, end]) => [original(start), original(end)])
 }
 
 /** Convert Fern's indented file-list shorthand to Thally's nested Tree nodes. */
@@ -2161,6 +2291,36 @@ function normalizeDocusaurusTabs(body: string): string {
   return result.replace(/<ThallyTabs\b/g, '<Tabs').replace(/<\/ThallyTabs>/g, '</Tabs>')
 }
 
+/**
+ * A TabItem outside any <Tabs>...</Tabs> pair (malformed source) never reaches normalizeDocusaurusTabs' block match; fall back to
+ * its own label/value so it still renders as a Tab. Only an opener with a `</TabItem>` of its own is mapped: a lone `<TabItem>`
+ * named in prose would become an unclosed `<Tab>` and fail the page, and is left to the orphan-tag escape.
+ */
+function normalizeStrayTabItems(body: string): string {
+  const tags = [...body.matchAll(/<TabItem\b([^<>]*)>|<\/TabItem>/g)].filter((tag) => !/\/$/.test(tag[1] ?? ''))
+  const openers: Array<number> = []
+  const paired = new Set<number>()
+  tags.forEach((tag, index) => {
+    if (tag[0] !== '</TabItem>') openers.push(index)
+    else if (openers.length > 0) {
+      paired.add(openers.pop()!)
+      paired.add(index)
+    }
+  })
+  let result = ''
+  let cursor = 0
+  tags.forEach((tag, index) => {
+    if (!paired.has(index)) return
+    const attributes = tag[1] ?? ''
+    const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+      ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
+      ?? 'Tab'
+    result += `${body.slice(cursor, tag.index)}${tag[0] === '</TabItem>' ? '</Tab>' : `<Tab title="${title.replace(/"/g, '&quot;')}">`}`
+    cursor = tag.index! + tag[0].length
+  })
+  return result + body.slice(cursor)
+}
+
 const TAB_FENCE_OPEN = /^(`{3,}|~{3,})(\S*)\s+tab\b(.*)$/
 
 /**
@@ -2476,18 +2636,59 @@ function pinStepsTitleSize(body: string): string {
 }
 
 /**
+ * Mintlify renders `<video autoPlay>` muted, looping and inline, so it starts on
+ * its own where browsers refuse autoplay with sound. Add the ones of `muted`,
+ * `loop` and `playsInline` an `autoPlay` video lacks, right after `autoPlay` (on
+ * a line of its own when `autoPlay` has one). A video without `autoPlay`, or with
+ * `autoPlay={false}`, is left as it is.
+ */
+function addMintlifyVideoAttributes(body: string): string {
+  if (!body.includes('<video')) return body
+  interface VideoAttribute { type: string; name?: string; value?: unknown; position?: MdxOffsetNode['position'] }
+  let result = ''
+  let cursor = 0
+  for (const match of body.matchAll(/<video(?=[\s/>])/g)) {
+    if (match.index < cursor) continue
+    const tag = readTagEnd(body, match.index + match[0].length)
+    if (tag === UNTERMINATED) break
+    if (!tag) continue
+    let attributes: Array<VideoAttribute>
+    try {
+      attributes = ((descriptionParser.parse(`<video${tag.attributes}/>`) as { children?: Array<{ attributes?: Array<VideoAttribute> }> }).children?.[0]?.attributes) ?? []
+    } catch {
+      continue
+    }
+    const named = (name: string): VideoAttribute | undefined => attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name?.toLowerCase() === name.toLowerCase())
+    const autoPlay = named('autoPlay')
+    const start = autoPlay?.position?.start.offset
+    const end = autoPlay?.position?.end.offset
+    const off = typeof autoPlay?.value === 'object' && (autoPlay.value as { value?: string } | null)?.value?.trim() === 'false'
+    const missing = ['muted', 'loop', 'playsInline'].filter((name) => !named(name))
+    if (!autoPlay || off || missing.length === 0 || start === undefined || end === undefined) continue
+    // Offsets are in the parsed tag, which starts where the tag does.
+    const at = match.index + end
+    const indent = body.slice(body.lastIndexOf('\n', match.index + start - 1) + 1, match.index + start)
+    const eol = /^[ \t]*(\r?\n)/.exec(body.slice(at))?.[1]
+    const insert = eol && /^[ \t]*$/.test(indent) ? missing.map((name) => `${eol}${indent}${name}`).join('') : missing.map((name) => ` ${name}`).join('')
+    result += body.slice(cursor, at) + insert
+    cursor = at
+  }
+  return result + body.slice(cursor)
+}
+
+/**
  * Escape closing tags that have no matching real opener (outside code), e.g.
  * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
  * literal text, so the bare closer is a compile error. Escaping the closer the
  * same way keeps the page. Linear: one regex pass with a per-name open count.
- * Returns the 1-based line numbers repaired; `body` is returned unchanged when
- * there are none.
+ * Returns the text of each closing tag repaired; `body` is returned unchanged
+ * when there are none.
  */
-export function escapeUnmatchedClosingTags(body: string): { body: string; lines: Array<number> } {
+export function escapeUnmatchedClosingTags(body: string): { body: string; escaped: Array<string> } {
   const masked = maskCodeRegions(body)
   const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)/g
   const open = new Map<string, number>()
-  const edits: Array<number> = []
+  const edits: Array<{ start: number; end: number }> = []
   for (let match = tagPattern.exec(masked); match; match = tagPattern.exec(masked)) {
     const [whole, escaped, closing, name] = match
     const tag = readTagEnd(masked, match.index + whole.length)
@@ -2500,21 +2701,86 @@ export function escapeUnmatchedClosingTags(body: string): { body: string; lines:
     } else if (open.get(name)) {
       open.set(name, open.get(name)! - 1)
     } else {
-      edits.push(match.index)
+      edits.push({ start: match.index, end: tag.end })
     }
   }
-  if (edits.length === 0) return { body, lines: [] }
+  if (edits.length === 0) return { body, escaped: [] }
   let result = ''
   let cursor = 0
-  const lines: Array<number> = []
-  let line = 1
-  for (const start of edits) {
+  for (const { start } of edits) {
     result += `${body.slice(cursor, start)}\\`
-    for (let i = cursor; i < start; i++) if (body.charCodeAt(i) === 10) line++
-    lines.push(line)
     cursor = start
   }
-  return { body: result + body.slice(cursor), lines }
+  return { body: result + body.slice(cursor), escaped: edits.map(({ start, end }) => body.slice(start, end)) }
+}
+
+/** Whether `text[index]` is escaped, that is preceded by an odd run of backslashes. */
+function isBackslashEscaped(text: string, index: number): boolean {
+  let slashes = 0
+  while (index - 1 - slashes >= 0 && text[index - 1 - slashes] === '\\') slashes++
+  return slashes % 2 === 1
+}
+
+const MAX_EXPRESSION_REPAIRS = 50
+
+/**
+ * Escape prose braces that MDX reads as an expression acorn cannot parse
+ * (`https://host/{chainId?}`); Mintlify shows them as literal text. Each round
+ * compiles the page and, for an acorn failure inside an expression, escapes
+ * every `{` of the balanced span around it: escaping only the outer one
+ * would leave a nested `{y}` as a live expression that throws at render.
+ * Fails closed: any other error (an `export`, a JSX attribute whose escaped
+ * brace is no longer valid JSX, an unclosed brace) or more than 50 repairs
+ * returns `body` unchanged. Otherwise `body` compiles, and `escaped` holds the
+ * text of each span that got an escape.
+ */
+export function escapeUnparseableExpressions(body: string): { body: string; escaped: Array<string> } {
+  let current = body
+  const escaped: Array<string> = []
+  for (let repairs = 0; ; repairs++) {
+    let failure: { source?: string; ruleId?: string; place?: { offset?: number } } | null
+    try {
+      compileSync(current, MDX_COMPILE_OPTIONS)
+      return { body: current, escaped }
+    } catch (error) {
+      failure = error as typeof failure
+    }
+    const offset = failure?.place?.offset
+    if (repairs === MAX_EXPRESSION_REPAIRS || failure?.source !== 'micromark-extension-mdx-expression'
+      || failure.ruleId !== 'acorn' || typeof offset !== 'number') return { body, escaped: [] }
+    const masked = maskCodeRegions(current)
+    // The offset is where acorn failed inside the expression, so its opening brace is the first unbalanced `{` before it.
+    let opener = -1
+    for (let i = offset - 1, depth = 0; i >= 0 && opener < 0; i--) {
+      if (isBackslashEscaped(masked, i)) continue
+      if (masked[i] === '}') depth++
+      else if (masked[i] === '{') {
+        if (depth === 0) opener = i
+        else depth--
+      }
+    }
+    if (opener < 0) return { body, escaped: [] }
+    let braces: Array<number> = []
+    let close = -1
+    for (let i = opener, depth = 0; i < masked.length && close < 0; i++) {
+      if (isBackslashEscaped(masked, i)) continue
+      if (masked[i] === '{') {
+        depth++
+        braces.push(i)
+      } else if (masked[i] === '}' && --depth === 0) {
+        close = i
+      }
+    }
+    if (close < 0) braces = [opener]
+    escaped.push(current.slice(opener, close < 0 ? opener + 1 : close + 1))
+    let cursor = 0
+    let result = ''
+    for (const brace of braces) {
+      result += `${current.slice(cursor, brace)}\\`
+      cursor = brace
+    }
+    current = result + current.slice(cursor)
+  }
 }
 
 function isKnownComponentName(name: string, body: string): boolean {
@@ -2562,7 +2828,7 @@ function escapeOrphanCapitalizedTags(body: string): string {
   // expression or export. A page that already compiles needs no escaping;
   // never rewrite one.
   try {
-    compileSync(body, { outputFormat: 'program' })
+    compileSync(body, MDX_COMPILE_OPTIONS)
     return body
   } catch {
     // Fails to compile: escape the placeholders below.
@@ -2654,7 +2920,7 @@ export function removeUndefinedExpressions(body: string, warn?: (message: string
 }
 
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
-function normalizeFlowParagraphContainers(body: string): string {
+export function normalizeFlowParagraphContainers(body: string): string {
   if (!body.includes('<p')) return body
   interface FlowNode {
     type: string
@@ -2752,6 +3018,8 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     ))
     rewritten = rewritten.replace(/^\n{2,}/, '\n')
   }
+  // Mintlify sources converted from Docusaurus keep its `<Tabs values>` and `<TabItem>`; a fenced example of them stays as written.
+  if (runMintlify && rewritten.includes('<TabItem')) rewritten = replaceOutsideCode(rewritten, normalizeDocusaurusTabs)
   if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
   rewritten = unwrapHtmlCommentInMdxComment(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
@@ -2766,24 +3034,13 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       .replace(/<Tree\.File/g, '<File')
       .replace(/<\/Tree\.File>/g, '</File>')
     if (runDocusaurus) {
-      result = result
-        // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
-        // never reaches normalizeDocusaurusTabs' block match above; fall
-        // back to its own label/value so it still renders as a Tab.
-        .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
-          const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-            ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
-            ?? 'Tab'
-          return `<Tab title="${title.replace(/"/g, '&quot;')}">`
-        })
-        .replace(/<\/TabItem>/g, '</Tab>')
-      result = normalizeDocusaurusLinkTags(result)
+      result = normalizeDocusaurusLinkTags(normalizeStrayTabItems(result))
         // The repository adapter expands DocCardList from the resolved
         // sidebar after page discovery. Its source tag has no runtime peer.
         .replace(/<(?:DocCardList|TOCInline)\b[^<>]*\/>/g, '')
     }
     if (runMintlify) {
-      result = normalizeMintlifyUpdateLabels(result)
+      result = normalizeMintlifyUpdateLabels(normalizeStrayTabItems(result))
         // Mintlify documents `<FileTree>` as a plain alias of `<Tree>`; Thally
         // only registers the latter.
         .replace(/<FileTree(\s[^>]*)?>/g, '<Tree$1>')
@@ -2805,6 +3062,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       // Mintlify renders step titles as plain text unless `titleSize` says
       // otherwise; Thally's default is an `<h3>`, so pin the source's default.
       result = pinStepsTitleSize(result)
+      result = addMintlifyVideoAttributes(result)
     }
     if (runFern) {
       result = result
@@ -2830,7 +3088,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const normalized = escapeOrphanCapitalizedTags(provideScopedGlobalReferences(rewritten))
   if (runDocusaurus && sourceBody !== body) {
     try {
-      compileSync(normalized, { outputFormat: 'program' })
+      compileSync(normalized, MDX_COMPILE_OPTIONS)
     } catch {
       // Some Docusaurus sites use this fence for imports or JSX fragments
       // whose surrounding source requires their private remark transforms.
@@ -2893,6 +3151,8 @@ export function parseMarkdownPage(input: {
   ) => MarkdownPageIdentity
   /** Receives a message when frontmatter is dropped or altered. */
   warn?: (message: string) => void
+  /** The icon library the migrated site uses; a page icon naming another one is reported, and none is when omitted. */
+  siteIconLibrary?: string
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
   if (input.platform === 'mintlify') {
@@ -2917,21 +3177,31 @@ export function parseMarkdownPage(input: {
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
-  const heading = leadingPageHeading(body)
+  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
+  // Mintlify titles a page from its frontmatter, else from its file name, and keeps a leading H1 in the body as an ordinary heading.
+  // A page that names an operation keeps taking its heading as the title.
+  const heading = input.platform === 'mintlify' && !namesOperation ? undefined : leadingPageHeading(body)
   const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
   const title = authoredTitle ?? titleFromId(identity.navigationId)
-  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
-  const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
-  const iconType = icon && typeof parsed.data.iconType === 'string'
-    && ['regular', 'solid', 'outline', 'brands'].includes(parsed.data.iconType)
-    ? parsed.data.iconType as MigrationPage['iconType']
+  // Mintlify also writes the icon as `{ name, style, library }`.
+  const iconObject = parsed.data.icon && typeof parsed.data.icon === 'object' && !Array.isArray(parsed.data.icon)
+    ? parsed.data.icon as Record<string, unknown>
     : undefined
+  const iconSource = iconObject ? iconObject.name : parsed.data.icon
+  const icon = typeof iconSource === 'string' && iconSource.trim() ? iconSource.trim() : undefined
+  const iconStyle = (value: unknown): MigrationPage['iconType'] =>
+    typeof value === 'string' && ['regular', 'solid', 'outline', 'brands'].includes(value) ? value as MigrationPage['iconType'] : undefined
+  const iconType = icon ? iconStyle(iconObject?.style) ?? iconStyle(parsed.data.iconType) : undefined
+  // Thally has one icon library per site, so a page's own library only works when it is the site's.
+  if (icon && typeof iconObject?.library === 'string' && input.siteIconLibrary !== undefined && iconObject.library !== input.siteIconLibrary) {
+    input.warn?.(`Page "${identity.id}": its icon names the "${iconObject.library}" icon library, but this site uses "${input.siteIconLibrary}", so the icon "${icon}" is looked up there and may show a different icon or none. Use an icon name from "${input.siteIconLibrary}", or set icons.library in docs.json to "${iconObject.library}".`)
+  }
   const meta: NonNullable<MigrationPage['meta']> = {}
   for (const [source, field] of PAGE_META_FIELDS) {
     const value = parsed.data[source]

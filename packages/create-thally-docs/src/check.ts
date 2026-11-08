@@ -15,7 +15,7 @@ import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { readDocsJson, writeDocsJson, type DocsJsonConfig } from './docs-json.js'
-import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
+import { API_GROUPS_MAX_DEPTH, groupKeyState, hiddenOperationDescription, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { parseMdxTree } from '@thallylabs/core/markdown'
@@ -339,6 +339,9 @@ function headingText(node: MdxNode, components: boolean, footnoteNumber: (identi
   return (node.children ?? []).map((child) => headingText(child, components, footnoteNumber)).join('')
 }
 
+/** The ids the site gives the rows of a page that documents an operation (`parameter-<name>`, `body-<path>`, `response-<path>`). */
+const GENERATED_FIELD_ID = /^(?:parameter|body|response)-/
+
 /** Step title sizes that render a heading; `p` is plain text. */
 const STEP_HEADING_SIZES = ['h2', 'h3', 'h4']
 
@@ -348,8 +351,24 @@ interface PageIds {
   headings: Array<{ base: string; explicit: boolean }>
   /** The anchor base of each `<ParamField>` and `<ResponseField>` that has a literal name and no `id` of its own, in document order. */
   fieldBases: Array<string>
+  /** The id base (slug of the title) of each `<Tab>` that has a literal title and no `id` of its own, in document order. */
+  tabBases: Array<string>
   /** Every `id` an author wrote on a JSX element, and each one a component makes from its text. */
   reserved: Set<string>
+}
+
+/**
+ * The ids of a page's `<Tab>`s: the slug of the title, `-2`, `-3` for a repeat,
+ * skipping the ids in `used`. Must stay identical to `numberTabIds` in the
+ * runtime (src/lib/field-anchor.ts), which gives each tab its id.
+ */
+export function numberTabIds(bases: Iterable<string>, used: Set<string>): Array<string> {
+  return [...bases].map((base) => {
+    let id = base
+    for (let occurrence = 2; used.has(id); occurrence++) id = `${base}-${occurrence}`
+    used.add(id)
+    return id
+  })
 }
 
 /**
@@ -375,7 +394,7 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
     if (!footnotes.has(identifier)) footnotes.set(identifier, footnotes.size + 1)
     return footnotes.get(identifier)!
   }
-  const page: PageIds = { headings: [], fieldBases: [], reserved: new Set() }
+  const page: PageIds = { headings: [], fieldBases: [], tabBases: [], reserved: new Set() }
   const visit = (node: MdxNode, stepSize: string | undefined, inNote: boolean): void => {
     let childSize = stepSize
     if (node.type === 'footnoteReference' && !inNote) footnoteNumber(node.identifier ?? '')
@@ -410,6 +429,11 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
         // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
         if (base && constantAttribute(node, 'id') === undefined) page.fieldBases.push(base)
       }
+      if (node.name === 'Tab') {
+        const title = constantAttribute(node, 'title')
+        const base = title ? slugify(plainInlineText(title)) : ''
+        if (base && constantAttribute(node, 'id') === undefined) page.tabBases.push(base)
+      }
     }
     for (const child of node.children ?? []) visit(child, childSize, inNote || node.type === 'footnoteDefinition')
   }
@@ -420,8 +444,8 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
 /**
  * Every id a rendered page exposes as a link target: its headings, numbered as
  * the renderer numbers them (`numberHeadingIds`), then its fields (`numberFieldIds`,
- * which skips every id an author wrote and every one a component makes), the ids
- * authored on JSX elements and made by components, and any element in the text
+ * which skips every id an author wrote and every one a component makes), then its
+ * tabs (`numberTabIds`), the ids authored on JSX elements and made by components, and any element in the text
  * with a literal `id` attribute or legacy `<a name>`. Read from the syntax tree
  * like the renderer, so a heading's level, form and place agree with the page.
  */
@@ -443,6 +467,7 @@ export function extractHeadingAnchors(content: string, parsed: MdxPage = parseMd
   const { ids, used } = numberHeadingIds(page.headings)
   for (const id of ids) if (id) anchors.add(id)
   for (const id of numberFieldIds(page.fieldBases, used, page.reserved)) anchors.add(id)
+  for (const id of numberTabIds(page.tabBases, used)) anchors.add(id)
   for (const id of page.reserved) anchors.add(id)
   return anchors
 }
@@ -713,14 +738,16 @@ function checkTabApiGroups(projectDir: string, tab: ApiGroupsTab, locale: string
 }
 
 /**
- * A page whose `openapi:` frontmatter names a hidden or excluded operation of
- * the site's default spec (the first visible API tab's, which is what the
- * route consults) 404s and is left out of every listing. Unknown operations
- * are not reported, and remote specs cannot be judged here.
+ * A page whose `openapi:` frontmatter names an excluded operation of the
+ * site's default spec (the first visible API tab's, which is what the route
+ * consults) 404s and is left out of every listing. A hidden operation is
+ * rendered by a page that names it, so that page is not reported as unpublished.
+ * Unknown operations are not reported, and remote specs cannot be judged here.
  *
  * A page with no description of its own is described by its operation, so it
  * is reported as missing one only when the operation has none either, or cannot
- * be read here. The site resolves a page's reference against the specs of hidden
+ * be read here. For a hidden operation that is the operation as the page
+ * renders it. The site resolves a page's reference against the specs of hidden
  * tabs too (after the visible ones), and so does that lookup.
  */
 function checkOperationPages(
@@ -741,14 +768,14 @@ function checkOperationPages(
   const described = pages.some((page) => !page.hasDescription) ? [...specs, ...load(true)] : specs
   for (const { file, reference, hasDescription } of pages) {
     const state = specs.length > 0 ? pageState(reference, specs) : 'unknown'
-    if (state === 'hidden' || state === 'excluded') {
+    if (state === 'excluded') {
       const operation = `${reference.specRef ? `${reference.specRef} ` : ''}${reference.method} ${reference.path}`
       issues.push({
         severity: 'warning',
         file,
         message: `page ${file} points at ${state} operation ${operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
       })
-    } else if (!hasDescription && operationDescription(reference, described) === undefined) {
+    } else if (!hasDescription && operationDescription(reference, described) === undefined && hiddenOperationDescription(reference, described) === undefined) {
       issues.push({ severity: 'warning', message: MISSING_DESCRIPTION, file })
     }
   }
@@ -871,6 +898,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const operationPages: Array<{ file: string; reference: DocReference; hasDescription: boolean }> = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
+  // The pages that document an operation: the site gives their parameters, body and response fields ids that are not in the MDX.
+  const operationPaths = new Set<string>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
   // The pages that are only a stub for a redirect, with the notices about their empty body held until every page is known.
   const linkStubs: Array<{ file: string; path: string; issues: LintIssue[] }> = []
@@ -921,7 +950,11 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     }
     if (isLinkStub) linkStubs.push({ file: rel2, path, issues: notices })
 
-    if (reference) operationPages.push({ file: rel2, reference, hasDescription: Boolean(data.description) })
+    if (reference) {
+      operationPages.push({ file: rel2, reference, hasDescription: Boolean(data.description) })
+      operationPaths.add(path)
+      operationPaths.add(`/${pageId}`)
+    }
     for (const message of manualApiProblems(rel2, data, Boolean(reference), content, (config as { api?: unknown }).api)) {
       issues.push({ severity: 'warning', file: rel2, message })
     }
@@ -988,7 +1021,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   // Broken internal link + anchor detection (after all valid paths are known).
   const externalLinks: Array<ExternalLinkReference> = []
-  for (const { file, anchors, links, offset } of linksByFile) {
+  // Not checked against the spec: the id of a field depends on how the renderer lists the schema (src/lib/openapi/field-ids.ts).
+  const isGeneratedFieldId = (path: string, fragment: string): boolean => operationPaths.has(path) && GENERATED_FIELD_ID.test(fragment)
+  for (const { file, path: pagePath, anchors, links, offset } of linksByFile) {
     for (const { target, line: contentLine } of links) {
       const line = contentLine + offset
       if (/^(https?:|mailto:|tel:)/i.test(target)) {
@@ -998,7 +1033,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       }
       if (target.startsWith('#')) {
         const anchor = target.slice(1)
-        if (anchor && !anchors.has(decodedFragment(anchor))) {
+        if (anchor && !anchors.has(decodedFragment(anchor)) && !isGeneratedFieldId(pagePath, decodedFragment(anchor))) {
           issues.push({ severity: 'warning', message: `Broken anchor: "${target}" not found on this page`, file, line })
         }
         continue
@@ -1009,7 +1044,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (!cycle && isGeneratedPath(path)) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
-      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor))) {
+      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor)) && !isGeneratedFieldId(path, decodedFragment(anchor))) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
       }
     }

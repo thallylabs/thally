@@ -114,6 +114,8 @@ export interface MigrationDocsConfig {
     versions?: Array<{ label: string; prefix: string; href: string; default?: boolean; hidden?: boolean }>
     shortcuts?: Array<{ label: string; href: string; icon?: string }>
   }
+  /** Mintlify's `errors.404.redirect`: an unknown path redirects to the home page instead of answering 404. */
+  errors?: { '404'?: { redirect?: boolean } }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
   appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
   background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }

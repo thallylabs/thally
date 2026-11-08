@@ -4,11 +4,26 @@ function isSchema(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object'
 }
 
-/** The object members of a schema's `oneOf` (else `anyOf`); null when it has none. */
-function unionMembers(schema: Record<string, unknown>): Array<Record<string, unknown>> | null {
-  const list = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : null
-  const members = list?.filter(isSchema)
+/** A member that only says the value may be null. */
+const isNullMember = (member: Record<string, unknown>) => member.type === 'null'
+
+/** The object members of a schema's `oneOf` (else `anyOf`), `{type: "null"}` included. */
+function listedMembers(schema: Record<string, unknown>): Array<Record<string, unknown>> | undefined {
+  return (Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : undefined)?.filter(isSchema)
+}
+
+/**
+ * The object members of a schema's `oneOf` (else `anyOf`); null when it has none. Structural merging keeps null:
+ * dropping it while flattening an allOf would change the schema's accepted values. Presentation callers may omit it.
+ */
+function unionMembers(schema: Record<string, unknown>, keepNull = true): Array<Record<string, unknown>> | null {
+  const members = listedMembers(schema)?.filter((member) => keepNull || !isNullMember(member))
   return members?.length ? members : null
+}
+
+/** Whether a schema's `oneOf` or `anyOf` lists a `{type: "null"}` member. */
+export function allowsNull(schema: Record<string, unknown>): boolean {
+  return listedMembers(schema)?.some(isNullMember) ?? false
 }
 
 /** The part of a schema that fragments of an allOf contribute to the merged one. */
@@ -126,14 +141,15 @@ export interface SchemaVariant {
   schema: Record<string, unknown>
 }
 
-export function unionVariants(schema: Record<string, unknown>): Array<SchemaVariant> | null {
-  const entries = unionMembers(schema)
+/** The variants of a oneOf/anyOf. A `{type: "null"}` member is no variant unless `keepNull` asks for it, as a type label does. */
+export function unionVariants(schema: Record<string, unknown>, keepNull = false): Array<SchemaVariant> | null {
+  const entries = unionMembers(schema, keepNull)
   if (!entries) return null
   const discriminator = (schema.discriminator as { propertyName?: unknown } | undefined)?.propertyName
   return entries.flatMap((entry) => {
     const flat = flattenSchema(entry)
     // A variant that is only a union itself is spread into this one, as live does.
-    const inner = flat.properties ? null : unionVariants(flat)
+    const inner = flat.properties ? null : unionVariants(flat, keepNull)
     if (inner) return inner
     const property = typeof discriminator === 'string' ? (flat.properties as Record<string, Record<string, unknown>> | undefined)?.[discriminator] : undefined
     const value = property?.const ?? (Array.isArray(property?.enum) ? property.enum[0] : undefined)

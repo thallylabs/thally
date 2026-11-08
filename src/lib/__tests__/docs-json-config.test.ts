@@ -19,6 +19,7 @@ import {
   getStructuralTheme,
   getBreadcrumbsEnabled,
   getEyebrowMode,
+  getNotFoundRedirect,
   getStylesheetsConfig,
 } from '@/data/docs'
 
@@ -93,6 +94,21 @@ describe('release-bound docs.json', () => {
       vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], ...(eyebrow === undefined ? {} : { eyebrow }) }))
       resetDocsJsonConfigForTests()
       expect(getEyebrowMode(), String(eyebrow)).toBe(expected)
+    }
+  })
+
+  it('sends an unknown address to the home page only when docs.json sets errors.404.redirect to true', () => {
+    for (const [errors, expected] of [
+      [{ '404': { redirect: true } }, true],
+      [{ '404': { redirect: false } }, false],
+      [{ '404': {} }, false],
+      [{ '404': { redirect: 'true' } }, false],
+      [{ '500': { redirect: true } }, false],
+      [undefined, false],
+    ] as const) {
+      vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], ...(errors === undefined ? {} : { errors }) }))
+      resetDocsJsonConfigForTests()
+      expect(getNotFoundRedirect(), JSON.stringify(errors)).toBe(expected)
     }
   })
 
