@@ -448,7 +448,9 @@ Headings written with an explicit `{#custom-id}` become a preceding
 `<a id="custom-id"></a>` anchor and keep their text, so links to that id still
 work and the page still compiles as MDX. A Mintlify heading that ends in `?`
 also gets an invisible anchor for the id Mintlify serves, which keeps the trailing
-dash (`what-is-mfa-`), so links from outside still reach it.
+dash (`what-is-mfa-`), so links from outside still reach it. When the heading
+repeats on a page, each anchor takes the number Mintlify gives the repeat
+(`why-`, then `why--2`). No anchor is added for an id the page already holds.
 
 Migrated specs are written to `openapi/`, never `public/`, because the host
 serves `public/` as-is and would publish operations marked `x-excluded` or
@@ -560,7 +562,9 @@ warning gives the counts and the first ten URLs. A changelog entry named
 to its page. An absolute link to the site's `custom-domain` becomes an internal
 path when it reaches a migrated page, directly or through a redirect, and its
 fragment (if any) names a heading on that page; the others stay absolute, and one
-warning lists the first ten.
+warning lists the first ten. A link through a redirect that adds a query or a
+fragment of its own points at the redirect, so the site applies both as the
+source site does. A link is never left on a redirect the migration drops.
 
 Fern icons (`fa-light fa-gears`, on tabs, sections and pages) keep their Font
 Awesome name without the style prefix, and the site selects the Font Awesome
