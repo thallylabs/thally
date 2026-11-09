@@ -204,6 +204,11 @@ const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
   '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
 ])
+/** The English description a changelog index gets when it has none: for the default locale only, other locales keep theirs or stay empty. */
+export function changelogIndexDescription(locale: string | undefined, defaultLocale: string | undefined): string {
+  return !locale || locale === defaultLocale ? 'Latest release notes and product updates.' : ''
+}
+
 /** What a stylesheet's root-relative `url()` may copy as a site asset: the usual assets and fonts, never a page or script. */
 const STYLESHEET_URL_EXTENSIONS = new Set([...ASSET_EXTENSIONS, '.woff', '.woff2', '.ttf', '.otf', '.eot'])
 const REPOSITORY_ONLY_DOCUMENTS = new Set([
@@ -6936,7 +6941,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           id: changelog.route,
           navigationId: changelog.route,
           title: 'Release Notes',
-          description: 'Latest release notes and product updates.',
+          description: changelogIndexDescription(undefined, docsConfig.i18n?.defaultLocale),
           descriptionPlacement: 'body',
           keywords: [],
           body: '',
@@ -6947,7 +6952,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig.redirects = docsConfig.redirects?.filter((redirect) => redirect.source !== `/${changelog.route}`)
       }
       // A page whose own text is only a form or a card has no usable first paragraph.
-      index.description ||= 'Latest release notes and product updates.'
+      index.description ||= changelogIndexDescription(index.locale, docsConfig.i18n?.defaultLocale)
       if (index.body.trim()) continue
       // Fern renders changelog directories as a dated feed at the bare tab
       // route. Its `overview.mdx` is often intentionally blank: leaving that
@@ -6957,7 +6962,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // and link/asset rewriting. Pages with module declarations need an
       // excerpt because imports cannot safely be concatenated into one MDX
       // document without renaming all their bindings.
-      index.description ||= 'Latest release notes and product updates.'
+      index.description ||= changelogIndexDescription(index.locale, docsConfig.i18n?.defaultLocale)
       index.body = entries.map((entry) => {
         const date = entry.source.match(/\d{4}-\d{2}-\d{2}/)?.[0]
         const escapeText = (value: string): string => value.replace(/([\\{}<>\[\]*_`])/g, '\\$1')
