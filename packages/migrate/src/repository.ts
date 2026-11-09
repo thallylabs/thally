@@ -77,7 +77,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, fernAvailabilityBadge, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -4791,6 +4791,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernSourceLinkAliases = new Map<string, string>()
   const fernNavTitles = new Map<string, string>()
   const fernPageIcons = new Map<string, string>()
+  const fernPageAvailability = new Map<string, string>()
   const fernUnmappedIcons = new Set<string>()
   const fernHiddenIds = new Set<string>()
   const fernRestrictedPaths = new Set<string>()
@@ -4876,6 +4877,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           if (descriptor.navTitle && !fernNavTitles.has(descriptor.navigationId)) {
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
+          if (typeof descriptor.availability === 'string' && !fernPageAvailability.has(descriptor.navigationId)) fernPageAvailability.set(descriptor.navigationId, descriptor.availability)
           if (descriptor.icon && !fernPageIcons.has(descriptor.navigationId)) fernPageIcons.set(descriptor.navigationId, descriptor.icon)
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
           if (descriptor.restricted) fernRestrictedPaths.add(canonicalPath(resolvePath(fernProjectRoot, descriptor.sourcePath)))
@@ -5647,6 +5649,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // The page's own frontmatter icon wins over the one docs.yml gives its navigation node.
       const icon = page.icon ?? fernPageIcons.get(navigationId)
       if (icon) page.icon = mapFernIcon(icon, fernUnmappedIcons)
+      page.badge ??= fernAvailabilityBadge(fernPageAvailability.get(navigationId))
     }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       // Counted as published only once the page is certain to be (below).

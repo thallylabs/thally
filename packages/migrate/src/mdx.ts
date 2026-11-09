@@ -33,6 +33,14 @@ export interface MarkdownPageIdentity {
   locale?: string
 }
 
+/** Fern's `availability` (beta, alpha, deprecated, ...) as the label Thally shows beside the page; a generally available page has none. */
+export function fernAvailabilityBadge(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const words = value.trim().toLowerCase().replace(/[-_]+/g, ' ')
+  if (!words || ['generally available', 'ga', 'stable'].includes(words)) return undefined
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 40)
+}
+
 function titleFromId(id: string): string {
   const value = id.split('/').at(-1) ?? id
   if (value === 'introduction') return 'Introduction'
@@ -3227,7 +3235,7 @@ export function parseMarkdownPage(input: {
     ? parsed.data.tag.trim()
     : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
       ? parsed.data.badge.trim()
-      : undefined
+      : input.platform === 'fern' ? fernAvailabilityBadge(parsed.data.availability) : undefined
   const sourceMode = typeof parsed.data.mode === 'string' ? parsed.data.mode : undefined
   // Mintlify's frame mode and Thally's wide mode both retain the sidebar while
   // removing the on-page table of contents. Other shared modes map directly.

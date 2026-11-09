@@ -60,6 +60,8 @@ export interface FernPageDescriptor {
   hidden?: boolean
   /** The docs.yml node's own `icon`, carried to the page's frontmatter. */
   icon?: string
+  /** The docs.yml node's own `availability` (beta, alpha, ...), used when the page's frontmatter sets none. */
+  availability?: unknown
   /** Listed under a docs.yml node that sets `viewers` or `authed`: Fern shows it only to signed-in roles. */
   restricted?: boolean
 }
@@ -315,7 +317,7 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
   return `${base}-${index}`
 }
 
-function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false, icon?: string): string {
+function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false, icon?: string, availability?: unknown): string {
   let sourcePath: string
   try {
     const absolute = withinRealRoot(resolveWithinRoot(
@@ -331,7 +333,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   const isHidden = hidden || context.hiddenInherited === true
-  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon: mapFernIcon(icon, context.unmappedIcons) } : {}), ...(isHidden ? { hidden: true } : {}) })
+  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon: mapFernIcon(icon, context.unmappedIcons) } : {}), ...(typeof availability === 'string' ? { availability } : {}), ...(isHidden ? { hidden: true } : {}) })
   // `repository.ts` creates exactly one page per physical file, keyed off
   // the first nav location that registers it — a file listed at a second
   // nav location (Fern allows the same page under several sections) must
@@ -425,7 +427,7 @@ function registerPage(
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
   const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
-  return registerPageAt(object.path, base, context, label, object.hidden === true, typeof object.icon === 'string' && object.icon.trim() ? object.icon.trim() : undefined) || null
+  return registerPageAt(object.path, base, context, label, object.hidden === true, typeof object.icon === 'string' && object.icon.trim() ? object.icon.trim() : undefined, object.availability) || null
 }
 
 /** Fern role-based access: any non-empty `viewers`, or a truthy `authed`, on a navigation node. Ambiguity counts as restricted. */

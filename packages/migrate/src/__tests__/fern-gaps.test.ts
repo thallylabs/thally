@@ -274,3 +274,20 @@ describe('V11: Fern subtitle', () => {
     expect(page.body).toBe('A \\{lead\\} \\<line\\>\n\nBody.')
   })
 })
+
+describe('V15: Fern availability', () => {
+  it('becomes the page badge from frontmatter or docs.yml, never over an authored badge', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: A\n    path: a.mdx\n  - page: B\n    path: b.mdx\n    availability: alpha\n  - page: C\n    path: c.mdx\n  - page: D\n    path: d.mdx\n    availability: generally-available\n',
+      'a.mdx': '---\ntitle: A\navailability: beta\n---\n\nA.',
+      'b.mdx': '---\ntitle: B\n---\n\nB.',
+      'c.mdx': '---\ntitle: C\navailability: deprecated\nbadge: Custom\n---\n\nC.',
+      'd.mdx': '---\ntitle: D\n---\n\nD.',
+    })
+    const badge = (title: string) => bundle.pages.find((page) => page.title === title)?.badge
+    expect(badge('A')).toBe('Beta')
+    expect(badge('B')).toBe('Alpha')
+    expect(badge('C')).toBe('Custom')
+    expect(badge('D')).toBeUndefined()
+  })
+})
