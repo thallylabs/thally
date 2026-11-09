@@ -12,7 +12,7 @@ function describe_(description: string, platform: MigrationPlatform = 'mintlify'
   return { description: page?.description, warnings }
 }
 
-const WARNING = 'Page "guides/koyeb": its description had links, which Thally shows as plain text; the link text was kept.'
+const WARNING = 'Page "guides/koyeb": its description had links, which Thally shows as plain text; only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.'
 
 describe('a Markdown link in an authored page description', () => {
   it('keeps the link text and warns once for the page', () => {
@@ -21,10 +21,31 @@ describe('a Markdown link in an authored page description', () => {
     expect(warnings).toEqual([WARNING])
   })
 
-  it('leaves inline code, emphasis and every other character as written', () => {
-    expect(describe_('Call [`client.sync()`](/sdk) to **sync** with _care_ & <b>speed</b>, 5 < 6 {ok}.').description)
-      .toBe('Call `client.sync()` to **sync** with _care_ & <b>speed</b>, 5 < 6 {ok}.')
-    expect(describe_('A [**bold** link](/x) and [a `code` link](/y).').description).toBe('A **bold** link and a `code` link.')
+  it('leaves inline code and every other character as written', () => {
+    expect(describe_('Call [`client.sync()`](/sdk) to sync with care & <b>speed</b>, 5 < 6 {ok}.').description)
+      .toBe('Call `client.sync()` to sync with care & <b>speed</b>, 5 < 6 {ok}.')
+    expect(describe_('A [**bold** link](/x) and [a `code` link](/y).').description).toBe('A bold link and a `code` link.')
+  })
+
+  it('drops emphasis markers, which the page header prints as typed, and keeps code, snake_case and literal asterisks', () => {
+    for (const [written, shown] of [
+      ['Works at the **cryptographic curve** level.', 'Works at the cryptographic curve level.'],
+      ['With *care*, _more care_ and __strong__ care.', 'With care, more care and strong care.'],
+      ['Call `a **b**` and my_var_name and 2 * 3 * 4.', 'Call `a **b**` and my_var_name and 2 * 3 * 4.'],
+    ]) {
+      const result = describe_(written)
+      expect(result.description).toBe(shown)
+      expect(result.warnings).toEqual([])
+    }
+  })
+
+  it('puts the original description at the top of an empty body so its links survive', () => {
+    const warnings: Array<string> = []
+    const raw = '---\ntitle: Foundry\ndescription: "See [the **SDK**](https://x.dev/sdk) {now}."\n---\n\n  \n'
+    const page = parseMarkdownPage({ id: 'sdks/foundry', raw, source: 'sdks/foundry.mdx', platform: 'mintlify', warn: (message) => warnings.push(message) })
+    expect(page?.description).toBe('See the SDK {now}.')
+    expect(page?.body).toBe('See [the **SDK**](https://x.dev/sdk) \\{now\\}.')
+    expect(warnings).toEqual(['Page "sdks/foundry": its description had links, which Thally shows as plain text; the link text was kept in the description and the original description, with its links, was added to the top of the empty page body.'])
   })
 
   it('reads a link the way Markdown does', () => {

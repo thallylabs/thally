@@ -133,25 +133,28 @@ interface PositionedNode extends DescriptionNode {
 const linkParser = unified().use(remarkParse)
 
 /**
- * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code, emphasis and
- * everything else stay as written. A link is read the way Markdown reads it, so one inside a code span, an escaped bracket, an image
- * and a bracket pair with no `(url)` are not links. Unchanged when it has none.
+ * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code and
+ * everything else stay as written; with `markers`, bold and italic markers are removed too. A link is read the way Markdown reads it,
+ * so one inside a code span, an escaped bracket, an image and a bracket pair with no `(url)` are not links. Unchanged when it has none.
  */
-function withoutMarkdownLinks(text: string): string {
-  const links: Array<{ start: number; end: number; textStart: number; textEnd: number }> = []
+function withoutMarkdownLinks(text: string, markers = false): string {
+  const removed: Array<[number, number]> = []
   const collect = (node: PositionedNode): void => {
-    if (node.type === 'link') {
-      const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
-      const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
-      const start = node.position?.start.offset
-      const end = node.position?.end.offset
-      if (start !== undefined && end !== undefined) links.push({ start, end, textStart: first ?? start, textEnd: last ?? start })
-      return
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
+    const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
+    if (node.type === 'link' && start !== undefined && end !== undefined) {
+      removed.push([start, first ?? start], [last ?? start, end])
+      if (first === undefined) return
+    } else if (markers && (node.type === 'strong' || node.type === 'emphasis') && start !== undefined && end !== undefined
+      && first !== undefined && last !== undefined) {
+      removed.push([start, first], [last, end])
     }
     for (const child of node.children ?? []) collect(child)
   }
   collect(linkParser.parse(text) as PositionedNode)
-  return links.reduceRight((result, link) => result.slice(0, link.start) + result.slice(link.textStart, link.textEnd) + result.slice(link.end), text)
+  return removed.sort((a, b) => b[0] - a[0]).reduce((result, [from, to]) => result.slice(0, from) + result.slice(to), text)
 }
 
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
@@ -3404,10 +3407,15 @@ export function parseMarkdownPage(input: {
   }
   // Thally shows an authored description as plain text (with inline code), so the raw `[text](url)` of a link would be shown as typed.
   const writtenDescription = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
-  const plainDescription = withoutMarkdownLinks(writtenDescription)
-  if (plainDescription !== writtenDescription) {
-    page.description = plainDescription
-    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; the link text was kept.`)
+  const plainDescription = withoutMarkdownLinks(writtenDescription, true)
+  if (plainDescription !== writtenDescription) page.description = plainDescription
+  if (withoutMarkdownLinks(writtenDescription) !== writtenDescription) {
+    // A page whose description is all it has would lose its links: the description is printed as plain text.
+    const emptyBody = page.body.trim() === '' && !page.openapi && !page.api
+    if (emptyBody) page.body = writtenDescription.replace(/([\\{}<>])/g, '\\$1')
+    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; ${emptyBody
+      ? 'the link text was kept in the description and the original description, with its links, was added to the top of the empty page body.'
+      : 'only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.'}`)
   }
   resolvePageDisplayHeading(page, input.platform)
   return page
