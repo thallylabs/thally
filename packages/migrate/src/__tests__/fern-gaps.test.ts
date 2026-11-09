@@ -154,6 +154,46 @@ describe('B8/V6: links to the site\'s own custom domain', () => {
   })
 })
 
+describe('links through a redirect that adds a query or a fragment', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'instances:\n  - url: acme.docs.buildwithfern.com\n    custom-domain: docs.example.com\nredirects:\n  - source: /old\n    destination: /guide/b?tab=python#intro-section\n  - source: /older\n    destination: /old\n  - source: /query\n    destination: /guide/b?tab=python\n  - source: /plain\n    destination: /guide/b\n  - source: /query\n    destination: /guide/a\n  - source: /plain\n    destination: /guide/a?tab=go#top\n  - source: /c++/tabbed\n    destination: /guide/b?tab=python\n  - source: /c++/plain\n    destination: /guide/b\nnavigation:\n  - section: Guide\n    contents:\n      - page: A\n        path: a.mdx\n      - page: B\n        path: b.mdx\n',
+    'a.mdx': '---\ntitle: A\n---\n\n[old](https://docs.example.com/old) [older](https://docs.example.com/older?x=1#anything) [query](https://docs.example.com/query#intro-section) [bad](https://docs.example.com/query#no-such-heading) [plain](https://docs.example.com/plain#intro-section) [rel](/old#anything) [relbad](/query#no-such-heading) [cpp](https://docs.example.com/c++/tabbed) [cppplain](https://docs.example.com/c++/plain) [relcpp](/c++/plain) [relplain](/plain)\n',
+    'b.mdx': '---\ntitle: B\n---\n\n## Intro Section\n\nB.',
+  })
+  const body = bundle.pages.find((page) => page.title === 'A')!.body
+
+  it('links to the redirect itself, so the site applies the query and the fragment', () => {
+    expect(body).toContain('[old](/old)')
+    expect(body).toContain('[older](/older?x=1#anything)')
+    expect(body).toContain('[query](/query#intro-section)')
+    expect(body).toContain('[rel](/old#anything)')
+    expect(bundle.docsConfig.redirects).toContainEqual(expect.objectContaining({ source: '/old', destination: '/guide/b?tab=python#intro-section' }))
+  })
+
+  it('still links straight to the page when the redirect adds neither', () => {
+    expect(body).toContain('[plain](/guide/b#intro-section)')
+  })
+
+  it('keeps a link on the live site when its own fragment would reach no heading', () => {
+    expect(body).toContain('[bad](https://docs.example.com/query#no-such-heading)')
+    expect(body).toContain('[relbad](https://docs.example.com/query#no-such-heading)')
+  })
+
+  it('follows the first redirect listed for an address', () => {
+    // `/query` and `/plain` are each listed twice in docs.yml; the expectations above hold only when the first one is followed.
+    expect(bundle.docsConfig.redirects!.filter((redirect) => redirect.source === '/query').map((redirect) => redirect.destination)).toEqual(['/guide/b?tab=python', '/guide/a'])
+    expect(body).toContain('[relplain](/plain)')
+  })
+
+  it('never leaves a link on a redirect the site drops', () => {
+    // `+` is route syntax, so neither `/c++` redirect is kept.
+    expect(bundle.docsConfig.redirects!.some((redirect) => redirect.source.startsWith('/c++'))).toBe(false)
+    expect(body).toContain('[cpp](https://docs.example.com/c++/tabbed)')
+    expect(body).toContain('[cppplain](/guide/b)')
+    expect(body).toContain('[relcpp](https://docs.example.com/c++/plain)')
+  })
+})
+
 describe('B12: a page without a frontmatter title takes its docs.yml label', () => {
   it('uses the page: label, not a title made from the slug', () => {
     const bundle = migrateFern({

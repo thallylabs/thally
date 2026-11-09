@@ -3637,15 +3637,14 @@ export function headingAnchors(body: string): Set<string> {
 }
 
 /**
- * Turn absolute links to the site's own custom domain into internal paths, but only when `resolve` finds the page they reach
- * (directly or through redirects). The rest stay absolute and are collected in `unresolved`.
+ * Turn absolute links to the site's own custom domain into internal paths, but only when `internalTarget` gives the address that
+ * serves the link's path and fragment (a page, or a redirect to one). The rest stay absolute and are collected in `unresolved`.
  */
 function rewriteFernOwnDomainLinks(
   body: string,
   domains: ReadonlyArray<{ host: string; path: string }>,
   versionPath: string,
-  resolve: (pathname: string) => string | undefined,
-  hasAnchor: (route: string, fragment: string) => boolean,
+  internalTarget: (pathname: string, fragment: string) => string | undefined,
   unresolved: Set<string>,
 ): string {
   const rewrite = (target: string): string => {
@@ -3657,13 +3656,13 @@ function rewriteFernOwnDomainLinks(
     let pathname = url.pathname.slice(domain.path.length) || '/'
     if (versionPath && (pathname === versionPath || pathname.startsWith(`${versionPath}/`))) pathname = pathname.slice(versionPath.length) || '/'
     if (pathname.startsWith('//') || pathname.includes('\\')) return target
-    const resolved = resolve(pathname)
     // A fragment that names no heading on the page would turn into a broken anchor, so such a link stays on the live site.
-    if (!resolved || (url.hash.length > 1 && !hasAnchor(resolved, url.hash.slice(1)))) {
+    const internal = internalTarget(pathname, url.hash.slice(1))
+    if (!internal) {
       unresolved.add(`${url.hostname}${url.pathname}${url.hash}`.slice(0, 120))
       return target
     }
-    return `${resolved}${url.search}${url.hash}`
+    return `${internal}${url.search}${url.hash}`
   }
   return replaceOutsideCode(body, (text) => text
     .replace(/(\]\()(https?:\/\/[^\s)]{1,2048})(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
@@ -7072,21 +7071,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Before the anchor pass, so a fragment on a converted link is checked like any other.
   if (platform === 'fern' && fernRawConfig) {
     const pageIds = new Set(pages.map((page) => page.id))
-    const redirectsBySource = new Map((docsConfig.redirects ?? []).map((redirect) => [redirect.source.replace(/\/+$/, '').toLowerCase() || '/', redirect.destination] as const))
-    let apiRoutes: Set<string> | undefined
-    /** The route a site path reaches: a page, an API operation page, or where redirects end; undefined when it reaches none. */
-    const resolve = (pathname: string): string | undefined => {
-      let current = pathname.replace(/\/+$/, '') || '/'
-      for (let hop = 0; hop < 8; hop++) {
-        if (current === '/' || pageIds.has(current.slice(1))) return current
-        apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))
-        if (apiRoutes.has(current)) return current
-        const next = redirectsBySource.get(current.toLowerCase())
-        if (!next?.startsWith('/') || next.startsWith('//')) return undefined
-        current = next.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
-      }
-      return undefined
+    // The first redirect listed for an address is the one the site answers with.
+    const redirectsBySource = new Map<string, { source: string; destination: string }>()
+    for (const redirect of docsConfig.redirects ?? []) {
+      const source = trimTrailingSlashes(redirect.source) || '/'
+      if (!redirectsBySource.has(source.toLowerCase())) redirectsBySource.set(source.toLowerCase(), { source, destination: redirect.destination })
     }
+    // The redirect checks further down drop a redirect the site cannot serve; a link may go to a redirect only when it stays.
+    let keptRedirectSources: Set<string> | undefined
+    const keepsRedirect = (source: string): boolean => (keptRedirectSources ??= new Set(
+      (dropConflictingRedirects(dropUnroutableRedirects(docsConfig, []), [...pages, ...sourceRefPages], []).redirects ?? []).map((redirect) => redirect.source),
+    )).has(source)
+    let apiRoutes: Set<string> | undefined
     const pagesById = new Map(pages.map((page) => [page.id, page]))
     const anchorsOf = new Map<string, Set<string>>()
     const hasAnchor = (route: string, fragment: string): boolean => {
@@ -7098,10 +7094,38 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       try { decoded = decodeURIComponent(fragment) } catch { /* compare as written */ }
       return anchorsOf.get(page.id)!.has(decoded)
     }
+    /**
+     * The internal address for a link to a site path: the page or API operation page it reaches, through redirects when need be.
+     * Undefined when it reaches none, or when `fragment` names no heading there. A redirect that adds a query or a fragment of its
+     * own is left for the site to follow, because only the redirect applies them as the source site does (its query is merged into
+     * the link's, its fragment replaces the link's): the address is then the first redirect's own source. So is the address of a
+     * link that is `keptAsWritten`. A link left on a redirect needs every redirect on its way, so it has no address when one is dropped.
+     */
+    const internalTarget = (pathname: string, fragment: string, keptAsWritten = false): string | undefined => {
+      let current = trimTrailingSlashes(pathname) || '/'
+      const followed: Array<string> = []
+      let adds = false
+      let setsFragment = false
+      for (let hop = 0; hop < 8; hop++) {
+        if (current === '/' || pageIds.has(current.slice(1)) || (apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))).has(current)) {
+          // The visitor arrives with the link's fragment unless a redirect on the way set one.
+          if (fragment && !setsFragment && !hasAnchor(current, fragment)) return undefined
+          if (followed.length === 0 || !(adds || keptAsWritten)) return current
+          return followed.every(keepsRedirect) ? followed[0] : undefined
+        }
+        const redirect = redirectsBySource.get(current.toLowerCase())
+        if (!redirect?.destination.startsWith('/') || redirect.destination.startsWith('//')) return undefined
+        followed.push(redirect.source)
+        adds ||= /[?#]/.test(redirect.destination)
+        setsFragment ||= redirect.destination.includes('#')
+        current = trimTrailingSlashes(redirect.destination.split(/[?#]/, 1)[0]) || '/'
+      }
+      return undefined
+    }
     const domains = fernCustomDomains(fernRawConfig)
     if (domains.length > 0) {
       const unresolved = new Set<string>()
-      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, resolve, hasAnchor, unresolved)
+      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, internalTarget, unresolved)
       if (unresolved.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
@@ -7110,13 +7134,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
     if (sourceSiteUrl) {
       const externalized = new Set<string>()
-      // A route the site answers itself (a page, an API operation page, a redirect's destination) is not missing, and neither is
-      // a fragment that names a heading there.
-      const isServed = (path: string, fragment: string): boolean => {
-        if (pageIds.has(path)) return true
-        const resolved = resolve(`/${path}`)
-        return resolved !== undefined && (!fragment || hasAnchor(resolved, fragment))
-      }
+      // A route the site answers itself (a page, an API operation page, a redirect it keeps that leads to one) is not missing, and
+      // neither is a fragment that names a heading there. The link stays as it is written, so it relies on that redirect.
+      const isServed = (path: string, fragment: string): boolean => pageIds.has(path) || internalTarget(`/${path}`, fragment, true) !== undefined
       for (const page of pages) page.body = externalizeMissingFernLinks(page.body, isServed, sourceSiteUrl, externalized)
       if (externalized.size > 0) warnings.push({
         code: 'unsupported-config',
