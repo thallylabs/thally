@@ -74,6 +74,12 @@ describe('code-fence metadata', () => {
     expect(parseCodeFenceMeta('api-client.ts theme={"system"}')).toEqual({ title: 'api-client.ts' })
   })
 
+  it('reads the bracketed [expandable] flag like the bare one, outside the title', () => {
+    expect(parseCodeFenceMeta('app.ts [expandable]')).toEqual({ title: 'app.ts', expandable: true })
+    expect(parseCodeFenceMeta('[expandable] app.ts')).toEqual({ title: 'app.ts', expandable: true })
+    expect(parseCodeFenceMeta('app.ts "[expandable]"')).toEqual({ title: 'app.ts [expandable]' })
+  })
+
   it('keeps explicit filenames and portable display options', () => {
     expect(parseCodeFenceMeta('filename="client.ts" wrap {2,4-5}')).toEqual({
       title: 'client.ts',

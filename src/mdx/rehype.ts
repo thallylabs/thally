@@ -602,6 +602,7 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
 //   ```ts icon="python"          (icon in the header)
 //   ```bash wrap lines           (soft-wrap, line numbers)
 //   ```ts expandable nocopy      (collapsible, no copy button)
+//   ```ts app.ts [expandable]    (bracketed form of expandable)
 // `twoslash` and unknown `key=value` options are accepted and ignored.
 // ---------------------------------------------------------------------------
 
@@ -745,6 +746,8 @@ export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
         // (`Show lines of code` is a title of "Show of code" plus `lines`);
         // quote the word (`"lines"`) to keep it in a title.
         if (token.value !== 'twoslash') result[token.value as 'wrap'] = true
+      } else if (!token.quoted && token.value === '[expandable]') {
+        result.expandable = true
       } else if (token.value && !/^[{}]+$/.test(token.value)) {
         words.push(token.value)
       }
