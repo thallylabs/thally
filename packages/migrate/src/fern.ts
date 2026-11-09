@@ -1030,8 +1030,15 @@ export function projectFernNavigation(input: {
     if (kept === descriptor.navigationId) return []
     return [{ source: `/${descriptor.navigationId}`, destination: `/${kept}` }]
   })
+  // Fern serves a changelog entry at `/<route>/YYYY/M/D` (no zero padding); the migrated page is dated `YYYY-MM-DD`.
+  const changelogDateRedirects = context.changelogIndexes.flatMap(({ route, entries }) => entries.flatMap((entry) => {
+    const sourcePath = context.descriptors.find((descriptor) => descriptor.navigationId === entry)?.sourcePath ?? ''
+    const date = basename(sourcePath).match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/)
+    return date ? [{ source: `/${[route, date[1], Number(date[2]), Number(date[3])].filter((part) => part !== '').join('/')}`, destination: `/${entry}` }] : []
+  })).filter((redirect, index, all) => all.findIndex((other) => other.source === redirect.source) === index)
   const allRedirects = [
     ...redirects,
+    ...changelogDateRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...context.bareRouteRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...duplicateNavRedirects.filter((redirect) => !authoredSources.has(redirect.source)),

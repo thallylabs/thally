@@ -210,3 +210,15 @@ describe('B16: loose pages in a Fern tab', () => {
     expect(groups.some((group) => group.group === 'Overview')).toBe(false)
   })
 })
+
+describe('V2: Fern changelog date URLs', () => {
+  it('redirects /route/YYYY/M/D to the dated page', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'tabs:\n  releases:\n    display-name: What is new\n    slug: whats-new\n    changelog: whats-new\nnavigation:\n  - tab: releases\n    layout: []\n',
+      'whats-new/2025-03-14.mdx': '---\ntitle: March\n---\n\nUpdate.',
+      'whats-new/2025-12-01.mdx': '---\ntitle: December\n---\n\nUpdate.',
+    })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/whats-new/2025/3/14', destination: '/whats-new/2025-03-14' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/whats-new/2025/12/1', destination: '/whats-new/2025-12-01' })
+  })
+})
