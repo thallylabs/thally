@@ -38,7 +38,7 @@ export function DocHeader({ doc, eyebrow, showCopyPage = true, showDescription =
               {eyebrow}
             </p>
           ) : null}
-          <h1 className="break-words font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
+          <h1 className="[overflow-wrap:anywhere] font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
             {doc.headingTitle ?? doc.title}
           </h1>
           {showDescription && doc.description && doc.descriptionPlacement !== 'body' ? (
