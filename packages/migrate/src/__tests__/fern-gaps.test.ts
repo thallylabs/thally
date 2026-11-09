@@ -305,3 +305,17 @@ describe('V19: Fern custom heading anchors', () => {
     expect(body).not.toContain('Batch Calling [#')
   })
 })
+
+describe('V20: block components right after a text line', () => {
+  it('get a blank line before them, never inside code', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: Notes\n    path: notes.mdx\n',
+      'notes.mdx': '---\ntitle: Notes\n---\n\nRun the server first.\n<Note>Use port 3000.</Note>\n\nSecond line.\n<Warning>Careful\nhere</Warning>\n\n```mdx\nText line\n<Warning>\nkept\n</Warning>\n```\n\n<Tabs>\n<Tab title="A">\nA text\n</Tab>\n</Tabs>\n',
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('Run the server first.\n\n<Note>')
+    expect(body).toContain('Second line.\n\n<Warning>')
+    expect(body).toContain('Text line\n<Warning>')
+    expect(body).toContain('<Tabs>\n<Tab title="A">')
+  })
+})

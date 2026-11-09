@@ -2958,6 +2958,47 @@ export function removeUndefinedExpressions(body: string, warn?: (message: string
     .reduce((text, edit) => text.slice(0, edit.start) + text.slice(edit.end), body)
 }
 
+/** Callout-style components that render a block; one that starts straight after a text line is read as part of that line's paragraph. */
+const BLOCK_COMPONENT_NAMES = new Set(['Note', 'Warning', 'Info', 'Tip', 'Check', 'Danger', 'Error', 'Callout', 'Steps', 'Tabs', 'CodeGroup', 'Accordion', 'AccordionGroup', 'Expandable', 'Frame', 'CardGroup', 'Columns'])
+
+/**
+ * Put a blank line before a block component that starts on the line directly after text. Without it MDX folds the component into that
+ * paragraph, the runtime serves a `<div>` inside a `<p>`, and the page fails to hydrate. Read from the syntax tree, so code fences,
+ * comments and components nested in a line of prose are never touched.
+ */
+export function separateBlockComponents(body: string): string {
+  if (!/\n[ \t]*<[A-Z]/.test(body)) return body
+  interface FlowNode {
+    type: string
+    name?: string | null
+    value?: string
+    children?: Array<FlowNode>
+    position?: { start: { offset?: number } }
+  }
+  let tree: FlowNode
+  try {
+    tree = descriptionParser.parse(body) as FlowNode
+  } catch {
+    return body
+  }
+  const inserts: Array<number> = []
+  const visit = (node: FlowNode): void => {
+    const children = node.children ?? []
+    if (node.type === 'paragraph') {
+      children.forEach((child, index) => {
+        const start = child.position?.start.offset
+        const before = children[index - 1]
+        if (child.type !== 'mdxJsxTextElement' || !BLOCK_COMPONENT_NAMES.has(child.name ?? '') || start === undefined
+          || before?.type !== 'text' || !/\S[ \t]*\n[ \t]*$/.test(before.value ?? '')) return
+        inserts.push(body.lastIndexOf('\n', start - 1) + 1)
+      })
+    }
+    children.forEach(visit)
+  }
+  visit(tree)
+  return inserts.sort((a, b) => b - a).reduce((text, offset) => `${text.slice(0, offset)}\n${text.slice(offset)}`, body)
+}
+
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
 export function normalizeFlowParagraphContainers(body: string): string {
   if (!body.includes('<p')) return body
@@ -3137,7 +3178,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       return normalizeMdx(body, platform, false)
     }
   }
-  return normalizeFlowParagraphContainers(normalized)
+  return normalizeFlowParagraphContainers(separateBlockComponents(normalized))
 }
 
 /**
