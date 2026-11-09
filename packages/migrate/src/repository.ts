@@ -6465,6 +6465,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // repository that navigation never references gets no tab.
     const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections
     const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; linkContent?: Buffer; routeSegments: Array<string> }> = []
+    if (sections.length === 0) {
+      const unreferenced = files.filter((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase()) && classifyApiSpec(file.absolutePath) === 'openapi')
+        .map((file) => file.relativePath)
+      if (unreferenced.length > 0) warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec${unreferenced.length === 1 ? '' : 's'} ${cappedList(unreferenced, 5)} ${unreferenced.length === 1 ? 'is' : 'are'} in the repository, but docs.yml does not reference ${unreferenced.length === 1 ? 'it' : 'them'}, so no API tab was created. To publish an API reference from ${unreferenced.length === 1 ? 'it' : 'them'}, add an "api:" entry to the navigation in docs.yml, for example "- api: API Reference".`,
+      })
+    }
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
     // apis/<name>/openapi/openapi.json) — track which absolute file a

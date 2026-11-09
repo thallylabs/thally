@@ -184,6 +184,17 @@ describe('B13: API tab only when navigation references an api section', () => {
     const bundle = withNav('navigation:\n  - api: API Reference\n')
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(true)
   })
+
+  it('names the unreferenced spec in one warning that says how to add the tab', () => {
+    const messages = withNav('navigation:\n  # - api: API Reference\n').warnings.map((warning) => warning.message)
+    expect(messages.filter((message) => message.includes('does not reference'))).toEqual([
+      'The OpenAPI spec openapi.json is in the repository, but docs.yml does not reference it, so no API tab was created. To publish an API reference from it, add an "api:" entry to the navigation in docs.yml, for example "- api: API Reference".',
+    ])
+  })
+
+  it('does not warn when navigation has an api: entry', () => {
+    expect(withNav('navigation:\n  - api: API Reference\n').warnings.map((warning) => warning.message).join('\n')).not.toContain('does not reference')
+  })
 })
 
 describe('B14/V12: Fern icons', () => {
