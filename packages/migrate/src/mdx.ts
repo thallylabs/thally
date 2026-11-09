@@ -3292,6 +3292,8 @@ export function parseMarkdownPage(input: {
   warn?: (message: string) => void
   /** The icon library the migrated site uses; a page icon naming another one is reported, and none is when omitted. */
   siteIconLibrary?: string
+  /** The redirects the source's own config lists: a `slug` one of them already answers is not reported as lost. */
+  redirects?: ReadonlyArray<{ source: string; destination: string }>
   /** The navigation label that titles a page with no title or heading of its own, before the file name does. */
   fallbackTitle?: string
 }): MigrationPage | null {
@@ -3303,7 +3305,12 @@ export function parseMarkdownPage(input: {
       // Access settings are enforced by the repository classifier, never lost here.
       'groups', 'public', ...PAGE_META_FIELDS.map(([field]) => field),
     ])
-    const dropped = Object.keys(parsed.data).filter((key) => !supported.has(key))
+    const route = (value: string): string => value.trim().replace(/^\/+|\/+$/g, '')
+    const slug = typeof parsed.data.slug === 'string' ? route(parsed.data.slug) : undefined
+    // The redirect the source already has sends the slug's address to this page, so nothing is lost.
+    const slugRedirected = slug !== undefined && (input.redirects ?? []).some((redirect) => route(redirect.source) === slug
+      && [input.id, input.navigationId ?? input.id].some((id) => route(redirect.destination) === id || (id === 'introduction' && route(redirect.destination) === '')))
+    const dropped = Object.keys(parsed.data).filter((key) => !supported.has(key) && !(key === 'slug' && slugRedirected))
     if (dropped.length) input.warn?.(`Unsupported Mintlify frontmatter fields were omitted: ${dropped.join(', ')}. Review their behavior before publishing.`)
 
   }

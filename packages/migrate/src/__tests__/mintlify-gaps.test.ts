@@ -67,3 +67,21 @@ describe('a snippet whose attribute is a template literal of constants', () => {
     expect(body).toContain('data-k={`k-${"b".length}`}')
   })
 })
+
+describe('slug frontmatter', () => {
+  const page = '---\ntitle: Landing\nslug: cookbook/landing\n---\n\nText\n'
+  const run = (redirects: Array<{ source: string; destination: string }>) => migrate(
+    { 'index.mdx': '---\ntitle: Home\n---\n\nHome\n', 'solutions/landing.mdx': page },
+    { navigation: { pages: ['index', 'solutions/landing'] }, redirects },
+  )
+
+  it('does not warn that slug was omitted when the source already redirects it to the page', () => {
+    const bundle = run([{ source: '/cookbook/landing', destination: '/solutions/landing' }])
+    expect(messages(bundle).join('\n')).not.toContain('slug')
+  })
+
+  it('still warns when no redirect answers the slug, or one goes elsewhere', () => {
+    expect(messages(run([])).join('\n')).toContain('fields were omitted: slug')
+    expect(messages(run([{ source: '/cookbook/landing', destination: '/index' }])).join('\n')).toContain('fields were omitted: slug')
+  })
+})

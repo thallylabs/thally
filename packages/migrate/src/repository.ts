@@ -5666,6 +5666,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
       siteIconLibrary,
+      ...(platform === 'mintlify' ? { redirects: mintlifyAuthoredRedirects } : {}),
       ...(platform === 'fern' && fernNavTitles.has(navigationId) ? { fallbackTitle: fernNavTitles.get(navigationId) } : {}),
       raw,
       platform,
