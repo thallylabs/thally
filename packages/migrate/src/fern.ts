@@ -124,7 +124,7 @@ export function fernDroppedConfigWarnings(config: Record<string, unknown>): Arra
   }
   const fonts = Object.entries(objectValue(config.typography) ?? {}).flatMap(([role, value]) => {
     const font = objectValue(value)
-    return font && configEntries([font.path, font.paths, ...(Array.isArray(font.paths) ? font.paths : [])].flat()).length > 0 ? [role] : []
+    return font && configEntries([font.path, font.paths].flat()).length > 0 ? [role] : []
   })
   if (fonts.length > 0) {
     warn('typography', `Fern custom font files (${cappedList(fonts)}) were not imported, so the migrated site uses its default fonts. Set a Google font family under "fonts" in docs.json to match them.`)
