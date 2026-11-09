@@ -142,6 +142,11 @@ export const FONT_AWESOME_PRO_FALLBACKS: Readonly<Record<string, string>> = {
   'light-switch': 'lucide:toggle-right', 'gear-api': 'gear', 'trian-balbot': 'lucide:user', whale: 'fish',
   blueberries: 'lucide:grape', 'link-horizontal': 'lucide:link-2', 'book-open-cover': 'lucide:book-open',
   'code-pull-request-closed': 'lucide:git-pull-request-closed',
+  // Names the Vapi docs use.
+  'book-user': 'lucide:book-user', 'calendar-clock': 'lucide:calendar-clock', 'phone-arrow-right': 'lucide:phone-forwarded',
+  'phone-arrow-up-right': 'lucide:phone-outgoing', 'phone-hangup': 'lucide:phone-off', 'phone-office': 'lucide:phone',
+  'shield-xmark': 'lucide:shield-x', 'square-terminal': 'lucide:square-terminal', 'waveform-lines': 'lucide:audio-lines',
+  running: 'person-running',
   // Pro names that are bundled as Lucide glyphs, so they stay visible when Font Awesome is selected.
   'rocket-launch': 'lucide:rocket', 'party-horn': 'lucide:party-popper', 'brackets-curly': 'lucide:braces',
   'code-simple': 'lucide:code', 'grid-round': 'lucide:grid-3x3', 'link-simple': 'lucide:link-2', 'circle-x': 'lucide:circle-x',
