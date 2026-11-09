@@ -6918,19 +6918,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const page of pages) page.body = rewriteRelativeJsxHrefs(page.body, page.id)
   }
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
-  preserveLinkedAnchors(pages)
-  if (platform === 'fern' && fernRawConfig) {
-    const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
-    if (sourceSiteUrl) {
-      const externalized = new Set<string>()
-      const pageIds = new Set(pages.map((page) => page.id))
-      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, pageIds, sourceSiteUrl, externalized)
-      if (externalized.size > 0) warnings.push({
-        code: 'unsupported-config',
-        message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
-      })
-    }
-  }
+  // Before the anchor pass, so a fragment on a converted link is checked like any other.
   if (platform === 'fern' && fernRawConfig) {
     const domains = fernCustomDomains(fernRawConfig)
     if (domains.length > 0) {
@@ -6954,6 +6942,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (unresolved.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
+      })
+    }
+  }
+  preserveLinkedAnchors(pages)
+  if (platform === 'fern' && fernRawConfig) {
+    const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
+    if (sourceSiteUrl) {
+      const externalized = new Set<string>()
+      const pageIds = new Set(pages.map((page) => page.id))
+      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, pageIds, sourceSiteUrl, externalized)
+      if (externalized.size > 0) warnings.push({
+        code: 'unsupported-config',
+        message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
       })
     }
   }
