@@ -53,7 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
-import { fernDroppedConfigWarnings, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
+import { cappedList, fernDroppedConfigWarnings, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
@@ -3525,6 +3525,52 @@ function fernSourceSiteUrl(config: Record<string, unknown>): string | undefined 
   }
 }
 
+/** The hosts (and the path each is served under) docs.yml names as this site's own `custom-domain`s. */
+function fernCustomDomains(config: Record<string, unknown>): Array<{ host: string; path: string }> {
+  const domains: Array<{ host: string; path: string }> = []
+  for (const instance of Array.isArray(config.instances) ? config.instances : []) {
+    const address = (instance as Record<string, unknown> | null)?.['custom-domain']
+    if (typeof address !== 'string') continue
+    try {
+      const url = new URL(/^https?:\/\//i.test(address) ? address : `https://${address}`)
+      domains.push({ host: url.hostname.toLowerCase(), path: url.pathname.replace(/\/+$/, '') })
+    } catch { /* an invalid domain names no site */ }
+  }
+  return domains
+}
+
+/**
+ * Turn absolute links to the site's own custom domain into internal paths, but only when `resolve` finds the page they reach
+ * (directly or through redirects). The rest stay absolute and are collected in `unresolved`.
+ */
+function rewriteFernOwnDomainLinks(
+  body: string,
+  domains: ReadonlyArray<{ host: string; path: string }>,
+  versionPath: string,
+  resolve: (pathname: string) => string | undefined,
+  unresolved: Set<string>,
+): string {
+  const rewrite = (target: string): string => {
+    let url: URL
+    try { url = new URL(target) } catch { return target }
+    const domain = domains.find((entry) => entry.host === url.hostname.toLowerCase())
+    if (!domain || url.port || url.username || url.password) return target
+    if (domain.path && url.pathname !== domain.path && !url.pathname.startsWith(`${domain.path}/`)) return target
+    let pathname = url.pathname.slice(domain.path.length) || '/'
+    if (versionPath && (pathname === versionPath || pathname.startsWith(`${versionPath}/`))) pathname = pathname.slice(versionPath.length) || '/'
+    if (pathname.startsWith('//') || pathname.includes('\\')) return target
+    const resolved = resolve(pathname)
+    if (!resolved) {
+      unresolved.add(`${url.hostname}${url.pathname}`.slice(0, 120))
+      return target
+    }
+    return `${resolved}${url.search}${url.hash}`
+  }
+  return replaceOutsideCode(body, (text) => text
+    .replace(/(\]\()(https?:\/\/[^\s)]{1,2048})(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
+    .replace(/(\b(?:href|to)=(['"]))(https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
+}
+
 /** Keep unresolved root-relative links usable on the source site, with an explicit warning. */
 function externalizeMissingFernLinks(body: string, pageIds: ReadonlySet<string>, sourceSiteUrl: string, externalized: Set<string>): string {
   const rewrite = (target: string): string => {
@@ -6852,6 +6898,32 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (externalized.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
+      })
+    }
+  }
+  if (platform === 'fern' && fernRawConfig) {
+    const domains = fernCustomDomains(fernRawConfig)
+    if (domains.length > 0) {
+      const pageIds = new Set(pages.map((page) => page.id))
+      const redirectsBySource = new Map((docsConfig.redirects ?? []).map((redirect) => [redirect.source.replace(/\/+$/, '').toLowerCase() || '/', redirect.destination] as const))
+      let apiRoutes: Set<string> | undefined
+      const resolve = (pathname: string): string | undefined => {
+        let current = pathname.replace(/\/+$/, '') || '/'
+        for (let hop = 0; hop < 8; hop++) {
+          if (current === '/' || pageIds.has(current.slice(1))) return current
+          apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))
+          if (apiRoutes.has(current)) return current
+          const next = redirectsBySource.get(current.toLowerCase())
+          if (!next?.startsWith('/') || next.startsWith('//')) return undefined
+          current = next.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
+        }
+        return undefined
+      }
+      const unresolved = new Set<string>()
+      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, resolve, unresolved)
+      if (unresolved.size > 0) warnings.push({
+        code: 'unsupported-config',
+        message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
       })
     }
   }

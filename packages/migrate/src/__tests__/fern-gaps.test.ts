@@ -116,3 +116,36 @@ describe('V1/V7: Fern API reference operation URLs', () => {
     expect(body).toContain(`(${redirect('/api-reference/analytics/get-all')})`)
   })
 })
+
+describe('B8/V6: links to the site\'s own custom domain', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'instances:\n  - url: acme.docs.buildwithfern.com\n    custom-domain: docs.example.com\nredirects:\n  - source: /old\n    destination: /guide/b\nnavigation:\n  - section: Guide\n    contents:\n      - page: A\n        path: a.mdx\n      - page: B\n        path: b.mdx\n',
+    'a.mdx': '---\ntitle: A\n---\n\n[b](https://docs.example.com/guide/b#top) [old](https://docs.example.com/old) <a href="https://docs.example.com/guide/b">x</a> [gone](https://docs.example.com/missing/page) [other](https://example.org/guide/b)\n',
+    'b.mdx': '---\ntitle: B\n---\n\nB.',
+  })
+  const body = bundle.pages.find((page) => page.title === 'A')!.body
+
+  it('turns resolvable links into internal paths, following redirects', () => {
+    expect(body).toContain('[b](/guide/b#top)')
+    expect(body).toContain('[old](/guide/b)')
+    expect(body).toContain('<a href="/guide/b">')
+  })
+
+  it('keeps unresolvable and foreign links absolute and warns', () => {
+    expect(body).toContain('https://docs.example.com/missing/page')
+    expect(body).toContain('https://example.org/guide/b')
+    expect(bundle.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/1 link.*docs\.example\.com\/missing\/page/))
+  })
+})
+
+describe('B12: a page without a frontmatter title takes its docs.yml label', () => {
+  it('uses the page: label, not a title made from the slug', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: Multi-Modal (Images / Audio)\n    path: multi-modal.mdx\n  - page: Titled\n    path: titled.mdx\n',
+      'multi-modal.mdx': 'Body text only.',
+      'titled.mdx': '---\ntitle: Own Title\n---\n\nBody.',
+    })
+    expect(bundle.pages.find((page) => page.body.startsWith('Body text'))?.title).toBe('Multi-Modal (Images / Audio)')
+    expect(bundle.pages.find((page) => page.body.startsWith('Body.'))?.title).toBe('Own Title')
+  })
+})
