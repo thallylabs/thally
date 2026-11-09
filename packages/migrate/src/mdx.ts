@@ -616,6 +616,11 @@ function pageIdClaims(body: string): { free: (id: string, line: number) => boole
   }
 }
 
+/** The id Mintlify gives a heading by the plain rule: lowercase, each run of ASCII characters that are not letters or digits one dash, nothing trimmed. */
+function mintlifyTrailingDashId(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g, '-')
+}
+
 /**
  * Give each Mintlify heading the id Mintlify serves, so in-page and cross-page
  * `#anchor` links from the source still land. Only headings whose id differs
@@ -651,7 +656,13 @@ export function markMintlifyHeadings(body: string): string {
       const visible = mdxTextWithoutInlineElements(source)
       if (visible !== undefined && id !== thallyHeadingSlug(visible)) marked = (claims ??= pageIdClaims(body)).free(id, index + 1)
     }
-    return `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
+    // Mintlify keeps the dash a closing `?` makes at the end of an id (`what-is-mfa-`), where Thally's slug has none; the ids read from
+    // other sites that end in `)` or `.` have no such dash, so only a heading that ends in `?` gets the alias.
+    // The heading keeps its own id; an invisible anchor answers the one Mintlify serves, so deep links from outside still land.
+    const served = `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
+    const own = id && marked ? id : thallyHeadingSlug(text)
+    const trailing = mintlifyTrailingDashId(text)
+    return own && text.trimEnd().endsWith('?') && trailing === `${own}-` ? `<a id="${trailing}" />\n\n${served}` : served
   }).join('\n')
 }
 

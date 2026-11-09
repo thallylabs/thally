@@ -101,3 +101,28 @@ describe('a page with no title', () => {
     expect(title('introduction')).toBe('Introduction')
   })
 })
+
+describe('heading ids that end in a dash on Mintlify', () => {
+  const headings = [
+    '## What is Multi-Factor Authentication (MFA)?',
+    '',
+    '## IndexedDB (web only)?',
+    '',
+    '## What is Turnkey Verifiable Cloud “TVC”?',
+    '',
+    '## Plain heading',
+    '',
+    '```md',
+    '## Not a heading?',
+    '```',
+  ].join('\n')
+
+  it('keeps Thally\'s own heading and adds an invisible anchor with the id Mintlify serves', () => {
+    const bundle = migrate({ 'index.mdx': `---\ntitle: Home\n---\n\n${headings}\n` })
+    const body = bundle.pages.find((page) => page.id === 'introduction')!.body
+    expect(body).toContain('<a id="what-is-multi-factor-authentication-mfa-" />\n\n## What is Multi-Factor Authentication (MFA)?')
+    expect(body).toContain('<a id="indexeddb-web-only-" />\n\n## IndexedDB (web only)?')
+    expect(body).toContain('<a id="what-is-turnkey-verifiable-cloud-“tvc”-" />\n\n## What is Turnkey Verifiable Cloud “TVC”?')
+    expect(body.match(/<a id=/g)).toHaveLength(3)
+  })
+})
