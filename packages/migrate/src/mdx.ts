@@ -3243,8 +3243,13 @@ export function parseMarkdownPage(input: {
   }
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
   const authoredDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim() ? parsed.data.description.trim() : undefined
+  // Fern shows `subtitle` as the lead line under the title. With no description of its own the page is described by it, which Thally
+  // shows under the title; otherwise the description stays as it is and the subtitle opens the body.
+  const subtitle = input.platform === 'fern' && typeof parsed.data.subtitle === 'string' && parsed.data.subtitle.trim()
+    ? withoutMarkdownLinks(parsed.data.subtitle.trim()) : undefined
+  const subtitleIsDescription = subtitle !== undefined && authoredDescription === undefined
   // An API reference page is described by its operation, not by its prose.
-  const description = authoredDescription ?? (namesOperation ? '' : firstParagraph(body))
+  const description = authoredDescription ?? (subtitleIsDescription ? subtitle : namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
@@ -3256,7 +3261,7 @@ export function parseMarkdownPage(input: {
     iconType,
     description,
     // A description taken from the body is the paragraph the body already shows, so it must not also appear under the title.
-    ...(input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== '')
+    ...(!subtitleIsDescription && (input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== ''))
       ? { descriptionPlacement: 'body' as const }
       : {}),
     badge,
@@ -3269,7 +3274,9 @@ export function parseMarkdownPage(input: {
     ...(Object.keys(meta).length > 0 ? { meta } : {}),
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),
-    body,
+    body: subtitle !== undefined && !subtitleIsDescription
+      ? `${subtitle.replace(/([\\{}<>])/g, '\\$1')}\n\n${body}`.trim()
+      : body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }

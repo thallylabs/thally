@@ -253,3 +253,24 @@ describe('V5: Fern Download and Button', () => {
     expect(messages).not.toMatch(/"?(Download|Button)"?[^\n]*(not|no)/)
   })
 })
+
+describe('V11: Fern subtitle', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'navigation:\n  - page: Plain\n    path: plain.mdx\n  - page: Both\n    path: both.mdx\n',
+    'plain.mdx': '---\ntitle: Plain\nsubtitle: Lead line\n---\n\nBody.',
+    'both.mdx': '---\ntitle: Both\ndescription: Meta text\nsubtitle: A {lead} <line>\n---\n\nBody.',
+  })
+
+  it('becomes the visible description when the page has none', () => {
+    const page = bundle.pages.find((entry) => entry.title === 'Plain')!
+    expect(page.description).toBe('Lead line')
+    expect(page.descriptionPlacement).toBeUndefined()
+  })
+
+  it('opens the body and keeps an existing description', () => {
+    const page = bundle.pages.find((entry) => entry.title === 'Both')!
+    expect(page.description).toBe('Meta text')
+    expect(page.descriptionPlacement).toBe('body')
+    expect(page.body).toBe('A \\{lead\\} \\<line\\>\n\nBody.')
+  })
+})
