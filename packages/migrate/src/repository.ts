@@ -2424,9 +2424,11 @@ export function apiOperationLinkMap(
       if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
       leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
       // Fern's own URL: `<section>/<sdk group>/<sdk method>`, else its tag and the derived leaf above.
-      const fernLeaf = operation.sdkMethod ? fernLabelSlug(operation.sdkMethod)
-        : operation.operationId ? fernLabelSlug(operation.operationId.replace(/([A-Za-z])(\d)/g, '$1-$2')) : [...leafCandidates][0]
-      const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernLabelSlug)
+      // Fern also splits a digit from the letter before it (`V2` -> `v-2`).
+      const fernSlug = (value: string): string => fernLabelSlug(value.replace(/([A-Za-z])(\d)/g, '$1-$2'))
+      const fernLeaf = operation.sdkMethod ? fernSlug(operation.sdkMethod)
+        : operation.operationId ? fernSlug(operation.operationId) : [...leafCandidates][0]
+      const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernSlug)
       const fernUrl = [base, ...fernGroups, fernLeaf].filter(Boolean).join('/').toLowerCase()
       if (fernLeaf && !underDeeperMount(fernUrl, prefix)) {
         if (specId !== undefined && !fernPages.has(fernUrl)) fernPages.set(fernUrl, thallyHref)
