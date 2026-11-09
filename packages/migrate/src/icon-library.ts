@@ -260,6 +260,35 @@ const LUCIDE_ICON_NAMES: ReadonlySet<string> = new Set(`
 `.split(/\s+/).filter(Boolean))
 
 /**
+ * Names the runtime draws from its own bundled glyphs (`lucideIconMap` in its `content-icon.tsx`), so they show
+ * even though Lucide's CDN set has no icon of that name (`envelope`, `file-lines`).
+ */
+const RUNTIME_BUNDLED_ICON_NAMES: ReadonlySet<string> = new Set(`
+  activity alert alert-circle archive arrow arrow-right arrow-trend-up arrows-rotate award ban bar-chart bell
+  bell-ring bolt bolt-lightning book book-open bookmark books bot box box-archive boxes boxes-stacked braces
+  brackets-curly briefcase brush bug building bullhorn calendar calendar-days cart-shopping chart-bar chart-
+  line chart-pie chart-simple check check-circle circle-check circle-info circle-question circle-user circle-x
+  circle-xmark clipboard clipboard-check clock clock-rotate-left cloud cloud-arrow-up cloud-upload code code-
+  branch code-commit code-merge code-pull-request code-simple code-xml cog command comment comments compass
+  copy cpu credit-card database desktop diagram-project display dollar dollar-sign download droplet envelope
+  external external-link eye eye-off eye-slash file file-code file-lines file-text files filter fingerprint
+  fire flag flame flask flask-conical floppy-disk folder folder-open font gauge gauge-high gear gears gem gift
+  git-branch git-commit git-merge git-pull-request github globe graduation-cap grid grid-round hammer hard-
+  drive hash hashtag heart help history home hourglass house image inbox info key key-round language languages
+  layer-group layers layout-grid leaf lightbulb line-chart link link-simple list list-check list-checks list-
+  ol list-ordered lock lock-open magnifying-glass magnifying-glass-plus mail map megaphone menu message
+  message-circle microchip mobile mobile-screen monitor moon network network-wired newspaper package package-
+  open paintbrush palette paper-plane paperclip party-horn party-popper pen pen-to-square pencil people-group
+  phone pie-chart play plug plus power power-off puzzle puzzle-piece question receipt refresh-cw repeat robot
+  rocket rocket-launch rotate rotate-cw route rss save scale scale-balanced screwdriver-wrench search send
+  server settings share share-nodes shield shield-alert shield-check shield-halved shopping-cart sliders
+  smartphone sparkles square-terminal star stopwatch sun table table-cells tag telegram terminal thumbs-down
+  thumbs-up timer trash trash-2 trash-can trending-up triangle-alert triangle-exclamation trophy twitter type
+  unlock upload user user-group users video wallet wand wand-magic wand-magic-sparkles warning webhook wifi
+  workflow wrench zap zoom-in
+`.split(/\s+/).filter(Boolean))
+
+/**
  * Font Awesome names whose Lucide icon has another name. Every target exists in `LUCIDE_ICON_NAMES`.
  */
 export const FONT_AWESOME_TO_LUCIDE: Readonly<Record<string, string>> = {
@@ -283,6 +312,6 @@ export function mapFernIcon(icon: string, unmapped: Set<string>): string {
   const mapped = FONT_AWESOME_TO_LUCIDE[name]
   if (mapped) return mapped
   // Brand marks come from the runtime's brand set, not from Lucide.
-  if (!tokens.includes('fa-brands') && !LUCIDE_ICON_NAMES.has(name)) unmapped.add(name)
+  if (!tokens.includes('fa-brands') && !LUCIDE_ICON_NAMES.has(name) && !RUNTIME_BUNDLED_ICON_NAMES.has(name)) unmapped.add(name)
   return icon
 }
