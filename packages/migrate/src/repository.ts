@@ -204,6 +204,8 @@ const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
   '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
 ])
+/** What a stylesheet's root-relative `url()` may copy as a site asset: the usual assets and fonts, never a page or script. */
+const STYLESHEET_URL_EXTENSIONS = new Set([...ASSET_EXTENSIONS, '.woff', '.woff2', '.ttf', '.otf', '.eot'])
 const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'agents.md', 'claude.md', 'code_of_conduct.md', 'contributing.md',
   'license.md', 'readme.md', 'security.md',
@@ -6066,6 +6068,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           ? (extname(file.relativePath).toLowerCase() === '.css' ? 'style' as const : 'script' as const)
           : undefined
     const loadedByStylesheet = platform === 'mintlify' && !siteKind && styleUrlTargets.has(file.relativePath)
+      && STYLESHEET_URL_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
     if (!siteKind && !loadedByStylesheet && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue

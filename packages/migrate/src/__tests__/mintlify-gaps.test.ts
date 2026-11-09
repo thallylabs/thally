@@ -35,6 +35,23 @@ describe('custom stylesheets', () => {
     expect(messages(bundle).join('\n')).not.toContain('NOT applied')
   })
 
+  it('copies only asset and font targets of url(), not a page or text file a stylesheet names', () => {
+    const bundle = migrate({
+      'index.mdx': '---\ntitle: Home\n---\n\nHello\n',
+      'styles.css': '.a { background: url(/private/page.html) }\n.b { background: url(/private/notes.txt) }\n.c { src: url(/fonts/b.eot) format("embedded-opentype"), url(/fonts/c.ttf), url(/fonts/d.woff) }\n.d { background: url(/img/e.svg) }\n',
+      'private/page.html': '<p>draft</p>',
+      'private/notes.txt': 'draft',
+      'fonts/b.eot': Buffer.from('f'),
+      'fonts/c.ttf': Buffer.from('f'),
+      'fonts/d.woff': Buffer.from('f'),
+      'img/e.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    })
+    const paths = bundle.assets.map((asset) => asset.path)
+    expect(paths).toEqual(expect.arrayContaining(['fonts/b.eot', 'fonts/c.ttf', 'fonts/d.woff', 'img/e.svg']))
+    expect(paths).not.toContain('private/page.html')
+    expect(paths).not.toContain('private/notes.txt')
+  })
+
   it('copies the root-relative url() targets that exist and warns once about the missing ones', () => {
     const bundle = migrate(files)
     const paths = bundle.assets.map((asset) => asset.path)
