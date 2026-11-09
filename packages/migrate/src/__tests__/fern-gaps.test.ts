@@ -319,3 +319,25 @@ describe('V20: block components right after a text line', () => {
     expect(body).toContain('<Tabs>\n<Tab title="A">')
   })
 })
+
+describe('V22: scheme-less links in OpenAPI descriptions', () => {
+  it('warns once, listing the hosts, and leaves the spec untouched', () => {
+    const spec = JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'T', version: '1', description: 'Open the [Dashboard](dashboard.vapi.ai) or [docs](https://docs.vapi.ai) or [guide](setup.md) or [x](dashboard.vapi.ai/keys).' },
+      paths: { '/a': { get: { operationId: 'a', responses: { 200: { description: 'ok' } } } } },
+    })
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: Home\n    path: index.mdx\n  - api: API Reference\n',
+      'generators.yml': 'api:\n  specs:\n    - openapi: openapi.json\n',
+      'openapi.json': spec,
+      'index.mdx': 'Hi.',
+    })
+    const warnings = bundle.warnings.map((warning) => warning.message).filter((message) => message.includes('without https://'))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('2 link(s)')
+    expect(warnings[0]).toContain('dashboard.vapi.ai, dashboard.vapi.ai/keys')
+    expect(warnings[0]).not.toContain('docs.vapi.ai')
+    expect(Buffer.from(bundle.assets.find((asset) => asset.path.endsWith('openapi.json'))!.content).toString()).toContain('(dashboard.vapi.ai)')
+  })
+})

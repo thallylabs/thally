@@ -2949,6 +2949,18 @@ function rewriteApiOperationLinks(
   }).join('\n')
 }
 
+/** File extensions a relative link such as `[guide](setup.md)` ends in, which are not top-level domains. */
+const RELATIVE_LINK_EXTENSIONS = new Set(['md', 'mdx', 'html', 'htm', 'json', 'yml', 'yaml', 'xml', 'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js', 'ts', 'csv', 'zip'])
+
+/** Markdown link targets in a spec that look like a host (`dashboard.vapi.ai`) but have no scheme, so they resolve as relative paths. Unique, in order of appearance. */
+export function schemelessSpecLinks(content: Buffer): Array<string> {
+  const found = new Set<string>()
+  for (const match of content.toString('utf8').matchAll(/\]\(([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\.([a-z]{2,24})(?:[/?#][^)\s"'\\]*)?)\)/gi)) {
+    if (!RELATIVE_LINK_EXTENSIONS.has(match[2].toLowerCase())) found.add(match[1].slice(0, 120))
+  }
+  return [...found]
+}
+
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
 
 function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<string> {
@@ -6353,6 +6365,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         specFilenameSources.set(filename, spec.absolutePath)
         const specContent = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
         if (!specContent) continue
+        const schemeless = schemelessSpecLinks(specContent)
+        if (schemeless.length > 0) warnings.push({
+          code: 'unsupported-config',
+          message: `The API spec ${spec.relativePath} has ${schemeless.length} link(s) written without https:// (${cappedList(schemeless, 5)}), so the API reference opens them as paths on this site. Add https:// to those links in the OpenAPI descriptions.`,
+          source: spec.relativePath,
+        })
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
           assets.push(specAsset(filename, specContent))
         }
