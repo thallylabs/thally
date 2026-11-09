@@ -3601,11 +3601,16 @@ function fernCustomDomains(config: Record<string, unknown>): Array<{ host: strin
 }
 
 /** The anchors a page body offers: its headings' GitHub-style slugs, explicit heading ids and `id` attributes, outside code. */
-function headingAnchors(body: string): Set<string> {
+export function headingAnchors(body: string): Set<string> {
   const anchors = new Set<string>()
   replaceOutsideCode(body, (segment) => {
     for (const line of segment.split('\n')) {
-      const heading = /^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line)?.[1]
+      const opened = /^ {0,3}#{1,6}[ \t]+(\S.*)$/.exec(line)?.[1]?.trimEnd()
+      if (!opened) continue
+      // A closing run of `#` counts only after a space or tab; scanned by hand so a long run of blanks cannot backtrack.
+      let end = opened.length
+      while (end > 0 && opened[end - 1] === '#') end--
+      const heading = end === 0 || /[ \t]/.test(opened[end - 1]) ? opened.slice(0, end).trimEnd() : opened
       if (!heading) continue
       const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}\s*$/.exec(heading)
       if (explicit) anchors.add(explicit[1])
