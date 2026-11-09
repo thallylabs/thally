@@ -648,6 +648,7 @@ function mintlifyTrailingDashId(text: string): string {
 export function markMintlifyHeadings(body: string): string {
   let fence: string | undefined
   let claims: ReturnType<typeof pageIdClaims> | undefined
+  const aliases = new Map<string, number>()
   return body.split('\n').map((line, index) => {
     const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
     if (marker) {
@@ -676,7 +677,14 @@ export function markMintlifyHeadings(body: string): string {
     const served = `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
     const own = id && marked ? id : thallyHeadingSlug(text)
     const trailing = mintlifyTrailingDashId(text)
-    return own && text.trimEnd().endsWith('?') && trailing === `${own}-` ? `<a id="${trailing}" />\n\n${served}` : served
+    if (!own || !text.trimEnd().endsWith('?') || trailing !== `${own}-`) return served
+    // Mintlify numbers an id the page has already used, so a second `Why?` answers to `why--2`.
+    const occurrence = (aliases.get(trailing) ?? 0) + 1
+    aliases.set(trailing, occurrence)
+    const alias = occurrence === 1 ? trailing : `${trailing}-${occurrence}`
+    // One id on two elements is invalid, so the anchor is left out when something else on the page could hold its id.
+    // The anchor takes the heading's indent, which keeps both in the same list item.
+    return (claims ??= pageIdClaims(body)).free(alias, index + 1) ? `${line.match(/^ */)![0]}<a id="${alias}" />\n\n${served}` : served
   }).join('\n')
 }
 

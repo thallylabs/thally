@@ -142,6 +142,26 @@ describe('heading ids that end in a dash on Mintlify', () => {
     expect(body).toContain('<a id="what-is-turnkey-verifiable-cloud-“tvc”-" />\n\n## What is Turnkey Verifiable Cloud “TVC”?')
     expect(body.match(/<a id=/g)).toHaveLength(3)
   })
+
+  const bodyOf = (content: string) => migrate({ 'index.mdx': `---\ntitle: Home\n---\n\n${content}\n` }).pages.find((page) => page.id === 'introduction')!.body
+
+  it('numbers the anchor of a repeated heading, so no id is on the page twice', () => {
+    const body = bodyOf('## Why?\n\nOne.\n\n## Why?\n\nTwo.\n\n### Why?\n\nThree.')
+    expect(body.match(/<a id="[^"]*" \/>/g)).toEqual(['<a id="why-" />', '<a id="why--2" />', '<a id="why--3" />'])
+  })
+
+  it('adds no anchor for an id the page already holds', () => {
+    const authored = bodyOf('<a id="why-" />\n\nText.\n\n## Why?\n\nOne.')
+    expect(authored.match(/id="why-"/g)).toHaveLength(1)
+    const numbered = bodyOf('<div id="why--2">x</div>\n\n## Why?\n\nOne.\n\n## Why?\n\nTwo.')
+    expect(numbered.match(/<a id=/g)).toBeNull()
+    // A different id is no claim on this one.
+    expect(bodyOf('<a id="how-" />\n\n## Why?\n\nOne.')).toContain('<a id="why-" />\n\n## Why?')
+  })
+
+  it('keeps the anchor in the list item its heading is in', () => {
+    expect(bodyOf('- Item\n\n  ## Why?\n\n  Text.')).toContain('  <a id="why-" />\n\n  ## Why?')
+  })
 })
 
 describe('top-level groups of a Mintlify tab', () => {
