@@ -309,6 +309,11 @@ body {
   background: var(--docs-bg);
 }
 
+/* A `mode: custom` page spans the page, as on Mintlify. */
+.thally-docs-root:has([data-doc-mode='custom']) .thally-docs-sidebar {
+  display: none;
+}
+
 .thally-docs-sidebar a[aria-current='page'] {
   background: var(--docs-accent-soft) !important;
   color: var(--docs-accent) !important;
