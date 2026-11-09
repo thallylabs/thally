@@ -241,6 +241,16 @@ function countAtMost(ascending: ReadonlyArray<number>, value: number): number {
   return low
 }
 
+/** A body that is one component tag (`<Landing />`) and nothing else: its text comes from the component, so its source length says nothing. */
+function isOnlyComponent(content: string): boolean {
+  try {
+    const children = (parseMdxTree(content) as unknown as { children?: Array<{ type: string; name?: string | null }> }).children ?? []
+    return children.length === 1 && children[0].type === 'mdxJsxFlowElement' && /^[A-Z]/.test(children[0].name ?? '')
+  } catch {
+    return false
+  }
+}
+
 /**
  * Parse a page body once, exactly as the renderer does: with the snippet
  * imports removed first. Every reported line is a line of `content`, found in
@@ -945,7 +955,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const notices = isLinkStub ? [] : issues
     // The site describes an API page by its operation when the page has no description, so only the spec can say it has none.
     if (!data.description && !reference) notices.push({ severity: 'warning', message: MISSING_DESCRIPTION, file: rel2 })
-    if (typeof data.openapi !== 'string' && content.trim().length < 50) {
+    if (typeof data.openapi !== 'string' && data.mode !== 'custom' && content.trim().length < 50 && !isOnlyComponent(content)) {
       notices.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
     if (isLinkStub) linkStubs.push({ file: rel2, path, issues: notices })
