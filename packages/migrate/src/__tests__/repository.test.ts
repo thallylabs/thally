@@ -6054,7 +6054,7 @@ navigation:
     expect(bundle.warnings.some((warning) => warning.message.includes('Math (KaTeX'))).toBe(false)
   })
 
-  it('redirects an underscore-slug link (matching the on-disk folder name) to the hyphenated route Thally actually uses', () => {
+  it('keeps an underscore slug as the route and redirects the hyphenated spelling to it', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-slug-alias-'))
     const fernRoot = join(root, 'fern')
     mkdirSync(join(fernRoot, 'baml_client'), { recursive: true })
@@ -6074,10 +6074,10 @@ navigation:
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
-    expect(bundle.pages.map((page) => page.id)).toContain('baml-client/with-options')
+    expect(bundle.pages.map((page) => page.id)).toContain('baml_client/with-options')
     expect(bundle.docsConfig.redirects).toContainEqual({
-      source: '/baml_client/with-options',
-      destination: '/baml-client/with-options',
+      source: '/baml-client/with-options',
+      destination: '/baml_client/with-options',
     })
   })
 

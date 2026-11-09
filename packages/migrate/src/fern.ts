@@ -250,6 +250,12 @@ function segmentFor(value: Record<string, unknown>, label: string, context?: Wal
   const explicit = value.slug.trim()
   if (!explicit) return null
   const slugified = fernBasicSlug(explicit)
+  // Fern serves an authored lowercase slug literally, underscores included,
+  // so that form stays the route and the hyphenated spelling redirects to it.
+  if (/^[a-z0-9_-]+$/.test(explicit) && explicit.includes('_') && !/^[-_]|[-_]$/.test(explicit)) {
+    if (context && slugified !== explicit) context.segmentAliases.set(explicit, slugified)
+    return explicit
+  }
   if (context && explicit !== slugified && FERN_SEGMENT_ALIAS.test(explicit)) {
     context.segmentAliases.set(slugified, explicit)
   }
