@@ -194,6 +194,35 @@ describe('links through a redirect that adds a query or a fragment', () => {
   })
 })
 
+describe('fragments the migrated page answers', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'instances:\n  - url: acme.docs.buildwithfern.com\n    custom-domain: docs.example.com\nredirects:\n  - source: /old\n    destination: /guide/b\n  - source: /oldq\n    destination: /guide/b?tab=python\nnavigation:\n  - section: Guide\n    contents:\n      - page: A\n        path: a.mdx\n      - page: B\n        path: b.mdx\n',
+    'a.mdx': '---\ntitle: A\n---\n\n[snake](https://docs.example.com/guide/b#the-set_primary-method) [second](https://docs.example.com/guide/b#options-1) [near](https://docs.example.com/guide/b#set-primary) [home](https://docs.example.com/#intro) [commented](https://docs.example.com/guide/b#commented) [rel](/old#the-set_primary-method) [relnative](/old#the-set-primary-method) [query](https://docs.example.com/oldq#the-set_primary-method) [querynative](https://docs.example.com/oldq#the-set-primary-method)\n',
+    'b.mdx': '---\ntitle: B\n---\n\n### The `set_primary` Method\n\n## Options\n\nOne.\n\n## Options\n\nTwo.\n\n<!-- <div id="commented"></div> -->\n',
+  })
+  const body = (title: string): string => bundle.pages.find((page) => page.title === title)!.body
+
+  it('links straight to the page when the source fragment becomes an anchor there', () => {
+    expect(body('A')).toContain('[snake](/guide/b#the-set_primary-method)')
+    expect(body('A')).toContain('[second](/guide/b#options-1)')
+    expect(body('B')).toContain('<a id="the-set_primary-method"></a>\n### The `set_primary` Method')
+    expect(body('B')).toMatch(/One\.\n+<a id="options-1"><\/a>\n## Options/)
+  })
+
+  it('keeps a link on the live site when its fragment names no heading', () => {
+    expect(body('A')).toContain('[near](https://docs.example.com/guide/b#set-primary)')
+    expect(body('A')).toContain('[home](https://docs.example.com/#intro)')
+    expect(body('A')).toContain('[commented](https://docs.example.com/guide/b#commented)')
+  })
+
+  it('leaves a link on a redirect only for an id the page serves as written', () => {
+    expect(body('A')).toContain('[rel](https://docs.example.com/old#the-set_primary-method)')
+    expect(body('A')).toContain('[relnative](/old#the-set-primary-method)')
+    expect(body('A')).toContain('[query](https://docs.example.com/oldq#the-set_primary-method)')
+    expect(body('A')).toContain('[querynative](/oldq#the-set-primary-method)')
+  })
+})
+
 describe('B12: a page without a frontmatter title takes its docs.yml label', () => {
   it('uses the page: label, not a title made from the slug', () => {
     const bundle = migrateFern({

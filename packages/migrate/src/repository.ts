@@ -3613,29 +3613,6 @@ function fernCustomDomains(config: Record<string, unknown>): Array<{ host: strin
   return domains
 }
 
-/** The anchors a page body offers: its headings' GitHub-style slugs, explicit heading ids and `id` attributes, outside code. */
-export function headingAnchors(body: string): Set<string> {
-  const anchors = new Set<string>()
-  replaceOutsideCode(body, (segment) => {
-    for (const line of segment.split('\n')) {
-      const opened = /^ {0,3}#{1,6}[ \t]+(\S.*)$/.exec(line)?.[1]?.trimEnd()
-      if (!opened) continue
-      // A closing run of `#` counts only after a space or tab; scanned by hand so a long run of blanks cannot backtrack.
-      let end = opened.length
-      while (end > 0 && opened[end - 1] === '#') end--
-      const heading = end === 0 || /[ \t]/.test(opened[end - 1]) ? opened.slice(0, end).trimEnd() : opened
-      if (!heading) continue
-      const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}\s*$/.exec(heading)
-      if (explicit) anchors.add(explicit[1])
-      const text = heading.replace(/\{\/\*.*?\*\/\}/g, '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_~]|<[^>]*>/g, '')
-      anchors.add(text.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-'))
-    }
-    for (const match of segment.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) anchors.add(match[1] ?? match[2])
-    return segment
-  })
-  return anchors
-}
-
 /**
  * Turn absolute links to the site's own custom domain into internal paths, but only when `internalTarget` gives the address that
  * serves the link's path and fragment (a page, or a redirect to one). The rest stay absolute and are collected in `unresolved`.
@@ -3656,7 +3633,7 @@ function rewriteFernOwnDomainLinks(
     let pathname = url.pathname.slice(domain.path.length) || '/'
     if (versionPath && (pathname === versionPath || pathname.startsWith(`${versionPath}/`))) pathname = pathname.slice(versionPath.length) || '/'
     if (pathname.startsWith('//') || pathname.includes('\\')) return target
-    // A fragment that names no heading on the page would turn into a broken anchor, so such a link stays on the live site.
+    // A fragment the page does not answer would turn into a broken anchor, so such a link stays on the live site.
     const internal = internalTarget(pathname, url.hash.slice(1))
     if (!internal) {
       unresolved.add(`${url.hostname}${url.pathname}${url.hash}`.slice(0, 120))
@@ -3772,6 +3749,113 @@ export function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<s
     .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]{1,2048}|https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
+/** A fragment `preserveLinkedAnchors` can add as an element id. Encoded fragments are common in exported docs, including names with `$`. */
+const ALIAS_FRAGMENT = /^[\p{L}\p{N}_.:$-]{1,120}$/u
+
+/**
+ * How a page answers the fragments links name: `existing` holds the ids it already serves, and `target` gives the heading or table
+ * row (an index into `lines`) a source-site fragment names, where `preserveLinkedAnchors` adds that fragment as an alias. `local`
+ * also reads the page's own `#fragment` links, which pick among repeated rows.
+ */
+export function pageAnchors(body: string): {
+  existing: Set<string>
+  lines: Array<string>
+  target: (fragment: string, local: boolean) => { index: number; kind: 'heading' | 'table' } | undefined
+} {
+  const comparable = (value: string): string => value
+    .replace(/&(?:lt|gt|amp|quot);/g, ' ')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+  const definitions = new Map<string, string>()
+  replaceOutsideCodeAndComments(body, (text) => {
+    for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
+      const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
+      if (!definitions.has(label)) definitions.set(label, match[0])
+    }
+    return text
+  })
+  const lines = body.split('\n')
+  let fence: string | undefined
+  const tableCells: Array<{ index: number; text: string }> = []
+  const headings = lines.map((line, index) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      return null
+    }
+    if (fence) return null
+    // Each pattern below runs in one pass over a line, so a long run of blanks or `#` cannot make it backtrack.
+    const tableCell = /^ {0,3}\|([^|]*)\|/.exec(line)?.[1].trim()
+    if (tableCell && !/^[:\s-]+$/.test(tableCell)) tableCells.push({ index, text: tableCell })
+    const match = /^ {0,3}#{1,6}\s+(\S.*)$/.exec(line.trimEnd())
+    if (!match) return null
+    // A closing run of `#` is the parser's to drop, like the rest of the heading's syntax.
+    const source = match[1].replace(/\{\/\*\s*#\S{1,120}?\s*\*\/\}$/, '').trimEnd()
+    // `own`: the text the renderer makes the id from, which leaves out inline components and what they hold.
+    return { index, text: mdxVisibleText(source, definitions), own: mdxTextWithoutInlineElements(source, definitions) }
+  }).filter((entry): entry is { index: number; text: string; own: string | undefined } => entry !== null)
+  const existing = new Set<string>()
+  // An `id` attribute in a comment is no element; an explicit heading id is written as a comment.
+  replaceOutsideCodeAndComments(body, (text) => {
+    for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
+    return text
+  })
+  replaceOutsideCode(body, (text) => {
+    for (const match of text.matchAll(/\{\/\*\s*#(\S{1,120}?)\s*\*\/\}/g)) existing.add(match[1])
+    return text
+  })
+  const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
+  for (const heading of headings) {
+    const key = comparable(heading.text)
+    candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: heading.index, kind: 'heading' }])
+  }
+  for (const cell of tableCells) {
+    const key = comparable(cell.text)
+    candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: cell.index, kind: 'table' }])
+  }
+  const headingSlugs = new Map<string, number>()
+  const slugCounts = new Map<string, number>()
+  for (const heading of headings) {
+    const slug = (heading.own ?? heading.text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+    existing.add(slug)
+    const seen = slugCounts.get(slug) ?? 0
+    slugCounts.set(slug, seen + 1)
+    if (slug) headingSlugs.set(seen === 0 ? slug : `${slug}-${seen}`, heading.index)
+  }
+  const target = (fragment: string, local: boolean): { index: number; kind: 'heading' | 'table' } | undefined => {
+    const matches = candidateIndexes.get(comparable(fragment)) ?? []
+    let match = matches.length === 1 ? matches[0] : undefined
+    if (!match && matches.length > 1 && local) {
+      // Repeated option names can occur in several tables. A same-page
+      // reference after one of them refers to the nearest preceding option;
+      // only add an alias when every real local link agrees on that row.
+      const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const linkPattern = new RegExp(`\\]\\(#${escaped}\\)|\\b(?:href|to)=["']#${escaped}["']`)
+      const linkIndexes = lines.flatMap((line, index) => linkPattern.test(line) ? [index] : [])
+      const selections = linkIndexes.map((index) => matches.filter((candidate) => candidate.index < index).at(-1))
+      if (selections.length && selections.every((candidate) => candidate?.index === selections[0]?.index)) match = selections[0]
+    }
+    // A fragment names a heading in the source site; option tables that
+    // repeat the same word are only extra candidates. When exactly one
+    // heading matches, that heading is the target.
+    if (!match && matches.length > 1) {
+      const headingMatches = matches.filter((candidate) => candidate.kind === 'heading')
+      if (headingMatches.length === 1) match = headingMatches[0]
+    }
+    // Repeated headings get numbered ids (`options`, `options-1`, ...). A
+    // fragment that differs from one of those only by letter case names
+    // that specific heading.
+    if (!match) {
+      const index = headingSlugs.get(fragment.toLowerCase())
+      if (index !== undefined) match = { index, kind: 'heading' }
+    }
+    return match
+  }
+  return { existing, lines, target }
+}
+
 /** Preserve source fragments that resolve to a unique heading or table row. */
 function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
   const pageById = new Map(pages.map((page) => [page.id, page]))
@@ -3782,9 +3866,7 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
     if (hash < 0) return
     let fragment: string
     try { fragment = decodeURIComponent(target.slice(hash + 1)) } catch { return }
-    // Only HTML-attribute-safe fragments can become explicit IDs. Encoded
-    // fragments are common in exported docs, including names with `$`.
-    if (!/^[\p{L}\p{N}_.:$-]{1,120}$/u.test(fragment)) return
+    if (!ALIAS_FRAGMENT.test(fragment)) return
     const path = target.slice(0, hash).split('?')[0]
     const id = target.startsWith('#') ? currentId : path.startsWith('/') && !path.startsWith('//')
       ? path.replace(/^\//, '').replace(/\/$/, '') || 'introduction' : ''
@@ -3800,95 +3882,15 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       return text
     })
   }
-  const comparable = (value: string): string => value
-    .replace(/&(?:lt|gt|amp|quot);/g, ' ')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '')
   for (const page of pages) {
     const fragments = requested.get(page.id)
     if (!fragments?.size) continue
-    const definitions = new Map<string, string>()
-    replaceOutsideCodeAndComments(page.body, (text) => {
-      for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
-        const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
-        if (!definitions.has(label)) definitions.set(label, match[0])
-      }
-      return text
-    })
-    const lines = page.body.split('\n')
-    let fence: string | undefined
-    const tableCells: Array<{ index: number; text: string }> = []
-    const headings = lines.map((line, index) => {
-      const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
-      if (marker) {
-        if (!fence) fence = marker[1]
-        else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
-          && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
-        return null
-      }
-      if (fence) return null
-      const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
-      if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
-      const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      if (!match) return null
-      const source = match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '')
-      // `own`: the text the renderer makes the id from, which leaves out inline components and what they hold.
-      return { index, text: mdxVisibleText(source, definitions), own: mdxTextWithoutInlineElements(source, definitions) }
-    }).filter((entry): entry is { index: number; text: string; own: string | undefined } => entry !== null)
-    const existing = new Set<string>()
-    replaceOutsideCode(page.body, (text) => {
-      for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
-      for (const match of text.matchAll(/\{\/\*\s*#(\S+?)\s*\*\/\}/g)) existing.add(match[1])
-      return text
-    })
-    const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
-    for (const heading of headings) {
-      const key = comparable(heading.text)
-      candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: heading.index, kind: 'heading' }])
-    }
-    for (const cell of tableCells) {
-      const key = comparable(cell.text)
-      candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: cell.index, kind: 'table' }])
-    }
-    const headingSlugs = new Map<string, number>()
-    const slugCounts = new Map<string, number>()
-    for (const heading of headings) {
-      const slug = (heading.own ?? heading.text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-      existing.add(slug)
-      const seen = slugCounts.get(slug) ?? 0
-      slugCounts.set(slug, seen + 1)
-      if (slug) headingSlugs.set(seen === 0 ? slug : `${slug}-${seen}`, heading.index)
-    }
+    const { existing, lines, target } = pageAnchors(page.body)
     const headingAliases = new Map<number, Array<string>>()
     const tableAliases = new Map<number, Array<string>>()
     for (const fragment of fragments) {
       if (existing.has(fragment)) continue
-      const matches = candidateIndexes.get(comparable(fragment)) ?? []
-      let match = matches.length === 1 ? matches[0] : undefined
-      if (!match && matches.length > 1 && !crossPageRequests.has(`${page.id}#${fragment}`)) {
-        // Repeated option names can occur in several tables. A same-page
-        // reference after one of them refers to the nearest preceding option;
-        // only add an alias when every real local link agrees on that row.
-        const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const linkPattern = new RegExp(`\\]\\(#${escaped}\\)|\\b(?:href|to)=["']#${escaped}["']`)
-        const linkIndexes = lines.flatMap((line, index) => linkPattern.test(line) ? [index] : [])
-        const selections = linkIndexes.map((index) => matches.filter((candidate) => candidate.index < index).at(-1))
-        if (selections.length && selections.every((candidate) => candidate?.index === selections[0]?.index)) match = selections[0]
-      }
-      // A fragment names a heading in the source site; option tables that
-      // repeat the same word are only extra candidates. When exactly one
-      // heading matches, that heading is the target.
-      if (!match && matches.length > 1) {
-        const headingMatches = matches.filter((candidate) => candidate.kind === 'heading')
-        if (headingMatches.length === 1) match = headingMatches[0]
-      }
-      // Repeated headings get numbered ids (`options`, `options-1`, ...). A
-      // fragment that differs from one of those only by letter case names
-      // that specific heading.
-      if (!match) {
-        const index = headingSlugs.get(fragment.toLowerCase())
-        if (index !== undefined) match = { index, kind: 'heading' }
-      }
+      const match = target(fragment, !crossPageRequests.has(`${page.id}#${fragment}`))
       if (!match) continue
       const { index, kind } = match
       const aliases = kind === 'heading' ? headingAliases : tableAliases
@@ -7084,22 +7086,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     )).has(source)
     let apiRoutes: Set<string> | undefined
     const pagesById = new Map(pages.map((page) => [page.id, page]))
-    const anchorsOf = new Map<string, Set<string>>()
-    const hasAnchor = (route: string, fragment: string): boolean => {
-      const page = pagesById.get(route.slice(1))
-      // Generated API pages and browser text fragments have no headings to check here.
-      if (!page || fragment.startsWith(':~:')) return true
-      if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, headingAnchors(page.body))
-      let decoded = fragment
-      try { decoded = decodeURIComponent(fragment) } catch { /* compare as written */ }
-      return anchorsOf.get(page.id)!.has(decoded)
+    const anchorsOf = new Map<string, ReturnType<typeof pageAnchors>>()
+    /**
+     * Whether the page at `route` answers `fragment` once migrated. A link straight to the page also reaches a fragment that
+     * `preserveLinkedAnchors` adds as an alias there; a link left on a redirect does not, because that pass reads page links only.
+     */
+    const hasAnchor = (route: string, fragment: string, direct: boolean): boolean => {
+      // Browser text fragments name no element.
+      if (fragment.startsWith(':~:')) return true
+      const page = pagesById.get(route.slice(1) || 'introduction')
+      // A generated API page has no headings to check here; a home page the migration does not hold has nothing to check against.
+      if (!page) return route !== '/'
+      if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, pageAnchors(page.body))
+      const anchors = anchorsOf.get(page.id)!
+      let decoded: string
+      try { decoded = decodeURIComponent(fragment) } catch { return anchors.existing.has(fragment) }
+      return anchors.existing.has(decoded) || (direct && ALIAS_FRAGMENT.test(decoded) && anchors.target(decoded, false) !== undefined)
     }
     /**
      * The internal address for a link to a site path: the page or API operation page it reaches, through redirects when need be.
-     * Undefined when it reaches none, or when `fragment` names no heading there. A redirect that adds a query or a fragment of its
-     * own is left for the site to follow, because only the redirect applies them as the source site does (its query is merged into
-     * the link's, its fragment replaces the link's): the address is then the first redirect's own source. So is the address of a
-     * link that is `keptAsWritten`. A link left on a redirect needs every redirect on its way, so it has no address when one is dropped.
+     * Undefined when it reaches none, or when the page there does not answer `fragment` (see `hasAnchor`). A redirect that adds a
+     * query or a fragment of its own is left for the site to follow, because only the redirect applies them as the source site does
+     * (its query is merged into the link's, its fragment replaces the link's): the address is then the first redirect's own source.
+     * So is the address of a link that is `keptAsWritten`. A link left on a redirect needs every redirect on its way, so it has no
+     * address when one is dropped.
      */
     const internalTarget = (pathname: string, fragment: string, keptAsWritten = false): string | undefined => {
       let current = trimTrailingSlashes(pathname) || '/'
@@ -7108,9 +7118,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       let setsFragment = false
       for (let hop = 0; hop < 8; hop++) {
         if (current === '/' || pageIds.has(current.slice(1)) || (apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))).has(current)) {
+          const direct = followed.length === 0 || !(adds || keptAsWritten)
           // The visitor arrives with the link's fragment unless a redirect on the way set one.
-          if (fragment && !setsFragment && !hasAnchor(current, fragment)) return undefined
-          if (followed.length === 0 || !(adds || keptAsWritten)) return current
+          if (fragment && !setsFragment && !hasAnchor(current, fragment, direct)) return undefined
+          if (direct) return current
           return followed.every(keepsRedirect) ? followed[0] : undefined
         }
         const redirect = redirectsBySource.get(current.toLowerCase())
@@ -7135,7 +7146,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (sourceSiteUrl) {
       const externalized = new Set<string>()
       // A route the site answers itself (a page, an API operation page, a redirect it keeps that leads to one) is not missing, and
-      // neither is a fragment that names a heading there. The link stays as it is written, so it relies on that redirect.
+      // neither is a fragment that page answers. The link stays as it is written, so it relies on that redirect.
       const isServed = (path: string, fragment: string): boolean => pageIds.has(path) || internalTarget(`/${path}`, fragment, true) !== undefined
       for (const page of pages) page.body = externalizeMissingFernLinks(page.body, isServed, sourceSiteUrl, externalized)
       if (externalized.size > 0) warnings.push({

@@ -560,11 +560,14 @@ At most 2,000 are created; past that, and when two operations share one URL, a
 warning gives the counts and the first ten URLs. A changelog entry named
 `YYYY-MM-DD` is also served at `/<route>/YYYY/M/D`, as Fern does, and redirects
 to its page. An absolute link to the site's `custom-domain` becomes an internal
-path when it reaches a migrated page, directly or through a redirect, and its
-fragment (if any) names a heading on that page; the others stay absolute, and one
-warning lists the first ten. A link through a redirect that adds a query or a
-fragment of its own points at the redirect, so the site applies both as the
-source site does. A link is never left on a redirect the migration drops.
+path when it reaches a migrated page, directly or through a redirect, and the
+page answers its fragment (if any): an id the page serves, or a heading or table
+row the fragment names, which then gets the fragment as an anchor. The others
+stay absolute, and one warning lists the first ten. A link through a redirect
+that adds a query or a fragment of its own points at the redirect, so the site
+applies both as the source site does; a link left on a redirect, this one or a
+root-relative one, keeps its fragment only when the page serves that id as
+written. A link is never left on a redirect the migration drops.
 
 Fern icons (`fa-light fa-gears`, on tabs, sections and pages) keep their Font
 Awesome name without the style prefix, and the site selects the Font Awesome
