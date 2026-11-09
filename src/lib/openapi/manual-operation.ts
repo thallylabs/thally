@@ -397,5 +397,6 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     prefill,
     manualPage: input.pageId,
     ...(input.locale ? { manualLocale: input.locale } : {}),
+    ...(/<(?:RequestExample|Panel)[\s>/]/.test(input.mdx) ? {} : { manualSamples: true as const }),
   }
 }

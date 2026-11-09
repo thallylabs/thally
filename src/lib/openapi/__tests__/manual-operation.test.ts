@@ -148,6 +148,12 @@ describe('buildManualOperation', () => {
     return buildManualOperation({ pageId: 'p/users', title: 'Users', api: 'POST https://httpbin.org/anything/users/{id}', mdx, config: noConfig, ...overrides })
   }
 
+  it('asks for generated samples unless the page authors its own request panel', () => {
+    expect(build()).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '<RequestExample>\n```bash\ncurl x\n```\n</RequestExample>' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: '<Panel>\nhello\n</Panel>' })).not.toHaveProperty('manualSamples')
+  })
+
   it('sets manualLocale only when a locale is given', () => {
     expect(build({ locale: 'fr' })).toMatchObject({ manualPage: 'p/users', manualLocale: 'fr' })
     expect(build()).not.toHaveProperty('manualLocale')

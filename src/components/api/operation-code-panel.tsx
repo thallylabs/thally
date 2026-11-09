@@ -37,7 +37,7 @@ export function OperationCodePanel({ controller }: { controller: TryItController
       {sample ? <LanguageMenu value={sample.label} options={samples.map((item) => item.label)} onChange={setLanguage} label={t('selectLanguage')} /> : null}
       <CodeCardActions code={requestCode} language={sample?.label} />
     </>}><CodeLines code={requestCode} parameters={parameters} lineParameters={lineParameters} /></CodeCard>
-    <CodeCard title={t('response')} className="tc-res" tools={<>
+    {operation.manualPage && !tabs.length ? null : <CodeCard title={t('response')} className="tc-res" tools={<>
       {tabs.length ? <div className="tc-statuses" role="tablist" aria-label={t('responseStatus')}>
         {tabs.map((tab, index) => <button type="button" role="tab" id={`${id}-tab-${tab.code}`} aria-controls={`${id}-response`} aria-selected={activeCode === tab.code} tabIndex={activeCode === tab.code ? 0 : -1}
           key={tab.code} className={`tc-st${/^[45]/.test(tab.status) ? ' err' : ''}`} onClick={() => setPick({ code: tab.code, at: response })}
@@ -57,6 +57,6 @@ export function OperationCodePanel({ controller }: { controller: TryItController
       <div id={`${id}-response`} role={tabs.length ? 'tabpanel' : undefined} aria-labelledby={tabs.length ? `${id}-tab-${activeCode}` : undefined} tabIndex={tabs.length ? 0 : undefined} key={`${activeCode}:${example?.key ?? ''}`}>
         <CodeLines code={responseCode} parameters={parameters} animate />
       </div>
-    </CodeCard>
+    </CodeCard>}
   </div>
 }
