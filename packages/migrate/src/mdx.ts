@@ -88,8 +88,12 @@ export function mdxTextWithoutInlineElements(content: string, definitions?: Read
   return elements.found && /[\p{L}\p{M}\p{N}]/u.test(text) ? text : undefined
 }
 
+/** Elements that hold form controls, scripts or styles: their text is interface chrome, never description copy. */
+const NON_PROSE_ELEMENTS = new Set(['form', 'label', 'input', 'select', 'textarea', 'button', 'script', 'style', 'noscript', 'template'])
+
 function firstParagraph(content: string): string {
-  function findParagraph(node: DescriptionNode): string {
+  function findParagraph(node: DescriptionNode & { name?: string | null }): string {
+    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && NON_PROSE_ELEMENTS.has(String(node.name).toLowerCase())) return ''
     if (node.type === 'paragraph') {
       const value = plainText(node).replace(/\s+/g, ' ').trim()
       if (value) return value.slice(0, 240)

@@ -222,3 +222,15 @@ describe('V2: Fern changelog date URLs', () => {
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/whats-new/2025/12/1', destination: '/whats-new/2025-12-01' })
   })
 })
+
+describe('V3: a form label is not page description', () => {
+  it('skips form controls when taking the first paragraph', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: Subscribe\n    path: subscribe.mdx\n  - page: Other\n    path: other.mdx\n',
+      'subscribe.mdx': '<Card title="Subscribe">\n  <form method="POST" action="https://example.com/submit">\n    <label htmlFor="email" style={{ display: \'none\' }}>E-mail address</label>\n    <input id="email" type="email" />\n  </form>\n</Card>\n',
+      'other.mdx': '<form>\n  <label htmlFor="x">Name</label>\n</form>\n\nReal intro text.\n',
+    })
+    expect(bundle.pages.find((page) => page.title === 'Subscribe')?.description).not.toContain('E-mail')
+    expect(bundle.pages.find((page) => page.title === 'Other')?.description).toBe('Real intro text.')
+  })
+})
