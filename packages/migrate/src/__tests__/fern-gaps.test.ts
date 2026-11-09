@@ -131,21 +131,26 @@ describe('V1/V7: Fern API reference operation URLs', () => {
 describe('B8/V6: links to the site\'s own custom domain', () => {
   const bundle = migrateFern({
     'docs.yml': 'instances:\n  - url: acme.docs.buildwithfern.com\n    custom-domain: docs.example.com\nredirects:\n  - source: /old\n    destination: /guide/b\nnavigation:\n  - section: Guide\n    contents:\n      - page: A\n        path: a.mdx\n      - page: B\n        path: b.mdx\n',
-    'a.mdx': '---\ntitle: A\n---\n\n[b](https://docs.example.com/guide/b#top) [old](https://docs.example.com/old) <a href="https://docs.example.com/guide/b">x</a> [gone](https://docs.example.com/missing/page) [other](https://example.org/guide/b)\n',
-    'b.mdx': '---\ntitle: B\n---\n\nB.',
+    'a.mdx': '---\ntitle: A\n---\n\n[b](https://docs.example.com/guide/b) [old](https://docs.example.com/old) <a href="https://docs.example.com/guide/b">x</a> [gone](https://docs.example.com/missing/page) [other](https://example.org/guide/b) [real](https://docs.example.com/guide/b#intro-section) [bad](https://docs.example.com/guide/b#no-such-heading)\n',
+    'b.mdx': '---\ntitle: B\n---\n\n## Intro Section\n\nB.',
   })
   const body = bundle.pages.find((page) => page.title === 'A')!.body
 
   it('turns resolvable links into internal paths, following redirects', () => {
-    expect(body).toContain('[b](/guide/b#top)')
+    expect(body).toContain('[b](/guide/b)')
     expect(body).toContain('[old](/guide/b)')
     expect(body).toContain('<a href="/guide/b">')
+    expect(body).toContain('[real](/guide/b#intro-section)')
+  })
+
+  it('keeps a link absolute when its fragment names no heading on the page', () => {
+    expect(body).toContain('(https://docs.example.com/guide/b#no-such-heading)')
   })
 
   it('keeps unresolvable and foreign links absolute and warns', () => {
     expect(body).toContain('https://docs.example.com/missing/page')
     expect(body).toContain('https://example.org/guide/b')
-    expect(bundle.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/1 link.*docs\.example\.com\/missing\/page/))
+    expect(bundle.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/2 link.*docs\.example\.com\/missing\/page/))
   })
 })
 
@@ -366,5 +371,16 @@ describe('links to pages the site answers itself stay internal', () => {
     expect(body).not.toMatch(/\]\(https:\/\/docs\.example\.com\/api/)
     expect(body).toContain('(/old)')
     expect(body).toContain('(https://docs.example.com/nowhere)')
+  })
+})
+
+describe('V3: changelog index description', () => {
+  it('falls back to a plain summary when the overview has only a subscribe form', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'tabs:\n  releases:\n    display-name: What is new\n    slug: whats-new\n    changelog: changelog\nnavigation:\n  - tab: releases\n    layout: []\n',
+      'changelog/overview.mdx': '---\nslug: whats-new\n---\n<Card title="Subscribe">\n  <form action="https://example.com/s"><label htmlFor="e">E-mail address</label></form>\n</Card>\n',
+      'changelog/2025-03-14.mdx': '---\ntitle: March\n---\n\nUpdate.',
+    })
+    expect(bundle.pages.find((page) => page.id === 'whats-new')?.description).toBe('Latest release notes and product updates.')
   })
 })

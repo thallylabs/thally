@@ -61,7 +61,8 @@ interface DescriptionNode {
 const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
 /** `elements`, when given, leaves out every JSX element and what it holds, and is set once one is met. */
-function plainText(node: DescriptionNode, elements?: { found: boolean }): string {
+function plainText(node: DescriptionNode & { name?: string | null }, elements?: { found: boolean }, skipNames?: ReadonlySet<string>): string {
+  if (skipNames && (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement') && skipNames.has(String(node.name).toLowerCase())) return ''
   if (elements && (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement')) {
     elements.found = true
     return ''
@@ -69,7 +70,7 @@ function plainText(node: DescriptionNode, elements?: { found: boolean }): string
   if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
   if (node.type === 'image') return node.alt ?? ''
   if (node.type === 'break') return ' '
-  return (node.children ?? []).map((child) => plainText(child, elements)).join('')
+  return (node.children ?? []).map((child) => plainText(child, elements, skipNames)).join('')
 }
 
 function headingText(content: string, definitions?: ReadonlyMap<string, string>, elements?: { found: boolean }): string {
@@ -103,7 +104,7 @@ function firstParagraph(content: string): string {
   function findParagraph(node: DescriptionNode & { name?: string | null }): string {
     if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && NON_PROSE_ELEMENTS.has(String(node.name).toLowerCase())) return ''
     if (node.type === 'paragraph') {
-      const value = plainText(node).replace(/\s+/g, ' ').trim()
+      const value = plainText(node, undefined, NON_PROSE_ELEMENTS).replace(/\s+/g, ' ').trim()
       if (value) return value.slice(0, 240)
     }
     for (const child of node.children ?? []) {

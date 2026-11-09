@@ -3601,6 +3601,24 @@ function fernCustomDomains(config: Record<string, unknown>): Array<{ host: strin
   return domains
 }
 
+/** The anchors a page body offers: its headings' GitHub-style slugs, explicit heading ids and `id` attributes, outside code. */
+function headingAnchors(body: string): Set<string> {
+  const anchors = new Set<string>()
+  replaceOutsideCode(body, (segment) => {
+    for (const line of segment.split('\n')) {
+      const heading = /^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line)?.[1]
+      if (!heading) continue
+      const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}\s*$/.exec(heading)
+      if (explicit) anchors.add(explicit[1])
+      const text = heading.replace(/\{\/\*.*?\*\/\}/g, '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_~]|<[^>]*>/g, '')
+      anchors.add(text.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-'))
+    }
+    for (const match of segment.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) anchors.add(match[1] ?? match[2])
+    return segment
+  })
+  return anchors
+}
+
 /**
  * Turn absolute links to the site's own custom domain into internal paths, but only when `resolve` finds the page they reach
  * (directly or through redirects). The rest stay absolute and are collected in `unresolved`.
@@ -3610,6 +3628,7 @@ function rewriteFernOwnDomainLinks(
   domains: ReadonlyArray<{ host: string; path: string }>,
   versionPath: string,
   resolve: (pathname: string) => string | undefined,
+  hasAnchor: (route: string, fragment: string) => boolean,
   unresolved: Set<string>,
 ): string {
   const rewrite = (target: string): string => {
@@ -3622,8 +3641,9 @@ function rewriteFernOwnDomainLinks(
     if (versionPath && (pathname === versionPath || pathname.startsWith(`${versionPath}/`))) pathname = pathname.slice(versionPath.length) || '/'
     if (pathname.startsWith('//') || pathname.includes('\\')) return target
     const resolved = resolve(pathname)
-    if (!resolved) {
-      unresolved.add(`${url.hostname}${url.pathname}`.slice(0, 120))
+    // A fragment that names no heading on the page would turn into a broken anchor, so such a link stays on the live site.
+    if (!resolved || (url.hash.length > 1 && !hasAnchor(resolved, url.hash.slice(1)))) {
+      unresolved.add(`${url.hostname}${url.pathname}${url.hash}`.slice(0, 120))
       return target
     }
     return `${resolved}${url.search}${url.hash}`
@@ -6851,6 +6871,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         byId.set(index.navigationId, index)
         docsConfig.redirects = docsConfig.redirects?.filter((redirect) => redirect.source !== `/${changelog.route}`)
       }
+      // A page whose own text is only a form or a card has no usable first paragraph.
+      index.description ||= 'Latest release notes and product updates.'
       if (index.body.trim()) continue
       // Fern renders changelog directories as a dated feed at the bare tab
       // route. Its `overview.mdx` is often intentionally blank: leaving that
@@ -6986,8 +7008,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         return undefined
       }
+      const pagesById = new Map(pages.map((page) => [page.id, page]))
+      const anchorsOf = new Map<string, Set<string>>()
+      const hasAnchor = (route: string, fragment: string): boolean => {
+        const page = pagesById.get(route.slice(1))
+        // Generated API pages and browser text fragments have no headings to check here.
+        if (!page || fragment.startsWith(':~:')) return true
+        if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, headingAnchors(page.body))
+        let decoded = fragment
+        try { decoded = decodeURIComponent(fragment) } catch { /* compare as written */ }
+        return anchorsOf.get(page.id)!.has(decoded)
+      }
       const unresolved = new Set<string>()
-      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, resolve, unresolved)
+      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, resolve, hasAnchor, unresolved)
       if (unresolved.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
