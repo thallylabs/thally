@@ -260,7 +260,7 @@ function fernBasicSlug(value: string): string {
  * live site's sitemap. Only the label fallback needs this; an authored
  * `slug` is used as literal, already-intended path text.
  */
-function fernLabelSlug(label: string): string {
+export function fernLabelSlug(label: string): string {
   const decamelized = label
     .replace(/[()]/g, '')
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')

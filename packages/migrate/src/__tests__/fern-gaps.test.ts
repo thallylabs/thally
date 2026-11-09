@@ -74,3 +74,45 @@ describe('B6/B7/V4: dropped Fern config is reported', () => {
     expect(messages(nav).join('\n')).not.toMatch(/not imported/)
   })
 })
+
+const sdkSpec = JSON.stringify({
+  openapi: '3.0.0',
+  info: { title: 'T', version: '1' },
+  paths: {
+    '/assistant': {
+      post: { operationId: 'AssistantController_create', tags: ['Assistants'], summary: 'Create Assistant', 'x-fern-sdk-group-name': 'assistants', 'x-fern-sdk-method-name': 'create', responses: { 200: { description: 'ok' } } },
+    },
+    '/analytics': {
+      get: { operationId: 'AnalyticsController_query', tags: ['Analytics'], summary: 'Query', 'x-fern-sdk-group-name': ['analytics'], 'x-fern-sdk-method-name': 'getAll', responses: { 200: { description: 'ok' } } },
+    },
+    '/call/{id}': {
+      get: { operationId: 'CallController_findOne', tags: ['Calls'], summary: 'Get Call', responses: { 200: { description: 'ok' } } },
+    },
+  },
+})
+
+describe('V1/V7: Fern API reference operation URLs', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'redirects:\n  - source: /old-assistants\n    destination: /api-reference/assistants/create\nnavigation:\n  - tab: guide\n    layout:\n      - page: Home\n        path: index.mdx\n  - tab: ref\n    layout:\n      - api: API Reference\n        skip-slug: true\ntabs:\n  guide:\n    display-name: Guide\n    slug: guide\n  ref:\n    display-name: API Reference\n    slug: api-reference\n',
+    'generators.yml': 'api:\n  specs:\n    - openapi: openapi.json\n',
+    'openapi.json': sdkSpec,
+    'index.mdx': '---\ntitle: Home\n---\n\nSee [create](/api-reference/assistants/create) and [analytics](/api-reference/analytics/get-all) and [call](/api-reference/calls/get).',
+  })
+  const redirect = (source: string): string | undefined => bundle.docsConfig.redirects?.find((entry) => entry.source === source)?.destination
+
+  it('redirects SDK-named and derived operation URLs to the operation pages', () => {
+    expect(redirect('/api-reference/assistants/create')).toMatch(/^\/api\/default\/.*assistant/)
+    expect(redirect('/api-reference/analytics/get-all')).toMatch(/^\/api\/default\//)
+    expect(redirect('/api-reference/calls/get')).toMatch(/^\/api\/default\//)
+  })
+
+  it('points docs.yml redirects that end on an operation URL at the operation page', () => {
+    expect(redirect('/old-assistants')).toBe(redirect('/api-reference/assistants/create'))
+  })
+
+  it('resolves content links to the operation instead of the API overview', () => {
+    const body = bundle.pages.find((page) => page.title === 'Home')!.body
+    expect(body).toContain(`(${redirect('/api-reference/assistants/create')})`)
+    expect(body).toContain(`(${redirect('/api-reference/analytics/get-all')})`)
+  })
+})

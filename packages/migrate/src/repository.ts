@@ -53,7 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
-import { fernDroppedConfigWarnings, projectFernNavigation, readFernConfig } from './fern.js'
+import { fernDroppedConfigWarnings, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
@@ -2097,6 +2097,9 @@ interface OpenApiOperationForLinking {
   summary?: string
   operationId?: string
   description?: string
+  /** Fern's `x-fern-sdk-group-name` (one name or a nested list) and `x-fern-sdk-method-name`, which name the operation's URL. */
+  sdkGroup?: Array<string>
+  sdkMethod?: string
 }
 
 /** `x-hidden: true` and `x-excluded: true` (or the string `"true"`), as the renderer reads them. */
@@ -2184,6 +2187,8 @@ function visibleOperations(document: unknown, entries: unknown): Array<OpenApiOp
         summary: typeof op.summary === 'string' ? op.summary : undefined,
         operationId: typeof op.operationId === 'string' ? op.operationId : undefined,
         description: typeof op.description === 'string' ? op.description : undefined,
+        sdkGroup: [op['x-fern-sdk-group-name']].flat().filter((name): name is string => typeof name === 'string' && name.trim() !== ''),
+        sdkMethod: typeof op['x-fern-sdk-method-name'] === 'string' ? op['x-fern-sdk-method-name'] : undefined,
       })
     }
   }
@@ -2263,6 +2268,8 @@ export interface ApiOperationLinkMaps {
   mintlifyPages: Map<string, string>
   /** Mintlify endpoint URLs that two operations share; the first operation keeps the URL. */
   duplicatePages: Array<string>
+  /** Fern operation URL (lowercased, no leading slash) -> Thally operation route, for redirects. */
+  fernPages: Map<string, string>
 }
 
 /** The operations a source served under its prefix: the listed ones in listed order, else every operation of the spec. */
@@ -2358,6 +2365,7 @@ export function apiOperationLinkMap(
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
+  const fernPages = new Map<string, string>()
   const duplicatePages: Array<string> = []
   const parsedByFile = new Map<string, Array<OpenApiOperationForLinking>>()
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
@@ -2414,6 +2422,14 @@ export function apiOperationLinkMap(
       if (operation.summary) leafCandidates.add(mintlifyOperationSlugSegment(operation.summary))
       if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
       leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
+      // Fern's own URL: `<section>/<sdk group>/<sdk method>`, else its tag and the derived leaf above.
+      const fernLeaf = operation.sdkMethod ? fernLabelSlug(operation.sdkMethod) : [...leafCandidates][0]
+      const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernLabelSlug)
+      const fernUrl = [base, ...fernGroups, fernLeaf].filter(Boolean).join('/').toLowerCase()
+      if (fernLeaf && !underDeeperMount(fernUrl, prefix)) {
+        if (specId !== undefined && !fernPages.has(fernUrl)) fernPages.set(fernUrl, thallyHref)
+        if (!map.has(fernUrl)) map.set(fernUrl, thallyHref)
+      }
       // Two prefix conventions get registered for every leaf candidate:
       // Mintlify nests auto-generated pages under a tag folder
       // ("<prefix>/<tag>/<leaf>"); Fern's default layout serves them flat
@@ -2446,7 +2462,7 @@ export function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages }
+  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages, fernPages }
 }
 
 /**
@@ -6338,11 +6354,25 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // under that section's own route (e.g. "api-reference/messages/...")
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
-      const { operationLinks, prefixLandings } = apiOperationLinkMap(
+      const { operationLinks, prefixLandings, fernPages } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
+      // Links first: an address a redirect answers is left as written, and the redirects below answer every operation URL.
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, { redirects: docsConfig.redirects })
+      // Fern's operation URLs redirect to the operation pages. A URL a page or an authored redirect already answers keeps it, and an
+      // authored redirect that ends on an operation URL goes straight to the page.
+      const taken = servedRoutes(pages)
+      for (const redirect of docsConfig.redirects ?? []) taken.add(literalRoute(redirect.source) ?? redirect.source)
+      const operationRedirects = [...fernPages].filter(([source]) => !taken.has(`/${source}`)).slice(0, MAX_ENDPOINT_REDIRECTS)
+        .map(([source, destination]) => ({ source: `/${source}`, destination }))
+      const authored = (docsConfig.redirects ?? []).map((redirect) => {
+        const target = fernPages.get(redirect.destination.replace(/\/+$/, '').replace(/^\//, '').toLowerCase())
+        return target ? { ...redirect, destination: target } : redirect
+      })
+      if (operationRedirects.length > 0 || authored.some((redirect, index) => redirect !== docsConfig.redirects![index])) {
+        docsConfig = { ...docsConfig, redirects: [...authored, ...operationRedirects] }
+      }
     }
   } else if (platform === 'mintlify') {
     const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
