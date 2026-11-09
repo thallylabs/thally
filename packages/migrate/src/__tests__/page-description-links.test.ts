@@ -79,3 +79,16 @@ describe('a Markdown link in an authored page description', () => {
     expect(page?.description).toBe('Read the guide first.')
   })
 })
+
+describe('emphasis markers in an authored page description', () => {
+  it('are kept inside a word and inside math, and removed at word boundaries', () => {
+    for (const [written, shown] of [
+      ['a*b*c', 'a*b*c'],
+      ['Cost is $2*3*4$ units.', 'Cost is $2*3*4$ units.'],
+      ['a**b**c and **bold** here', 'a**b**c and bold here'],
+      ['See `*x*` and *em*, then _it_.', 'See `*x*` and em, then it.'],
+    ]) {
+      expect(describe_(written).description).toBe(shown)
+    }
+  })
+})

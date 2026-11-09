@@ -171,6 +171,11 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
   if (kind === 'info') return 'Info'
   if (kind === 'caution' || kind === 'warning') return 'Warning'
   return 'Note'
+/** `line` with a Markdown block marker at its start (`#`, `-`, `>`, `1.`, a fence) escaped, so the line stays a paragraph. */
+function escapeLeadingBlockMarker(line: string): string {
+  return line.replace(/^(\s*)(\d{1,9})([.)])(?=\s)/, '$1$2\\$3').replace(/^(\s*)(#{1,6}(?=\s|$)|[-+*](?=\s)|>|`{3}|~{3})/, '$1\\$2')
+}
+
 }
 
 /**
@@ -3044,7 +3049,7 @@ const BLOCK_COMPONENT_NAMES = new Set(['Note', 'Warning', 'Info', 'Tip', 'Check'
  * comments and components nested in a line of prose are never touched.
  */
 export function separateBlockComponents(body: string): string {
-  if (!/\n[ \t]*<[A-Z]/.test(body)) return body
+  if (!/\n[ \t>]*<[A-Z]/.test(body)) return body
   interface FlowNode {
     type: string
     name?: string | null
