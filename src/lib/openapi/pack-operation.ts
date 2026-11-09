@@ -38,7 +38,10 @@ export function packValue<T>(root: T): PackedValue {
       entry = value.map(child)
     } else {
       const out: { [key: string]: Json } = {}
-      for (const [key, item] of Object.entries(value)) if (item !== undefined) out[key] = child(item)
+      // defineProperty, not assignment: assigning `__proto__` would set the prototype and lose the key.
+      for (const [key, item] of Object.entries(value)) {
+        if (item !== undefined) Object.defineProperty(out, key, { value: child(item), enumerable: true, writable: true, configurable: true })
+      }
       entry = out
     }
     const content = JSON.stringify(entry)

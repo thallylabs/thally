@@ -51,6 +51,14 @@ describe('packValue', () => {
     expect(back.a).toBe(back.b)
   })
 
+  it('round-trips an own __proto__ key without changing the prototype', () => {
+    const value = JSON.parse('{"properties":{"__proto__":{"type":"string"},"id":{"type":"string"}}}') as { properties: Record<string, unknown> }
+    const back = unpackValue<typeof value>(JSON.parse(JSON.stringify(packValue(value))))
+    expect(Object.keys(back.properties)).toEqual(['__proto__', 'id'])
+    expect(Object.getPrototypeOf(back.properties)).toBe(Object.prototype)
+    expect(JSON.stringify(back)).toBe(JSON.stringify(value))
+  })
+
   it('is recognised by isPacked and nothing else is', () => {
     expect(isPacked(packValue({}))).toBe(true)
     expect(isPacked({ specId: 'x' })).toBe(false)
