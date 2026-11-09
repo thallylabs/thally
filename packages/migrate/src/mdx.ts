@@ -417,6 +417,23 @@ function headingIdMarker(id: string): string {
   return `{/* #${id} */}`
 }
 
+/**
+ * Fern's custom heading anchor, `## Title [#custom-id]`: the suffix leaves the visible text and the id stays on the heading,
+ * in the marker form the renderer reads. Only a trailing `[#id]` on a heading line counts, and the id is a plain anchor name.
+ */
+export function normalizeFernHeadingIds(raw: string): string {
+  const { front, body } = splitFrontmatterBlock(raw)
+  return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+    if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
+    const trimmed = line.trimEnd()
+    const marker = trimmed.endsWith(']') ? trimmed.lastIndexOf('[#') : -1
+    if (marker <= 0) return line
+    const id = trimmed.slice(marker + 2, -1)
+    const heading = trimmed.slice(0, marker).trimEnd()
+    return /^[\w.:-]+$/.test(id) && /[^\s#]/.test(heading.replace(/^[ \t]{0,3}#{1,6}/, '')) ? `${heading} ${headingIdMarker(id)}` : line
+  }).join('\n'))
+}
+
 /** Characters Mintlify keeps in an id besides letters, marks and digits; the ones around which it also places a dash. */
 const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@%=<>|\u2019\u201c\u201d\u2014\u2013\u2192\u2026]/u
 
@@ -3003,6 +3020,8 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     undefined,
     { headingMarkers: runMintlify },
   )
+  // After the `{#id}` pass above, which would turn the marker this writes into an anchor element.
+  if (runFern) rewritten = normalizeFernHeadingIds(rewritten)
   if (runDocusaurus) rewritten = normalizeDocusaurusAdmonitions(rewritten)
   if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {

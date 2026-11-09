@@ -291,3 +291,17 @@ describe('V15: Fern availability', () => {
     expect(badge('D')).toBeUndefined()
   })
 })
+
+describe('V19: Fern custom heading anchors', () => {
+  it('strips the [#id] suffix and keeps the id on the heading, outside code only', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'navigation:\n  - page: Anchors\n    path: anchors.mdx\n',
+      'anchors.mdx': '---\ntitle: Anchors\n---\n\n## Batch Calling [#batch-calling]\n\nSee [link](#batch-calling).\n\n```md\n## Keep [#in-code]\n```\n\n## Not an id [see docs]\n',
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('## Batch Calling {/* #batch-calling */}')
+    expect(body).toContain('## Keep [#in-code]')
+    expect(body).toContain('## Not an id [see docs]')
+    expect(body).not.toContain('Batch Calling [#')
+  })
+})
