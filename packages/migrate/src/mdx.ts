@@ -1012,7 +1012,60 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
       edits.push({ start: at, end: at + match[0].length, value: match[1] === 'children' || !isJsx ? bound : `{${JSON.stringify(bound)}}` })
     }
   }
-  return applyEdits(body, edits)
+  return foldConstantTemplates(applyEdits(body, edits))
+}
+
+/** The string a template literal comes to when every `${}` in it is a string literal, or undefined when any is not. */
+function constantTemplate(node: EstreeNode | undefined): string | undefined {
+  if (node?.type !== 'TemplateLiteral') return undefined
+  const { quasis, expressions } = node as unknown as { quasis: Array<{ value: { cooked: string | null } }>; expressions: Array<EstreeNode> }
+  let text = ''
+  for (const [index, quasi] of quasis.entries()) {
+    if (quasi.value.cooked === null) return undefined
+    text += quasi.value.cooked
+    const expression = expressions[index]
+    if (expression === undefined) continue
+    if (expression.type !== 'Literal' || typeof expression.value !== 'string') return undefined
+    text += expression.value
+  }
+  return text
+}
+
+/**
+ * Write an attribute given as a template literal of string literals (`src={`/a/${"b"}.svg`}`, which inlining a component leaves
+ * behind) as the plain string it is: `src="/a/b.svg"`. A template that reads a variable stays as it is.
+ */
+export function foldConstantTemplates(body: string): string {
+  if (!body.includes('`')) return body
+  let tree: MdxOffsetNode
+  try { tree = descriptionParser.parse(body) as MdxOffsetNode } catch { return body }
+  const edits: Array<SourceEdit> = []
+  const attribute = (name: string, text: string, start: number, end: number): void => {
+    edits.push({ start, end, value: /^[^"&<>{}\\\r\n]*$/.test(text) ? `${name}="${text}"` : `${name}={${JSON.stringify(text)}}` })
+  }
+  const walkEstree = (node: EstreeNode): void => {
+    const attr = node as unknown as { name?: { type: string; name?: string }; value?: EstreeNode }
+    if (node.type === 'JSXAttribute' && attr.name?.type === 'JSXIdentifier' && attr.value?.type === 'JSXExpressionContainer') {
+      const text = constantTemplate(attr.value.expression)
+      if (text !== undefined) attribute(attr.name.name ?? '', text, node.start, node.end)
+    }
+    for (const child of estreeChildren(node)) walkEstree(child)
+  }
+  const walk = (node: MdxOffsetNode): void => {
+    const attributes = (node as { attributes?: Array<{ type: string; name?: string; value?: { data?: { estree?: acorn.Program | null } } | string | null; position?: MdxOffsetNode['position'] }> }).attributes
+    for (const item of attributes ?? []) {
+      const estree = typeof item.value === 'object' && item.value ? item.value.data?.estree : undefined
+      const expression = (estree?.body[0] as unknown as EstreeNode | undefined)?.expression
+      const text = item.type === 'mdxJsxAttribute' && item.name ? constantTemplate(expression) : undefined
+      const start = item.position?.start.offset
+      const end = item.position?.end.offset
+      if (text !== undefined && start !== undefined && end !== undefined) attribute(item.name!, text, start, end)
+    }
+    if (node.data?.estree) walkEstree(node.data.estree as unknown as EstreeNode)
+    for (const child of node.children ?? []) walk(child)
+  }
+  walk(tree)
+  return edits.length > 0 ? applyEdits(body, edits) : body
 }
 
 /** Use a page's leading H1 as its title without rendering it twice. */

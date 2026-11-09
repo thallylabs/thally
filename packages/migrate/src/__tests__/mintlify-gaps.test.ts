@@ -47,3 +47,23 @@ describe('custom stylesheets', () => {
     expect(missing[0].message).not.toContain('cdn.example.com')
   })
 })
+
+describe('a snippet whose attribute is a template literal of constants', () => {
+  const card = [
+    'export const Card = ({ icon, label }) => (',
+    '  <a href={`#${label}`}><img src={`/a/${icon}.svg`} alt={`${icon} icon`} width={`${"4"}${"0"}`} data-k={`k-${icon.length}`} /></a>',
+    ')',
+    '',
+  ].join('\n')
+  const home = '---\ntitle: Home\n---\n\nimport { Card } from "/snippets/card.mdx"\n\n<Card icon="b" label="x" />\n'
+
+  it('writes the constant attribute as a plain string and keeps the template that has a variable', () => {
+    const bundle = migrate({ 'index.mdx': home, 'snippets/card.mdx': card })
+    const body = bundle.pages.find((page) => page.id === 'introduction')!.body
+    expect(body).toContain('src="/a/b.svg"')
+    expect(body).toContain('alt="b icon"')
+    expect(body).toContain('href="#x"')
+    expect(body).toContain('width="40"')
+    expect(body).toContain('data-k={`k-${"b".length}`}')
+  })
+})
