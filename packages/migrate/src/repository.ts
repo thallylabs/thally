@@ -53,7 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
-import { projectFernNavigation, readFernConfig } from './fern.js'
+import { fernDroppedConfigWarnings, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
@@ -7165,6 +7165,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         + 'Confirm nothing here was meant to stay private before deploying.',
     })
   }
+  if (fernRawConfig) warnings.push(...fernDroppedConfigWarnings(fernRawConfig))
   if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
     code: 'unsupported-config',
     message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,

@@ -100,6 +100,46 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+/** At most five entries, with the remainder counted. */
+export function cappedList(values: Array<string>, limit = 5): string {
+  const shown = values.slice(0, limit).join(', ')
+  return values.length > limit ? `${shown}, and ${values.length - limit} more` : shown
+}
+
+function configEntries(value: unknown): Array<string> {
+  return (Array.isArray(value) ? value : [value]).flatMap((entry) => {
+    const object = objectValue(entry)
+    const text = typeof entry === 'string' ? entry : object ? [object.path, object.url, object.src].find((item) => typeof item === 'string') : undefined
+    return typeof text === 'string' && text.trim() ? [text.trim().slice(0, 120)] : []
+  })
+}
+
+/** Fern `css`, `typography` font files, `analytics` and `js` have no Thally equivalent; say so instead of dropping them silently. */
+export function fernDroppedConfigWarnings(config: Record<string, unknown>): Array<MigrationWarning> {
+  const warnings: Array<MigrationWarning> = []
+  const warn = (source: string, message: string): void => { warnings.push({ code: 'unsupported-config', message, source }) }
+  const css = configEntries(config.css)
+  if (css.length > 0) {
+    warn('css', `Fern custom stylesheets were not imported (${cappedList(css)}). They style Fern's own page markup, so they do not carry over; add the rules you still need to a stylesheet listed under "stylesheets" in docs.json.`)
+  }
+  const fonts = Object.entries(objectValue(config.typography) ?? {}).flatMap(([role, value]) => {
+    const font = objectValue(value)
+    return font && configEntries([font.path, font.paths, ...(Array.isArray(font.paths) ? font.paths : [])].flat()).length > 0 ? [role] : []
+  })
+  if (fonts.length > 0) {
+    warn('typography', `Fern custom font files (${cappedList(fonts)}) were not imported, so the migrated site uses its default fonts. Set a Google font family under "fonts" in docs.json to match them.`)
+  }
+  const analytics = Object.keys(objectValue(config.analytics) ?? {})
+  if (analytics.length > 0) {
+    warn('analytics', `Fern analytics settings (${cappedList(analytics)}) were not imported; trackers are never migrated. Add the analytics you want under "integrations" in docs.json.`)
+  }
+  const scripts = configEntries(config.js)
+  if (scripts.length > 0) {
+    warn('js', `Fern custom scripts were not imported (${cappedList(scripts)}). Review what they did and re-create anything you still need as a custom component.`)
+  }
+  return warnings
+}
+
 function titleCase(value: string): string {
   return value
     .split(/[-_]/)

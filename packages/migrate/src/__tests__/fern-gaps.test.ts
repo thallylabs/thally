@@ -56,3 +56,21 @@ describe('B5/V14: Fern header tabs keep the tab bar', () => {
     expect(bundle.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/more than six tabs.*dropdown/))
   })
 })
+
+describe('B6/B7/V4: dropped Fern config is reported', () => {
+  const page = { 'index.mdx': '---\ntitle: Home\n---\n\nHi.' }
+  const nav = 'navigation:\n  - page: Home\n    path: index.mdx\n'
+  const messages = (docsYml: string): Array<string> => migrateFern({ 'docs.yml': docsYml, ...page }).warnings.map((warning) => warning.message)
+
+  it('warns about css, font files, analytics and js', () => {
+    const all = messages(`css: ./assets/styles.css\ntypography:\n  bodyFont:\n    name: Open Sans\n    paths:\n      - path: ./assets/os.woff2\n  codeFont:\n    name: Mono\nanalytics:\n  posthog:\n    api-key: x\njs:\n  - path: ./custom.js\n${nav}`)
+    expect(all).toContainEqual(expect.stringMatching(/stylesheets were not imported.*styles\.css/))
+    expect(all).toContainEqual(expect.stringMatching(/font files \(bodyFont\) were not imported/))
+    expect(all).toContainEqual(expect.stringMatching(/analytics settings \(posthog\).*never migrated/))
+    expect(all).toContainEqual(expect.stringMatching(/scripts were not imported.*custom\.js/))
+  })
+
+  it('stays quiet when none of them is set', () => {
+    expect(messages(nav).join('\n')).not.toMatch(/not imported/)
+  })
+})
