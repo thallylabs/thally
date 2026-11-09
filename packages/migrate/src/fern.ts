@@ -601,12 +601,28 @@ function convertNodes(
   })
 }
 
+/**
+ * Pages listed directly in a tab (Fern allows that) go into a group named after the tab, whose heading the
+ * sidebar leaves out, and stay where docs.yml put them so the tab opens on its first listed page.
+ */
 function groupsFromConverted(
   converted: Array<string | MigrationNavigationGroup>,
+  tabLabel: string,
 ): Array<MigrationNavigationGroup> {
-  const loosePages = converted.filter((entry): entry is string => typeof entry === 'string')
-  const groups = converted.filter((entry): entry is MigrationNavigationGroup => typeof entry !== 'string')
-  return loosePages.length > 0 ? [{ group: 'Overview', pages: loosePages }, ...groups] : groups
+  const groups: Array<MigrationNavigationGroup> = []
+  let looseRun: MigrationNavigationGroup | undefined
+  for (const entry of converted) {
+    if (typeof entry !== 'string') {
+      groups.push(entry)
+      looseRun = undefined
+    } else if (looseRun) {
+      looseRun.pages.push(entry)
+    } else {
+      looseRun = { group: tabLabel, pages: [entry] }
+      groups.push(looseRun)
+    }
+  }
+  return groups
 }
 
 /**
@@ -728,7 +744,7 @@ function buildUnrestrictedTabs(
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
       const descriptorsBefore = restrictionMark(context)
-      const groups = groupsFromConverted(convertNodes(layout, segments, context))
+      const groups = groupsFromConverted(convertNodes(layout, segments, context), label)
       if (isRestrictedNode(entry) || isRestrictedNode(meta)) {
         markRestricted(context, descriptorsBefore)
         return []
@@ -794,7 +810,7 @@ function buildUnrestrictedTabs(
   }
   if (Array.isArray(navigation)) {
     const sectionsBefore = context.apiSections.length
-    const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context))
+    const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context), fallbackTabLabel)
     for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
       context.apiSections[index].tabLabel ??= fallbackTabLabel
     }

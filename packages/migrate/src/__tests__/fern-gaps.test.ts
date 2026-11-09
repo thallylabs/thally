@@ -197,3 +197,16 @@ describe('B14/V12: Fern icons', () => {
     expect(warnings[0]).not.toContain('vial')
   })
 })
+
+describe('B16: loose pages in a Fern tab', () => {
+  it('group them under the tab name, in docs.yml order', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'tabs:\n  guide:\n    display-name: Guide\nnavigation:\n  - tab: guide\n    layout:\n      - section: First\n        contents:\n          - page: One\n            path: one.mdx\n      - page: Loose\n        path: loose.mdx\n',
+      'one.mdx': '---\ntitle: One\n---\n\nOne.',
+      'loose.mdx': '---\ntitle: Loose\n---\n\nLoose.',
+    })
+    const groups = bundle.docsConfig.tabs[0].groups!
+    expect(groups.map((group) => group.group)).toEqual(['First', 'Guide'])
+    expect(groups.some((group) => group.group === 'Overview')).toBe(false)
+  })
+})
