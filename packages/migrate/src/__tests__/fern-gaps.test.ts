@@ -149,3 +149,23 @@ describe('B12: a page without a frontmatter title takes its docs.yml label', () 
     expect(bundle.pages.find((page) => page.body.startsWith('Body.'))?.title).toBe('Own Title')
   })
 })
+
+describe('B13: API tab only when navigation references an api section', () => {
+  const files = {
+    'generators.yml': 'api:\n  specs:\n    - openapi: openapi.json\n',
+    'openapi.json': sdkSpec,
+    'index.mdx': '---\ntitle: Home\n---\n\nHi.',
+  }
+  const withNav = (nav: string) => migrateFern({ ...files, 'docs.yml': `${nav}  - page: Home\n    path: index.mdx\n` })
+
+  it('adds no API tab when every api: entry is commented out', () => {
+    const bundle = withNav('navigation:\n  # - api: API Reference\n')
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.assets.some((asset) => asset.path.endsWith('openapi.json'))).toBe(false)
+  })
+
+  it('adds the API tab when navigation has an api: entry', () => {
+    const bundle = withNav('navigation:\n  - api: API Reference\n')
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(true)
+  })
+})

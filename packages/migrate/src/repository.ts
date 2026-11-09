@@ -6315,12 +6315,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // API's spec from another's, so once an explicit `api-name` names a
     // specific API, that naive scan is never consulted as a fallback (the
     // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
-    // with no `api:` node at all falls back to the naive scan, bound to
-    // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
-    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
-      ? fernApiSections
-      // Every `api:` node is restricted: none may fall back to a repository-wide spec scan.
-      : fernRestrictedApiSections.length > 0 ? [] : [{ nameExplicit: false }]
+    // with no `api:` node publishes no API reference: a spec file in the
+    // repository that navigation never references gets no tab.
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections
     const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
