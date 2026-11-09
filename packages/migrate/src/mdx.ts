@@ -104,12 +104,16 @@ export function mdxTextWithoutInlineElements(content: string, definitions?: Read
 
 /** Elements that hold form controls, scripts or styles: their text is interface chrome, never description copy. */
 const NON_PROSE_ELEMENTS = new Set(['form', 'label', 'input', 'select', 'textarea', 'button', 'script', 'style', 'noscript', 'template'])
+/** Of those, the ones whose text is dropped even inside a sentence; a `<label>` or `<button>` in prose keeps its text. */
+const NEVER_PROSE_ELEMENTS = new Set(['form', 'input', 'select', 'textarea', 'script', 'style', 'noscript', 'template'])
 
 function firstParagraph(content: string): string {
   function findParagraph(node: DescriptionNode & { name?: string | null }): string {
     if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && NON_PROSE_ELEMENTS.has(String(node.name).toLowerCase())) return ''
-    if (node.type === 'paragraph') {
-      const value = plainText(node, undefined, NON_PROSE_ELEMENTS).replace(/\s+/g, ' ').trim()
+    // A paragraph made only of form controls and whitespace is chrome; the same elements inside a sentence are part of it.
+    if (node.type === 'paragraph' && !(node.children ?? []).every((child) => (child.type === 'text' && !(child.value ?? '').trim())
+      || ((child.type === 'mdxJsxTextElement' || child.type === 'mdxJsxFlowElement') && NON_PROSE_ELEMENTS.has(String((child as { name?: string }).name).toLowerCase())))) {
+      const value = plainText(node, undefined, NEVER_PROSE_ELEMENTS).replace(/\s+/g, ' ').trim()
       if (value) return value.slice(0, 240)
     }
     for (const child of node.children ?? []) {
