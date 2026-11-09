@@ -1,7 +1,7 @@
 'use client'
 
 /** Generated API documentation keeps schema behavior while sharing handoff code/field focus. */
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ParameterLinkProvider } from '@/components/api/parameter-link'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
 import type { PageActionsConfig } from '@/lib/page-actions'
@@ -19,6 +19,7 @@ import { allowsNull, flattenSchema, unionVariants, type SchemaVariant } from '@/
 import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
 import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
 import { authDescription } from '@/lib/openapi/auth'
+import { isPacked, unpackValue, type PackedValue } from '@/lib/openapi/pack-operation'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
 import { Prose } from '@/components/mdx/prose'
@@ -29,7 +30,8 @@ const markdownProse = 'prose prose-sm max-w-none dark:prose-invert'
 interface OperationPanelProps {
   /** Serializable release configuration for spec-only page header actions. */
   pageActions?: PageActionsConfig
-  operation: NormalizedOperation
+  /** Server pages pass `packValue(operation)`: the expanded schema tree is far smaller on the wire when packed. */
+  operation: NormalizedOperation | PackedValue
   /** The page's own MDX body, shown between the header and the schema. */
   children?: React.ReactNode
   /** False when the page header already shows the page's authored description. */
@@ -42,15 +44,25 @@ interface OperationPanelProps {
   locale?: string
 }
 
+/**
+ * Rows a page lists before the fields under a collapsed Expandable stop being rendered with it. A page under this renders
+ * every level, collapsed ones hidden. A schema that expands past it (a spec of large, mutually referencing objects reaches
+ * tens of MB of HTML) mounts a level when it is opened, or when a link to one of its fields asks for it.
+ */
+const EAGER_ROWS = 500
+const LazyNestedContext = createContext(false)
+
 /** Keep operation-local state isolated when navigating between specs and endpoints. */
-export function OperationPanel(props: OperationPanelProps) {
-  return <ParameterLinkProvider key={`${props.operation.specId}:${props.operation.id}:${props.operation.key}`}><OperationPanelContent {...props} /></ParameterLinkProvider>
+export function OperationPanel({ operation: wire, ...props }: OperationPanelProps) {
+  const operation = useMemo(() => (isPacked(wire) ? unpackValue<NormalizedOperation>(wire) : wire), [wire])
+  return <ParameterLinkProvider key={`${operation.specId}:${operation.id}:${operation.key}`}><OperationPanelContent {...props} operation={operation} /></ParameterLinkProvider>
 }
 
-function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale, pageActions }: OperationPanelProps) {
+function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale, pageActions }: OperationPanelProps & { operation: NormalizedOperation }) {
   const t = (key: ApiLabelKey, n?: number) => apiLabel(locale, key, n)
   const controller = useTryItController(operation)
   const interactive = playground === 'interactive' && !operation.isWebhook
+  const lazyNested = useMemo(() => exceedsEagerRows(operation), [operation])
   // `?playground=open` opens the playground straight away, as on live. The
   // dialog renders in a client-only portal, so reading the URL here is safe.
   const [isDialogOpen, setDialogOpen] = useState(
@@ -81,6 +93,7 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
 
   return (
     <ApiLocaleProvider value={locale}>
+    <LazyNestedContext.Provider value={lazyNested}>
     <div className="thally-endpoint">
         {/* Header */}
         <header className="thally-endpoint-header">
@@ -203,6 +216,7 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
         </div>
         {interactive ? <TryItDialog controller={controller} open={isDialogOpen} onOpenChange={setDialogOpen} /> : null}
     </div>
+    </LazyNestedContext.Provider>
     </ApiLocaleProvider>
   )
 }
@@ -225,6 +239,7 @@ function WebhookExample({ body }: { body?: string }) {
 
 function SchemaAsParamFields({ schema, parent, taken }: { schema?: Record<string, unknown>; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
+  const lazyNested = useContext(LazyNestedContext)
   if (!schema) return null
 
   const flat = listedObject(schema)
@@ -274,7 +289,7 @@ function SchemaAsParamFields({ schema, parent, taken }: { schema?: Record<string
               </p>
             ) : null}
             {nested ? (
-              <Expandable title={`${name} ${t('properties')}`}>
+              <Expandable lazy={lazyNested} anchor={fields[index].nested} title={`${name} ${t('properties')}`}>
                 <NestedFields schema={flatProp} depth={1} parent={fields[index].nested} taken={below} />
               </Expandable>
             ) : null}
@@ -357,6 +372,7 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
 
 function SchemaAsResponseFields({ schema, depth = 0, parent, taken }: { schema?: Record<string, unknown>; depth?: number; parent?: string; taken?: ReadonlySet<string> }) {
   const t = useApiLabels()
+  const lazyNested = useContext(LazyNestedContext)
   if (!schema) return null
 
   const flat = listedObject(schema)
@@ -391,7 +407,7 @@ function SchemaAsResponseFields({ schema, depth = 0, parent, taken }: { schema?:
               </p>
             ) : null}
             {nested ? (
-              <Expandable title={`${name} ${t('properties')}`}>
+              <Expandable lazy={lazyNested} anchor={fields[index].nested} title={`${name} ${t('properties')}`}>
                 <NestedFields schema={flatProp} depth={depth + 1} parent={fields[index].nested} taken={below} />
               </Expandable>
             ) : null}
@@ -566,6 +582,30 @@ function enumOptions(schema?: Record<string, unknown>): Array<string> | null {
 function mapValueSchema(flat: Record<string, unknown>): Record<string, unknown> | null {
   const value = flat.additionalProperties
   return value && typeof value === 'object' && Object.keys(value).length > 0 ? (value as Record<string, unknown>) : null
+}
+
+/** Whether the schemas a page shows list more than `EAGER_ROWS` rows, nested levels included; stops counting at the limit. */
+function exceedsEagerRows(operation: NormalizedOperation): boolean {
+  const budget = { left: EAGER_ROWS }
+  // The first response is the one shown; every media type of it and of the body lists its rows.
+  for (const content of [...(operation.requestBody?.contents ?? []), ...(operation.responses[0]?.contents ?? [])]) {
+    if (content.schema) countRows(content.schema, 0, budget)
+  }
+  return budget.left <= 0
+}
+
+function countRows(schema: Record<string, unknown>, depth: number, budget: { left: number }): void {
+  const nested = getNestedSchema(schema)
+  // Every member of a union is counted, though one tab shows at a time: a page near the limit may mount lazily a little early.
+  const members = (unionVariants(nested) ?? [{ schema: nested }]).map((variant) => getNestedSchema(variant.schema))
+  for (const member of members) {
+    for (const property of Object.values((member.properties ?? {}) as Record<string, Record<string, unknown>>)) {
+      if (--budget.left <= 0) return
+      const flat = flattenSchema(property)
+      if (depth < MAX_NESTING && getNestedProperties(flat)) countRows(flat, depth + 1, budget)
+      if (budget.left <= 0) return
+    }
+  }
 }
 
 function getNestedProperties(schema: Record<string, unknown>): boolean {
