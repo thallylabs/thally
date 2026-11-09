@@ -397,6 +397,11 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     prefill,
     manualPage: input.pageId,
     ...(input.locale ? { manualLocale: input.locale } : {}),
-    ...(/<(?:RequestExample|Panel)[\s>/]/.test(input.mdx) ? {} : { manualSamples: true as const }),
+    ...(/<(?:RequestExample|Panel)[\s>/]/.test(withoutCode(input.mdx)) ? {} : { manualSamples: true as const }),
   }
+}
+
+/** `mdx` without fenced code blocks (an unclosed fence runs to the end) and inline code spans. */
+function withoutCode(mdx: string): string {
+  return mdx.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?^[ \t]*\1[ \t]*$|[\s\S]*)/gm, '').replace(/`[^`\n]+`/g, '')
 }

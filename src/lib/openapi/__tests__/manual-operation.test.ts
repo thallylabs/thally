@@ -154,6 +154,13 @@ describe('buildManualOperation', () => {
     expect(build({ mdx: '<Panel>\nhello\n</Panel>' })).not.toHaveProperty('manualSamples')
   })
 
+  it('still asks for generated samples when RequestExample or Panel only appears in code', () => {
+    expect(build({ mdx: 'Wrap it in a `<RequestExample>` block.\n' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '```mdx\n<RequestExample>\n```bash\ncurl x\n```\n</RequestExample>\n```\n' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '~~~\n<Panel>x</Panel>\n~~~\n\nAfter.' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '```\ncode\n```\n\n<RequestExample>\nx\n</RequestExample>' })).not.toHaveProperty('manualSamples')
+  })
+
   it('sets manualLocale only when a locale is given', () => {
     expect(build({ locale: 'fr' })).toMatchObject({ manualPage: 'p/users', manualLocale: 'fr' })
     expect(build()).not.toHaveProperty('manualLocale')
