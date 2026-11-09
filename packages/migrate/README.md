@@ -135,7 +135,14 @@ A page with no `description`, other than one that names an API operation, gets
 one from its first paragraph, which keeps it for search and metadata but marks it
 `descriptionPlacement: body`, so the runtime does not print the same sentence under
 the title and again in the body; an authored description is shown under the title as
-written. (Docusaurus and Fern pages are always marked `body`.)
+written. (Docusaurus and Fern pages are always marked `body`.) A first paragraph
+skips form chrome (a paragraph or element that is only a form or form controls),
+but keeps the text of a `<label>` or `<button>` inside a sentence. An authored
+description is shown as plain text, so a Markdown link keeps its text and loses its
+address, with one warning for the page, and bold and italic markers at word
+boundaries are removed (an asterisk inside a word or inside `$...$` math stays). A
+Fern `subtitle` is the description when the page has none, and otherwise opens the
+body, with the same link handling.
 Analytics come across too: docs.json `integrations` and legacy mint.json
 `analytics` for GA4, Google Tag Manager, PostHog, and Plausible are validated
 and written to `docs.json` `integrations` (`integrations` wins per provider when
@@ -439,7 +446,9 @@ size gets its own warning: a Cloudflare deploy fails until it is made smaller
 
 Headings written with an explicit `{#custom-id}` become a preceding
 `<a id="custom-id"></a>` anchor and keep their text, so links to that id still
-work and the page still compiles as MDX.
+work and the page still compiles as MDX. A Mintlify heading that ends in `?`
+also gets an invisible anchor for the id Mintlify serves, which keeps the trailing
+dash (`what-is-mfa-`), so links from outside still reach it.
 
 Migrated specs are written to `openapi/`, never `public/`, because the host
 serves `public/` as-is and would publish operations marked `x-excluded` or
@@ -528,15 +537,38 @@ the API being silently dropped. A Fern Definition (a non-OpenAPI API with no
 document to attach), an AsyncAPI/OpenRPC-only `api:` section (Thally has no
 renderer for either), and an `api:` section for which no spec could be
 resolved at all, are each reported as a warning naming the API instead of the
-tab being silently dropped, as is `changelog`, which has no equivalent Thally
-field yet.
+tab being silently dropped. A `changelog` directory is imported as a dated feed at
+its route.
 
 A section/page/tab's explicit `slug` is used as literal Fern routing text
-(e.g. `slug: baml_client`, matching a `baml_client/` folder) even when
-Thally's own route still hyphenates it for consistency (`baml-client`); an
-in-body link written against that literal, unslugified form — which Fern's
-own file-path-based routing tolerates — gets a redirect to the route Thally
-actually serves, instead of 404ing after migration.
+(e.g. `slug: baml_client`, matching a `baml_client/` folder) and is the route
+Thally serves; the hyphenated form (`baml-client`) redirects to it, so a link
+written either way still resolves.
+
+A `docs.yml` whose navigation has no `api:` entry publishes no API reference: an
+OpenAPI file in the repository gets no tab, and one warning names it (the first
+five) and says to add an `api:` entry to the navigation to publish one.
+
+Fern URLs that Thally serves elsewhere get redirects. Each operation URL of an
+`api:` section (named from the SDK group and method in the spec or its
+`overrides` files, else the `operationId`, else the tag and summary) redirects to
+the operation page, and a `docs.yml` redirect that ends on one points straight at
+the page. A URL a page or an authored redirect already answers is left alone.
+At most 2,000 are created; past that, and when two operations share one URL, a
+warning gives the counts and the first ten URLs. A changelog entry named
+`YYYY-MM-DD` is also served at `/<route>/YYYY/M/D`, as Fern does, and redirects
+to its page. An absolute link to the site's `custom-domain` becomes an internal
+path when it reaches a migrated page, directly or through a redirect, and its
+fragment (if any) names a heading on that page; the others stay absolute, and one
+warning lists the first ten.
+
+Fern icons (`fa-light fa-gears`, on tabs, sections and pages) keep their Font
+Awesome name without the style prefix, and the site selects the Font Awesome
+library (`icons.library: "fontawesome"`); a page also keeps the style (`iconType`).
+A name in a Pro style that Thally draws from the free set is reported in one
+warning. Header tabs keep the tab bar, whatever their number; only tabs a source
+places in the sidebar (`layout.tabs-placement: sidebar`) switch to a dropdown past
+six, with a warning.
 
 KaTeX-style `$$...$$` math (block or inline) has no Thally renderer yet.
 Rather than crashing the MDX compiler and silently excluding the whole page,
@@ -899,9 +931,13 @@ except modules that pages import as components, which are copied as components
 instead. A script that loads or names a known tracker (PostHog, Intercom,
 Segment, Hotjar, Google Tag Manager or Analytics, Mixpanel, Amplitude) is still
 carried, with one warning for that file naming the trackers. Thally loads a local stylesheet that `docs.json` lists under
-`stylesheets`, but the migrator does not list the `.css` files it copies, since
-their rules likely target Mintlify's DOM: each is preserved with a warning that it
-is not applied. Fonts named by
+`stylesheets`, and the migrator lists every `.css` file it copies there, so each
+loads on every page as it did on Mintlify; one warning names the first five and
+says that selectors for Mintlify's own markup match nothing. The files those
+stylesheets load by a root-relative `url()` are copied with the site when they are
+an image, audio, video or PDF file or a `.woff`, `.woff2`, `.ttf`, `.otf` or `.eot`
+font; a page, script or other file a `url()` names is not, and one warning names
+the targets that are missing or outside the content directory. Fonts named by
 `fonts.source` (top level, `heading`, `body`) that are local `.woff`, `.woff2`,
 `.ttf`, or `.otf` files are copied. Thally's `fonts` setting loads Google Fonts
 by family only, so a font with a `source` of its own is not written to it (the
