@@ -186,7 +186,7 @@ describe('Mintlify navigation projection', () => {
 
     expect(result.docsConfig.tabs[0]?.pages).toEqual([
       'introduction',
-      { group: 'Guides', pages: ['guides/start'] },
+      { group: 'Guides', defaultOpen: true, pages: ['guides/start'] },
       'faq',
     ])
   })

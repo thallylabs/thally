@@ -126,3 +126,23 @@ describe('heading ids that end in a dash on Mintlify', () => {
     expect(body.match(/<a id=/g)).toHaveLength(3)
   })
 })
+
+describe('top-level groups of a Mintlify tab', () => {
+  const pages = Object.fromEntries(['a', 'b', 'c', 'd'].map((id) => [`${id}.mdx`, `---\ntitle: ${id}\ndescription: ${id}.\n---\n\nBody of page ${id} here.\n`]))
+
+  it('become section headers of the tab when the tab holds only groups', () => {
+    const bundle = migrate(pages, { navigation: { tabs: [{ tab: 'Docs', pages: [{ group: 'One', pages: ['a', 'b'] }, { group: 'Two', pages: ['c', 'd'] }] }] } })
+    const tab = bundle.docsConfig.tabs?.[0]
+    expect(tab?.groups?.map((group) => group.group)).toEqual(['One', 'Two'])
+    expect(tab?.pages).toBeUndefined()
+  })
+
+  it('stay open when the tab also lists loose pages, which the runtime keeps in one flat list', () => {
+    const bundle = migrate(pages, { navigation: { tabs: [{ tab: 'Docs', pages: ['a', { group: 'Two', pages: ['c', { group: 'Nested', pages: ['d'] }] }, 'b'] }] } })
+    const tab = bundle.docsConfig.tabs?.[0]
+    const group = tab?.pages?.find((entry): entry is Exclude<typeof entry, string> => typeof entry !== 'string')
+    expect(group?.defaultOpen).toBe(true)
+    const nested = group?.pages.find((entry): entry is Exclude<typeof entry, string> => typeof entry !== 'string')
+    expect(nested?.defaultOpen).toBeUndefined()
+  })
+})
