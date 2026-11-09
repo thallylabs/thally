@@ -3072,13 +3072,16 @@ export function separateBlockComponents(body: string): string {
         const before = children[index - 1]
         if (child.type !== 'mdxJsxTextElement' || !BLOCK_COMPONENT_NAMES.has(child.name ?? '') || start === undefined
           || before?.type !== 'text' || !/\S[ \t]*\n[ \t]*$/.test(before.value ?? '')) return
-        inserts.push(body.lastIndexOf('\n', start - 1) + 1)
+        const lineStart = body.lastIndexOf('\n', start - 1) + 1
+        // Inside a blockquote the separating line carries the quote marker, so the component stays in the quote.
+        const quote = /^[ \t]*(?:>[ \t]?)+/.exec(body.slice(lineStart, start))?.[0].trimEnd() ?? ''
+        inserts.push([lineStart, `${quote}\n`])
       })
     }
     children.forEach(visit)
   }
   visit(tree)
-  return inserts.sort((a, b) => b - a).reduce((text, offset) => `${text.slice(0, offset)}\n${text.slice(offset)}`, body)
+  return inserts.sort((a, b) => b[0] - a[0]).reduce((text, [offset, blank]) => `${text.slice(0, offset)}${blank}${text.slice(offset)}`, body)
 }
 
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
@@ -3402,9 +3405,14 @@ export function parseMarkdownPage(input: {
   const authoredDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim() ? parsed.data.description.trim() : undefined
   // Fern shows `subtitle` as the lead line under the title. With no description of its own the page is described by it, which Thally
   // shows under the title; otherwise the description stays as it is and the subtitle opens the body.
-  const subtitle = input.platform === 'fern' && typeof parsed.data.subtitle === 'string' && parsed.data.subtitle.trim()
-    ? withoutMarkdownLinks(parsed.data.subtitle.trim()) : undefined
-  const subtitleIsDescription = subtitle !== undefined && authoredDescription === undefined
+  const writtenSubtitle = input.platform === 'fern' && typeof parsed.data.subtitle === 'string' ? parsed.data.subtitle.trim() : ''
+  const subtitleWithoutLinks = writtenSubtitle ? withoutMarkdownLinks(writtenSubtitle) : undefined
+  const subtitleIsDescription = subtitleWithoutLinks !== undefined && authoredDescription === undefined
+  // As a description it is plain text, so emphasis markers go too; as the first line of the body they render as written.
+  const subtitle = subtitleWithoutLinks === undefined ? undefined : subtitleIsDescription ? withoutMarkdownLinks(writtenSubtitle, true) : subtitleWithoutLinks
+  if (subtitleWithoutLinks !== undefined && subtitleWithoutLinks !== writtenSubtitle) {
+    input.warn?.(`Page "${identity.id}": its subtitle had links, which Thally shows as plain text; only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.`)
+  }
   // An API reference page is described by its operation, not by its prose.
   const description = authoredDescription ?? (subtitleIsDescription ? subtitle : namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
@@ -3432,7 +3440,7 @@ export function parseMarkdownPage(input: {
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),
     body: subtitle !== undefined && !subtitleIsDescription
-      ? `${subtitle.replace(/([\\{}<>])/g, '\\$1')}\n\n${body}`.trim()
+      ? `${escapeLeadingBlockMarker(subtitle.replace(/([\\{}<>])/g, '\\$1'))}\n\n${body}`.trim()
       : body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
