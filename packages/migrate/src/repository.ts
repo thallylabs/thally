@@ -5677,8 +5677,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // body (after `parseMarkdownPage`'s `normalizeMdx`), so a tag that a
       // platform-specific rename still resolves (Docusaurus `TabItem` ->
       // `Tab`, Mintlify `Warn` -> `Warning`, ...) is never mistaken for
-      // unknown. Fern-native components with no Thally equivalent
-      // (`Markdown`, `Button`, `Download`, ...) fall into the same generic
+      // unknown. Fern's `Button` and `Download` become anchors in the next
+      // step; other Fern-native components with no Thally equivalent
+      // (`Markdown`, ...) fall into the same generic
       // path below — there is no separate Fern-specific detector, so each
       // unknown tag gets exactly one warning.
       page.body = replaceLinkWithAnchor(page.body)
@@ -5688,7 +5689,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // throw "Expected component X to be defined" at render. Warn once per
       // component name and neutralize it: keep a paired tag's children,
       // drop a self-closing one outright.
-      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) }, { fernLinks: platform === 'fern' })
     }
     if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
@@ -5704,7 +5705,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         let settled = escapeFernLiteralBraces(repair.body)
         settled = normalizeFlowParagraphContainers(settled)
         settled = removeUndefinedExpressions(settled, (message) => { settledWarnings.push({ code: 'unsupported-config', message, source: pageWarningSource }) })
-        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) }, { fernLinks: platform === 'fern' })
         if (invalidMdxReason(settled) === null) {
           page.body = settled
           mdxError = null

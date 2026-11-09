@@ -234,3 +234,22 @@ describe('V3: a form label is not page description', () => {
     expect(bundle.pages.find((page) => page.title === 'Other')?.description).toBe('Real intro text.')
   })
 })
+
+describe('V5: Fern Download and Button', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'navigation:\n  - page: Links\n    path: links.mdx\n',
+    'links.mdx': '---\ntitle: Links\n---\n\n<Download src="/files/guide.pdf">Get the guide</Download>\n\n<Button href="https://example.com/start" intent="primary" rounded={true}>Start now</Button>\n\n<EndpointRequestSnippet endpoint="POST /x" />\n',
+  })
+  const body = bundle.pages[0].body
+
+  it('turns them into links that keep target and label', () => {
+    expect(body).toContain('<a download href="/files/guide.pdf">Get the guide</a>')
+    expect(body).toContain('<a href="https://example.com/start">Start now</a>')
+  })
+
+  it('still warns about components with no equivalent', () => {
+    const messages = bundle.warnings.map((warning) => warning.message).join('\n')
+    expect(messages).toContain('EndpointRequestSnippet')
+    expect(messages).not.toMatch(/"?(Download|Button)"?[^\n]*(not|no)/)
+  })
+})

@@ -1521,7 +1521,7 @@ export function replaceLinkWithAnchor(raw: string): string {
 export function replaceUnknownComponents(
   raw: string,
   warn: (name: string) => void,
-  options: { onlyRenameLinkTag?: boolean } = {},
+  options: { onlyRenameLinkTag?: boolean; fernLinks?: boolean } = {},
 ): string {
   const { front, body } = splitFrontmatterBlock(raw)
 
@@ -1555,6 +1555,16 @@ export function replaceUnknownComponents(
       return renameTagOccurrences(body.slice(start, openEnd), node.name!, 'a')
         + renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)
         + renameTagOccurrences(body.slice(closeStart, end), node.name!, 'a')
+    }
+
+    // Fern's `<Download src>` and `<Button href>` are links: a plain anchor keeps the target and the label.
+    if (options.fernLinks && isJsx && (node.name === 'Download' || node.name === 'Button') && !declared.has(node.name)) {
+      const openEnd = isSelfClosingJsx(text) || !node.children?.length ? end : node.children[0].position?.start.offset ?? start
+      const rest = openEnd === end ? '' : renderChildrenSpan(node.children!, openEnd, node.children!.at(-1)!.position?.end.offset ?? end, body, renderNode)
+        + renameTagOccurrences(body.slice(node.children!.at(-1)!.position?.end.offset ?? end, end), node.name, 'a')
+      const open = body.slice(start, openEnd).replace(/\s(?:intent|variant|rounded|size|icon|rightIcon|minimal|mono)=(?:"[^"]*"|'[^']*'|\{[^}]*\})/g, '')
+      const anchor = node.name === 'Download' ? open.replace(/\ssrc=/, ' download href=') : open
+      return renameTagOccurrences(anchor, node.name, 'a') + rest
     }
 
     if (!options.onlyRenameLinkTag && isJsx && tagRoot && /^[A-Z]/.test(tagRoot)
