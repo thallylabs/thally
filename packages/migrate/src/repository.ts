@@ -53,8 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
-import { mapFernIcon } from './icon-library.js'
-import { cappedList, fernDroppedConfigWarnings, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
+import { cappedList, fernDroppedConfigWarnings, fernIcon, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
@@ -4873,7 +4872,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernNavTitles = new Map<string, string>()
   const fernPageIcons = new Map<string, string>()
   const fernPageAvailability = new Map<string, string>()
-  const fernUnmappedIcons = new Set<string>()
+  const fernProStyleIcons = new Set<string>()
   const fernHiddenIds = new Set<string>()
   const fernRestrictedPaths = new Set<string>()
 
@@ -4952,7 +4951,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         fernRestrictedApiSections = projected.restrictedApiSections
         fernNavigationIncomplete = projected.navigationIncomplete
         fernChangelogIndexes = projected.changelogIndexes
-        for (const name of projected.unmappedIcons) fernUnmappedIcons.add(name)
+        for (const name of projected.proStyleIcons) fernProStyleIcons.add(name)
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
           if (descriptor.navTitle && !fernNavTitles.has(descriptor.navigationId)) {
@@ -5730,7 +5729,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'fern') {
       // The page's own frontmatter icon wins over the one docs.yml gives its navigation node.
       const icon = page.icon ?? fernPageIcons.get(navigationId)
-      if (icon) page.icon = mapFernIcon(icon, fernUnmappedIcons)
+      if (icon) {
+        const { icon: name, iconType } = fernIcon(icon, fernProStyleIcons)
+        page.icon = name
+        if (iconType && !page.iconType) page.iconType = iconType
+      }
       page.badge ??= fernAvailabilityBadge(fernPageAvailability.get(navigationId))
     }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
@@ -7423,9 +7426,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     })
   }
   if (fernRawConfig) warnings.push(...fernDroppedConfigWarnings(fernRawConfig))
-  if (fernUnmappedIcons.size > 0) warnings.push({
+  if (fernRawConfig) docsConfig = { ...docsConfig, icons: { library: 'fontawesome' } }
+  if (fernProStyleIcons.size > 0) warnings.push({
     code: 'unsupported-config',
-    message: `${fernUnmappedIcons.size} Font Awesome icon name(s) have no matching icon in Thally's default icon set and will show blank: ${cappedList([...fernUnmappedIcons].sort(), 10)}. Replace them with Lucide icon names (lucide.dev/icons) in docs.json and the page frontmatter.`,
+    message: `${fernProStyleIcons.size} icon name(s) use a Font Awesome Pro style (light, thin, duotone or sharp): ${cappedList([...fernProStyleIcons].sort(), 10)}. Thally draws them from Font Awesome Free, in the regular or solid style, and a name that exists only in Pro shows blank. Look the names up in the Font Awesome Free icon list and rename the ones that show blank.`,
   })
   if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
     code: 'unsupported-config',

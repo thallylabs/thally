@@ -10,7 +10,6 @@ import { basename, dirname, extname, relative } from 'node:path'
 import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
-import { mapFernIcon } from './icon-library.js'
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
 import { skippedRedirectsWarning } from './redirects.js'
 import { isPathEscapeError, resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
@@ -97,8 +96,8 @@ export interface FernNavigationResult {
   restrictedApiSections: Array<FernApiSection>
   /** Fern changelog tabs render their entries as a feed at the bare route. */
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
-  /** Font Awesome icon names with no Lucide equivalent, so they render blank. */
-  unmappedIcons: Array<string>
+  /** Icon names written in a Font Awesome Pro style (light, thin, duotone, sharp), which Thally draws from the Free set. */
+  proStyleIcons: Array<string>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -147,6 +146,23 @@ export function fernDroppedConfigWarnings(config: Record<string, unknown>): Arra
   return warnings
 }
 
+/**
+ * A Fern icon as the runtime reads it. Fern writes Font Awesome class strings (`fa-light fa-browser`); the runtime takes the last
+ * `fa-` token as the name and the style from `iconType`, so the name is returned bare and the prefix becomes the style (brands and
+ * solid keep theirs, every other style is the regular outline). A name in a Pro-only style is added to `proStyled`. Anything that
+ * is not a class string (an image path, a bare name) is unchanged.
+ */
+export function fernIcon(icon: string, proStyled: Set<string>): { icon: string; iconType?: 'regular' | 'solid' | 'brands' } {
+  const tokens = icon.trim().toLowerCase().split(/\s+/)
+  const last = tokens.at(-1) ?? ''
+  if (!last.startsWith('fa-') || last.length === 3) return { icon }
+  const name = last.slice(3)
+  const styles = tokens.slice(0, -1)
+  if (styles.includes('fa-brands')) return { icon: name, iconType: 'brands' }
+  if (styles.some((style) => /^fa-(?:light|thin|duotone|sharp)/.test(style))) proStyled.add(name)
+  return { icon: name, ...(styles.length > 0 ? { iconType: styles.includes('fa-solid') ? 'solid' as const : 'regular' as const } : {}) }
+}
+
 function titleCase(value: string): string {
   return value
     .split(/[-_]/)
@@ -186,7 +202,7 @@ interface WalkContext {
   /** `api:` nodes under a node that sets `viewers`: never published, and their specs stay out of public/. */
   restrictedApiSections: Array<FernApiSection>
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
-  unmappedIcons: Set<string>
+  proStyleIcons: Set<string>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** External navigation leaves cannot live inside Thally groups; keep them as navbar links. */
@@ -333,7 +349,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   const isHidden = hidden || context.hiddenInherited === true
-  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon: mapFernIcon(icon, context.unmappedIcons) } : {}), ...(typeof availability === 'string' ? { availability } : {}), ...(isHidden ? { hidden: true } : {}) })
+  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon } : {}), ...(typeof availability === 'string' ? { availability } : {}), ...(isHidden ? { hidden: true } : {}) })
   // `repository.ts` creates exactly one page per physical file, keyed off
   // the first nav location that registers it — a file listed at a second
   // nav location (Fern allows the same page under several sections) must
@@ -531,7 +547,7 @@ function convertNodeContents(
       group: label,
       ...(['open-by-default', 'closed-by-default', true, false].includes(object.collapsed as string | boolean)
         ? { defaultOpen: object.collapsed === 'open-by-default' || object.collapsed === false } : {}),
-      ...(typeof object.icon === 'string' ? { icon: mapFernIcon(object.icon, context.unmappedIcons) } : {}),
+      ...(typeof object.icon === 'string' ? { icon: fernIcon(object.icon, context.proStyleIcons).icon } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages,
     }
@@ -755,7 +771,7 @@ function buildUnrestrictedTabs(
         context.apiSections[index].tabLabel ??= label
       }
       if (groups.length === 0 && typeof meta.href === 'string' && /^https?:\/\//i.test(meta.href)) {
-        return [{ tab: label, ...(typeof meta.icon === 'string' ? { icon: mapFernIcon(meta.icon, context.unmappedIcons) } : {}), href: meta.href }]
+        return [{ tab: label, ...(typeof meta.icon === 'string' ? { icon: fernIcon(meta.icon, context.proStyleIcons).icon } : {}), href: meta.href }]
       }
       if (groups.length === 0 && typeof meta.changelog === 'string') {
         // A Fern changelog tab names a directory rather than explicit page
@@ -805,7 +821,7 @@ function buildUnrestrictedTabs(
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
       return [{
         tab: label,
-        ...(typeof meta.icon === 'string' ? { icon: mapFernIcon(meta.icon, context.unmappedIcons) } : {}),
+        ...(typeof meta.icon === 'string' ? { icon: fernIcon(meta.icon, context.proStyleIcons).icon } : {}),
         groups,
       }]
     })
@@ -911,7 +927,7 @@ export function projectFernNavigation(input: {
     apiSections: [],
     restrictedApiSections: [],
     changelogIndexes: [],
-    unmappedIcons: new Set(),
+    proStyleIcons: new Set(),
     warnings: [],
     warningKeys: new Set(),
     externalLinks: [],
@@ -1094,6 +1110,6 @@ export function projectFernNavigation(input: {
     apiSections: disambiguatedApiSections,
     restrictedApiSections: context.restrictedApiSections,
     changelogIndexes: context.changelogIndexes,
-    unmappedIcons: [...context.unmappedIcons],
+    proStyleIcons: [...context.proStyleIcons],
   }
 }
