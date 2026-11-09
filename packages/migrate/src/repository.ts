@@ -2424,7 +2424,8 @@ export function apiOperationLinkMap(
       if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
       leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
       // Fern's own URL: `<section>/<sdk group>/<sdk method>`, else its tag and the derived leaf above.
-      const fernLeaf = operation.sdkMethod ? fernLabelSlug(operation.sdkMethod) : [...leafCandidates][0]
+      const fernLeaf = operation.sdkMethod ? fernLabelSlug(operation.sdkMethod)
+        : operation.operationId ? fernLabelSlug(operation.operationId.replace(/([A-Za-z])(\d)/g, '$1-$2')) : [...leafCandidates][0]
       const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernLabelSlug)
       const fernUrl = [base, ...fernGroups, fernLeaf].filter(Boolean).join('/').toLowerCase()
       if (fernLeaf && !underDeeperMount(fernUrl, prefix)) {
@@ -2977,6 +2978,44 @@ function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<stri
   })
 }
 
+/** The `overrides` files (one path or a list) of the `api.specs[]` entry that names `specPath`. */
+function fernGeneratorsOverridePaths(config: Record<string, unknown>, specPath: string): Array<string> {
+  const specs = (config.api as Record<string, unknown> | undefined)?.specs
+  if (!Array.isArray(specs)) return []
+  const entry = specs.find((spec) => spec && typeof spec === 'object' && (spec as Record<string, unknown>).openapi === specPath) as Record<string, unknown> | undefined
+  return [entry?.overrides].flat().filter((path): path is string => typeof path === 'string' && !/^(?:https?:)?\/\//i.test(path))
+}
+
+/**
+ * Fern names an operation's URL from the SDK group and method names its `overrides` files add to the spec. Copy just those names
+ * onto the operations of a spec for linking (the published spec is untouched), so links and redirects use the names Fern served.
+ */
+function withFernSdkNames(content: Buffer, overrideFiles: Array<string>): Buffer {
+  const document = readSpecDocument(content)
+  if (!isRecord(document) || !isRecord(document.paths)) return content
+  let changed = false
+  for (const file of overrideFiles) {
+    let overrides: unknown
+    try {
+      if (lstatSync(file).size > MAX_FERN_GENERATORS_BYTES) continue
+      overrides = (parseYaml(readFileSync(file, 'utf8')) as Record<string, unknown> | null)?.paths
+    } catch { continue }
+    if (!isRecord(overrides)) continue
+    for (const [path, item] of Object.entries(overrides)) {
+      const target = document.paths[path]
+      if (!isRecord(item) || !isRecord(target)) continue
+      for (const [method, patch] of Object.entries(item)) {
+        const operation = target[method]
+        if (!isRecord(patch) || !isRecord(operation)) continue
+        for (const key of ['x-fern-sdk-group-name', 'x-fern-sdk-method-name']) {
+          if (patch[key] !== undefined) { operation[key] = patch[key]; changed = true }
+        }
+      }
+    }
+  }
+  return changed ? Buffer.from(JSON.stringify(document)) : content
+}
+
 /**
  * Fern's `generators.yml` can also point an `api.specs[]` entry at an
  * AsyncAPI or OpenRPC document instead of OpenAPI. Thally's API reference
@@ -3033,6 +3072,8 @@ function fernOpenApiCandidateDirs(fernRoot: string, apiName: string | undefined,
 /** `findFernConfiguredOpenApi`'s result, plus any AsyncAPI/OpenRPC specs seen along the way (Thally has no renderer for either). */
 interface FernOpenApiResolution {
   spec: ScannedFile | null
+  /** Absolute paths of the `overrides` files configured beside the spec. */
+  overrides?: Array<string>
   unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }>
 }
 
@@ -3071,7 +3112,13 @@ function findFernConfiguredOpenApi(
           continue
         }
         if (kind !== 'openapi') continue
-        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, unsupported }
+        const overrides = fernGeneratorsOverridePaths(config, specPath).flatMap((path) => {
+          try {
+            const file = withinRealRoot(resolveWithinRoot(dir, path, repositoryDir), repositoryDir)
+            return existsSync(file) && lstatSync(file).isFile() ? [file] : []
+          } catch { return [] }
+        })
+        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, overrides, unsupported }
       } catch {
         warnings.push({
           code: 'unsupported-config',
@@ -6344,7 +6391,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // with no `api:` node publishes no API reference: a spec file in the
     // repository that navigation never references gets no tab.
     const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections
-    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; linkContent?: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
     // apis/<name>/openapi/openapi.json) — track which absolute file a
@@ -6374,7 +6421,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
           assets.push(specAsset(filename, specContent))
         }
-        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, routeSegments: section.routeSegments ?? [] })
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, linkContent: withFernSdkNames(specContent, resolution.overrides ?? []), routeSegments: section.routeSegments ?? [] })
         continue
       }
       if (resolution.unsupported.length > 0) {
@@ -6431,7 +6478,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
       const { operationLinks, prefixLandings, fernPages } = apiOperationLinkMap(
-        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.linkContent ?? spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
       // Links first: an address a redirect answers is left as written, and the redirects below answer every operation URL.

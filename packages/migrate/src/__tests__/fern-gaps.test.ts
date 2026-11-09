@@ -103,7 +103,18 @@ describe('V1/V7: Fern API reference operation URLs', () => {
   it('redirects SDK-named and derived operation URLs to the operation pages', () => {
     expect(redirect('/api-reference/assistants/create')).toMatch(/^\/api\/default\/.*assistant/)
     expect(redirect('/api-reference/analytics/get-all')).toMatch(/^\/api\/default\//)
-    expect(redirect('/api-reference/calls/get')).toMatch(/^\/api\/default\//)
+    expect(redirect('/api-reference/calls/call-controller-find-one')).toMatch(/^\/api\/default\//)
+  })
+
+  it('reads SDK names from the overrides files generators.yml lists', () => {
+    const overridden = migrateFern({
+      'docs.yml': 'navigation:\n  - tab: guide\n    layout:\n      - page: Home\n        path: index.mdx\n  - tab: ref\n    layout:\n      - api: API Reference\n        skip-slug: true\ntabs:\n  guide:\n    display-name: Guide\n    slug: guide\n  ref:\n    display-name: API Reference\n    slug: api-reference\n',
+      'generators.yml': 'api:\n  specs:\n    - openapi: openapi.json\n      overrides: ./overrides.yml\n',
+      'openapi.json': sdkSpec,
+      'overrides.yml': 'paths:\n  /call/{id}:\n    get:\n      x-fern-sdk-group-name:\n        - calls\n      x-fern-sdk-method-name: get\n',
+      'index.mdx': '---\ntitle: Home\n---\n\nHi.',
+    })
+    expect(overridden.docsConfig.redirects?.find((entry) => entry.source === '/api-reference/calls/get')?.destination).toMatch(/^\/api\/default\//)
   })
 
   it('points docs.yml redirects that end on an operation URL at the operation page', () => {
