@@ -2270,6 +2270,8 @@ export interface ApiOperationLinkMaps {
   duplicatePages: Array<string>
   /** Fern operation URL (lowercased, no leading slash) -> Thally operation route, for redirects. */
   fernPages: Map<string, string>
+  /** Fern operation URLs that two operations share; the first operation keeps the URL. */
+  fernDuplicates: Array<string>
 }
 
 /** The operations a source served under its prefix: the listed ones in listed order, else every operation of the spec. */
@@ -2366,6 +2368,7 @@ export function apiOperationLinkMap(
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
   const fernPages = new Map<string, string>()
+  const fernDuplicates: Array<string> = []
   const duplicatePages: Array<string> = []
   const parsedByFile = new Map<string, Array<OpenApiOperationForLinking>>()
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
@@ -2430,7 +2433,10 @@ export function apiOperationLinkMap(
       const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernSlug)
       const fernUrl = [base, ...fernGroups, fernLeaf].filter(Boolean).join('/').toLowerCase()
       if (fernLeaf && !underDeeperMount(fernUrl, prefix)) {
-        if (specId !== undefined && !fernPages.has(fernUrl)) fernPages.set(fernUrl, thallyHref)
+        if (specId !== undefined) {
+          if (!fernPages.has(fernUrl)) fernPages.set(fernUrl, thallyHref)
+          else if (fernPages.get(fernUrl) !== thallyHref && !fernDuplicates.includes(fernUrl)) fernDuplicates.push(fernUrl)
+        }
         if (!map.has(fernUrl)) map.set(fernUrl, thallyHref)
       }
       // Two prefix conventions get registered for every leaf candidate:
@@ -2465,7 +2471,7 @@ export function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages, fernPages }
+  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages, fernPages, fernDuplicates }
 }
 
 /**
@@ -6544,7 +6550,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // under that section's own route (e.g. "api-reference/messages/...")
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
-      const { operationLinks, prefixLandings, fernPages } = apiOperationLinkMap(
+      const { operationLinks, prefixLandings, fernPages, fernDuplicates } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.linkContent ?? spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
@@ -6554,8 +6560,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // authored redirect that ends on an operation URL goes straight to the page.
       const taken = servedRoutes(pages)
       for (const redirect of docsConfig.redirects ?? []) taken.add(literalRoute(redirect.source) ?? redirect.source)
-      const operationRedirects = [...fernPages].filter(([source]) => !taken.has(`/${source}`)).slice(0, MAX_ENDPOINT_REDIRECTS)
-        .map(([source, destination]) => ({ source: `/${source}`, destination }))
+      const fernCandidates = [...fernPages].filter(([source]) => !taken.has(`/${source}`))
+      const operationRedirects = fernCandidates.slice(0, MAX_ENDPOINT_REDIRECTS).map(([source, destination]) => ({ source: `/${source}`, destination }))
+      const listUrls = (urls: ReadonlyArray<string>): string => `${urls.slice(0, 10).map((url) => `/${url}`).join(', ')}${urls.length > 10 ? ', ...' : ''}`
+      if (fernDuplicates.length > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `${fernDuplicates.length} Fern operation URL${fernDuplicates.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and name), so only the first operation is redirected from ${fernDuplicates.length === 1 ? 'it' : 'each'}: ${listUrls(fernDuplicates)}.`,
+        })
+      }
+      if (fernCandidates.length > operationRedirects.length) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Created ${operationRedirects.length} of ${fernCandidates.length} Fern operation redirects; skipped ${fernCandidates.length - operationRedirects.length} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to skipped operation URLs will not redirect: ${listUrls(fernCandidates.slice(MAX_ENDPOINT_REDIRECTS).map(([source]) => source))}.`,
+        })
+      }
       const authored = (docsConfig.redirects ?? []).map((redirect) => {
         const target = fernPages.get(redirect.destination.replace(/\/+$/, '').replace(/^\//, '').toLowerCase())
         return target ? { ...redirect, destination: target } : redirect
