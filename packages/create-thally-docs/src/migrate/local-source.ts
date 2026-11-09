@@ -8,7 +8,7 @@ import { detectRepositoryDocsDir, projectMintlifyNavigation, readMintlifyConfig 
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const generatedDirectories = new Set(['dist', 'build', 'coverage'])
-const extensions = new Set(['.md', '.mdx', '.json', '.yaml', '.yml', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.sass', '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4', '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp'])
+const extensions = new Set(['.md', '.mdx', '.json', '.yaml', '.yml', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.sass', '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4', '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp', '.woff', '.woff2', '.ttf', '.otf'])
 
 function contains(root: string, candidate: string): boolean {
   const path = relative(root, candidate)
