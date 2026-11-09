@@ -341,3 +341,19 @@ describe('V22: scheme-less links in OpenAPI descriptions', () => {
     expect(Buffer.from(bundle.assets.find((asset) => asset.path.endsWith('openapi.json'))!.content).toString()).toContain('(dashboard.vapi.ai)')
   })
 })
+
+describe('links to pages the site answers itself stay internal', () => {
+  it('does not send operation pages or redirect sources to the live site', () => {
+    const bundle = migrateFern({
+      'docs.yml': 'instances:\n  - url: acme.docs.buildwithfern.com\n    custom-domain: docs.example.com\nredirects:\n  - source: /old\n    destination: /guide/home\nnavigation:\n  - tab: guide\n    layout:\n      - page: Home\n        path: index.mdx\n  - tab: ref\n    layout:\n      - api: API Reference\n        skip-slug: true\ntabs:\n  guide:\n    display-name: Guide\n    slug: guide\n  ref:\n    display-name: API Reference\n    slug: api-reference\n',
+      'generators.yml': 'api:\n  specs:\n    - openapi: openapi.json\n',
+      'openapi.json': sdkSpec,
+      'index.mdx': '---\ntitle: Home\n---\n\n[create](/api-reference/assistants/create) [old](/old) [landing](/api-reference) [gone](/nowhere)',
+    })
+    const body = bundle.pages.find((page) => page.title === 'Home')!.body
+    expect(body).not.toContain('(/api-reference/assistants/create)')
+    expect(body).not.toMatch(/\]\(https:\/\/docs\.example\.com\/api/)
+    expect(body).toContain('(/old)')
+    expect(body).toContain('(https://docs.example.com/nowhere)')
+  })
+})

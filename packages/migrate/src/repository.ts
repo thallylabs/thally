@@ -6950,8 +6950,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
     if (sourceSiteUrl) {
       const externalized = new Set<string>()
-      const pageIds = new Set(pages.map((page) => page.id))
-      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, pageIds, sourceSiteUrl, externalized)
+      // A route the site answers itself (an API operation page, a redirect source) is not missing.
+      const served = new Set([
+        ...pages.map((page) => page.id),
+        ...migrationApiRoutes({ docsConfig, assets }).map((route) => route.replace(/^\//, '')),
+        ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\/|\/$/g, '')),
+      ])
+      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, served, sourceSiteUrl, externalized)
       if (externalized.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
