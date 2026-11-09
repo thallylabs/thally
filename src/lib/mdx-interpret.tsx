@@ -210,9 +210,18 @@ function evaluateStaticExpression(node: unknown, scope: Record<string, unknown>)
       if (expression.operator === '!') return !argument
       return undefined
     }
-    case 'TemplateLiteral':
-      if ((expression.expressions?.length ?? 0) > 0) return undefined
-      return (expression.quasis ?? []).map((quasi) => quasi.value?.cooked ?? '').join('')
+    case 'TemplateLiteral': {
+      const quasis = expression.quasis ?? []
+      let result = quasis[0]?.value?.cooked ?? ''
+      for (const [index, part] of (expression.expressions ?? []).entries()) {
+        const value = evaluateStaticExpression(part, scope)
+        // Only primitives interpolate; anything unresolved or structured
+        // degrades the whole template instead of fabricating "undefined".
+        if (value === null || (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean')) return undefined
+        result += String(value) + (quasis[index + 1]?.value?.cooked ?? '')
+      }
+      return result
+    }
     case 'JSXElement':
     case 'JSXFragment':
       return evaluateJsxElement(expression, scope)
