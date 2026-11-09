@@ -148,6 +148,11 @@ const linkParser = unified().use(remarkParse)
  */
 function withoutMarkdownLinks(text: string, markers = false): string {
   const removed: Array<[number, number]> = []
+  const math = markers ? [...text.matchAll(/\$[^$\n]+\$/g)].map((match): [number, number] => [match.index, match.index + match[0].length]) : []
+  const isWord = (char: string | undefined): boolean => char !== undefined && /[\p{L}\p{N}_]/u.test(char)
+  // Emphasis is removed only when its markers stand at word boundaries and outside `$...$` math.
+  const removableEmphasis = (start: number, end: number): boolean => !isWord(text[start - 1]) && !isWord(text[end])
+    && !math.some(([from, to]) => start >= from && start < to)
   const collect = (node: PositionedNode): void => {
     const start = node.position?.start.offset
     const end = node.position?.end.offset
@@ -157,7 +162,7 @@ function withoutMarkdownLinks(text: string, markers = false): string {
       removed.push([start, first ?? start], [last ?? start, end])
       if (first === undefined) return
     } else if (markers && (node.type === 'strong' || node.type === 'emphasis') && start !== undefined && end !== undefined
-      && first !== undefined && last !== undefined) {
+      && first !== undefined && last !== undefined && removableEmphasis(start, end)) {
       removed.push([start, first], [last, end])
     }
     for (const child of node.children ?? []) collect(child)
@@ -166,16 +171,16 @@ function withoutMarkdownLinks(text: string, markers = false): string {
   return removed.sort((a, b) => b[0] - a[0]).reduce((result, [from, to]) => result.slice(0, from) + result.slice(to), text)
 }
 
-function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
-  if (kind === 'danger') return 'Error'
-  if (kind === 'info') return 'Info'
-  if (kind === 'caution' || kind === 'warning') return 'Warning'
-  return 'Note'
 /** `line` with a Markdown block marker at its start (`#`, `-`, `>`, `1.`, a fence) escaped, so the line stays a paragraph. */
 function escapeLeadingBlockMarker(line: string): string {
   return line.replace(/^(\s*)(\d{1,9})([.)])(?=\s)/, '$1$2\\$3').replace(/^(\s*)(#{1,6}(?=\s|$)|[-+*](?=\s)|>|`{3}|~{3})/, '$1\\$2')
 }
 
+function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
+  if (kind === 'danger') return 'Error'
+  if (kind === 'info') return 'Info'
+  if (kind === 'caution' || kind === 'warning') return 'Warning'
+  return 'Note'
 }
 
 /**
@@ -3063,7 +3068,7 @@ export function separateBlockComponents(body: string): string {
   } catch {
     return body
   }
-  const inserts: Array<number> = []
+  const inserts: Array<[number, string]> = []
   const visit = (node: FlowNode): void => {
     const children = node.children ?? []
     if (node.type === 'paragraph') {
@@ -3414,7 +3419,7 @@ export function parseMarkdownPage(input: {
     input.warn?.(`Page "${identity.id}": its subtitle had links, which Thally shows as plain text; only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.`)
   }
   // An API reference page is described by its operation, not by its prose.
-  const description = authoredDescription ?? (subtitleIsDescription ? subtitle : namesOperation ? '' : firstParagraph(body))
+  const description = authoredDescription ?? (subtitleIsDescription && subtitle !== undefined ? subtitle : namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
