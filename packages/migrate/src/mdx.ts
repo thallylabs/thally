@@ -3153,6 +3153,8 @@ export function parseMarkdownPage(input: {
   warn?: (message: string) => void
   /** The icon library the migrated site uses; a page icon naming another one is reported, and none is when omitted. */
   siteIconLibrary?: string
+  /** The navigation label that titles a page with no title or heading of its own, before the file name does. */
+  fallbackTitle?: string
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
   if (input.platform === 'mintlify') {
@@ -3182,7 +3184,7 @@ export function parseMarkdownPage(input: {
   // A page that names an operation keeps taking its heading as the title.
   const heading = input.platform === 'mintlify' && !namesOperation ? undefined : leadingPageHeading(body)
   const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
-  const title = authoredTitle ?? titleFromId(identity.navigationId)
+  const title = authoredTitle ?? (input.fallbackTitle?.trim() || titleFromId(identity.navigationId))
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()

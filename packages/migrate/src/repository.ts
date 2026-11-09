@@ -5578,6 +5578,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
       siteIconLibrary,
+      ...(platform === 'fern' && fernNavTitles.has(navigationId) ? { fallbackTitle: fernNavTitles.get(navigationId) } : {}),
       raw,
       platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
