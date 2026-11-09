@@ -3654,13 +3654,13 @@ function rewriteFernOwnDomainLinks(
 }
 
 /** Keep unresolved root-relative links usable on the source site, with an explicit warning. */
-function externalizeMissingFernLinks(body: string, pageIds: ReadonlySet<string>, sourceSiteUrl: string, externalized: Set<string>): string {
+function externalizeMissingFernLinks(body: string, isServed: (path: string, fragment: string) => boolean, sourceSiteUrl: string, externalized: Set<string>): string {
   const rewrite = (target: string): string => {
     const path = target.split(/[?#]/, 1)[0].replace(/^\//, '').replace(/\/$/, '')
     // Only unresolved page routes belong on the source site. Fern pages may
     // reference copied public assets with root-relative Markdown links; an
     // image or download is not a missing docs page.
-    if (!path || pageIds.has(path) || ASSET_EXTENSIONS.has(extname(path).toLowerCase())) return target
+    if (!path || isServed(path, target.includes('#') ? target.slice(target.indexOf('#') + 1) : '') || ASSET_EXTENSIONS.has(extname(path).toLowerCase())) return target
     try {
       const base = new URL(`${sourceSiteUrl}/`)
       const sourceLinkUrl = new URL(target.slice(1), base)
@@ -6991,34 +6991,35 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
   // Before the anchor pass, so a fragment on a converted link is checked like any other.
   if (platform === 'fern' && fernRawConfig) {
+    const pageIds = new Set(pages.map((page) => page.id))
+    const redirectsBySource = new Map((docsConfig.redirects ?? []).map((redirect) => [redirect.source.replace(/\/+$/, '').toLowerCase() || '/', redirect.destination] as const))
+    let apiRoutes: Set<string> | undefined
+    /** The route a site path reaches: a page, an API operation page, or where redirects end; undefined when it reaches none. */
+    const resolve = (pathname: string): string | undefined => {
+      let current = pathname.replace(/\/+$/, '') || '/'
+      for (let hop = 0; hop < 8; hop++) {
+        if (current === '/' || pageIds.has(current.slice(1))) return current
+        apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))
+        if (apiRoutes.has(current)) return current
+        const next = redirectsBySource.get(current.toLowerCase())
+        if (!next?.startsWith('/') || next.startsWith('//')) return undefined
+        current = next.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
+      }
+      return undefined
+    }
+    const pagesById = new Map(pages.map((page) => [page.id, page]))
+    const anchorsOf = new Map<string, Set<string>>()
+    const hasAnchor = (route: string, fragment: string): boolean => {
+      const page = pagesById.get(route.slice(1))
+      // Generated API pages and browser text fragments have no headings to check here.
+      if (!page || fragment.startsWith(':~:')) return true
+      if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, headingAnchors(page.body))
+      let decoded = fragment
+      try { decoded = decodeURIComponent(fragment) } catch { /* compare as written */ }
+      return anchorsOf.get(page.id)!.has(decoded)
+    }
     const domains = fernCustomDomains(fernRawConfig)
     if (domains.length > 0) {
-      const pageIds = new Set(pages.map((page) => page.id))
-      const redirectsBySource = new Map((docsConfig.redirects ?? []).map((redirect) => [redirect.source.replace(/\/+$/, '').toLowerCase() || '/', redirect.destination] as const))
-      let apiRoutes: Set<string> | undefined
-      const resolve = (pathname: string): string | undefined => {
-        let current = pathname.replace(/\/+$/, '') || '/'
-        for (let hop = 0; hop < 8; hop++) {
-          if (current === '/' || pageIds.has(current.slice(1))) return current
-          apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))
-          if (apiRoutes.has(current)) return current
-          const next = redirectsBySource.get(current.toLowerCase())
-          if (!next?.startsWith('/') || next.startsWith('//')) return undefined
-          current = next.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
-        }
-        return undefined
-      }
-      const pagesById = new Map(pages.map((page) => [page.id, page]))
-      const anchorsOf = new Map<string, Set<string>>()
-      const hasAnchor = (route: string, fragment: string): boolean => {
-        const page = pagesById.get(route.slice(1))
-        // Generated API pages and browser text fragments have no headings to check here.
-        if (!page || fragment.startsWith(':~:')) return true
-        if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, headingAnchors(page.body))
-        let decoded = fragment
-        try { decoded = decodeURIComponent(fragment) } catch { /* compare as written */ }
-        return anchorsOf.get(page.id)!.has(decoded)
-      }
       const unresolved = new Set<string>()
       for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, resolve, hasAnchor, unresolved)
       if (unresolved.size > 0) warnings.push({
@@ -7026,25 +7027,24 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
       })
     }
-  }
-  preserveLinkedAnchors(pages)
-  if (platform === 'fern' && fernRawConfig) {
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
     if (sourceSiteUrl) {
       const externalized = new Set<string>()
-      // A route the site answers itself (an API operation page, a redirect source) is not missing.
-      const served = new Set([
-        ...pages.map((page) => page.id),
-        ...migrationApiRoutes({ docsConfig, assets }).map((route) => route.replace(/^\//, '')),
-        ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\/|\/$/g, '')),
-      ])
-      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, served, sourceSiteUrl, externalized)
+      // A route the site answers itself (a page, an API operation page, a redirect's destination) is not missing, and neither is
+      // a fragment that names a heading there.
+      const isServed = (path: string, fragment: string): boolean => {
+        if (pageIds.has(path)) return true
+        const resolved = resolve(`/${path}`)
+        return resolved !== undefined && (!fragment || hasAnchor(resolved, fragment))
+      }
+      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, isServed, sourceSiteUrl, externalized)
       if (externalized.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
       })
     }
   }
+  preserveLinkedAnchors(pages)
   if (docsConfig.redirects) {
     // Every platform's redirects meet here: none may fail the build, hide a page or loop.
     // Mintlify answers a redirect from its own config before it looks for a page, so there the redirect wins over a page at its source:
