@@ -10,6 +10,7 @@ import { basename, dirname, extname, relative } from 'node:path'
 import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
+import { mapFernIcon } from './icon-library.js'
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
 import { skippedRedirectsWarning } from './redirects.js'
 import { isPathEscapeError, resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
@@ -57,6 +58,8 @@ export interface FernPageDescriptor {
   navTitle?: string
   /** Keep routable pages excluded by Fern's `hidden` navigation flag. */
   hidden?: boolean
+  /** The docs.yml node's own `icon`, carried to the page's frontmatter. */
+  icon?: string
   /** Listed under a docs.yml node that sets `viewers` or `authed`: Fern shows it only to signed-in roles. */
   restricted?: boolean
 }
@@ -92,6 +95,8 @@ export interface FernNavigationResult {
   restrictedApiSections: Array<FernApiSection>
   /** Fern changelog tabs render their entries as a feed at the bare route. */
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
+  /** Font Awesome icon names with no Lucide equivalent, so they render blank. */
+  unmappedIcons: Array<string>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -179,6 +184,7 @@ interface WalkContext {
   /** `api:` nodes under a node that sets `viewers`: never published, and their specs stay out of public/. */
   restrictedApiSections: Array<FernApiSection>
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
+  unmappedIcons: Set<string>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** External navigation leaves cannot live inside Thally groups; keep them as navbar links. */
@@ -309,7 +315,7 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
   return `${base}-${index}`
 }
 
-function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false): string {
+function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false, icon?: string): string {
   let sourcePath: string
   try {
     const absolute = withinRealRoot(resolveWithinRoot(
@@ -325,7 +331,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   const isHidden = hidden || context.hiddenInherited === true
-  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(isHidden ? { hidden: true } : {}) })
+  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon: mapFernIcon(icon, context.unmappedIcons) } : {}), ...(isHidden ? { hidden: true } : {}) })
   // `repository.ts` creates exactly one page per physical file, keyed off
   // the first nav location that registers it — a file listed at a second
   // nav location (Fern allows the same page under several sections) must
@@ -419,7 +425,7 @@ function registerPage(
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
   const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
-  return registerPageAt(object.path, base, context, label, object.hidden === true) || null
+  return registerPageAt(object.path, base, context, label, object.hidden === true, typeof object.icon === 'string' && object.icon.trim() ? object.icon.trim() : undefined) || null
 }
 
 /** Fern role-based access: any non-empty `viewers`, or a truthy `authed`, on a navigation node. Ambiguity counts as restricted. */
@@ -523,7 +529,7 @@ function convertNodeContents(
       group: label,
       ...(['open-by-default', 'closed-by-default', true, false].includes(object.collapsed as string | boolean)
         ? { defaultOpen: object.collapsed === 'open-by-default' || object.collapsed === false } : {}),
-      ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
+      ...(typeof object.icon === 'string' ? { icon: mapFernIcon(object.icon, context.unmappedIcons) } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages,
     }
@@ -731,7 +737,7 @@ function buildUnrestrictedTabs(
         context.apiSections[index].tabLabel ??= label
       }
       if (groups.length === 0 && typeof meta.href === 'string' && /^https?:\/\//i.test(meta.href)) {
-        return [{ tab: label, href: meta.href }]
+        return [{ tab: label, ...(typeof meta.icon === 'string' ? { icon: mapFernIcon(meta.icon, context.unmappedIcons) } : {}), href: meta.href }]
       }
       if (groups.length === 0 && typeof meta.changelog === 'string') {
         // A Fern changelog tab names a directory rather than explicit page
@@ -781,7 +787,7 @@ function buildUnrestrictedTabs(
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
       return [{
         tab: label,
-        ...(typeof meta.icon === 'string' ? { icon: meta.icon } : {}),
+        ...(typeof meta.icon === 'string' ? { icon: mapFernIcon(meta.icon, context.unmappedIcons) } : {}),
         groups,
       }]
     })
@@ -887,6 +893,7 @@ export function projectFernNavigation(input: {
     apiSections: [],
     restrictedApiSections: [],
     changelogIndexes: [],
+    unmappedIcons: new Set(),
     warnings: [],
     warningKeys: new Set(),
     externalLinks: [],
@@ -1062,5 +1069,6 @@ export function projectFernNavigation(input: {
     apiSections: disambiguatedApiSections,
     restrictedApiSections: context.restrictedApiSections,
     changelogIndexes: context.changelogIndexes,
+    unmappedIcons: [...context.unmappedIcons],
   }
 }

@@ -169,3 +169,31 @@ describe('B13: API tab only when navigation references an api section', () => {
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(true)
   })
 })
+
+describe('B14/V12: Fern icons', () => {
+  const bundle = migrateFern({
+    'docs.yml': 'tabs:\n  guide:\n    display-name: Guide\n    icon: fa-light fa-browser\n  ext:\n    display-name: Playground\n    icon: fa-regular fa-robot\n    href: https://example.com/play\nnavigation:\n  - tab: guide\n    layout:\n      - section: Basics\n        icon: fa-duotone fa-gears\n        contents:\n          - page: With icon\n            path: a.mdx\n            icon: fa-light fa-vial\n          - page: Own icon\n            path: b.mdx\n            icon: fa-light fa-vial\n          - page: Odd\n            path: c.mdx\n            icon: fa-light fa-made-up-name\n  - tab: ext\n',
+    'a.mdx': 'A body.',
+    'b.mdx': '---\ntitle: B\nicon: rocket\n---\n\nB body.',
+    'c.mdx': 'C body.',
+  })
+  const tab = (name: string) => bundle.docsConfig.tabs.find((entry) => entry.tab === name)
+
+  it('maps Font Awesome names to Lucide on tabs, groups and pages, whatever the style', () => {
+    expect(tab('Guide')?.icon).toBe('app-window')
+    expect(tab('Guide')?.groups?.[0].icon).toBe('cog')
+    expect(bundle.pages.find((page) => page.body === 'A body.')?.icon).toBe('test-tube')
+  })
+
+  it('keeps a page frontmatter icon over the docs.yml one and an href tab icon', () => {
+    expect(bundle.pages.find((page) => page.body === 'B body.')?.icon).toBe('rocket')
+    expect(tab('Playground')).toMatchObject({ href: 'https://example.com/play', icon: 'bot' })
+  })
+
+  it('warns once about names with no Lucide icon', () => {
+    const warnings = bundle.warnings.map((warning) => warning.message).filter((message) => message.includes('Font Awesome icon'))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('made-up-name')
+    expect(warnings[0]).not.toContain('vial')
+  })
+})

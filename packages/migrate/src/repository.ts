@@ -53,6 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
+import { mapFernIcon } from './icon-library.js'
 import { cappedList, fernDroppedConfigWarnings, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
@@ -4789,6 +4790,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernReferencedPaths = new Set<string>()
   const fernSourceLinkAliases = new Map<string, string>()
   const fernNavTitles = new Map<string, string>()
+  const fernPageIcons = new Map<string, string>()
+  const fernUnmappedIcons = new Set<string>()
   const fernHiddenIds = new Set<string>()
   const fernRestrictedPaths = new Set<string>()
 
@@ -4867,11 +4870,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         fernRestrictedApiSections = projected.restrictedApiSections
         fernNavigationIncomplete = projected.navigationIncomplete
         fernChangelogIndexes = projected.changelogIndexes
+        for (const name of projected.unmappedIcons) fernUnmappedIcons.add(name)
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
           if (descriptor.navTitle && !fernNavTitles.has(descriptor.navigationId)) {
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
+          if (descriptor.icon && !fernPageIcons.has(descriptor.navigationId)) fernPageIcons.set(descriptor.navigationId, descriptor.icon)
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
           if (descriptor.restricted) fernRestrictedPaths.add(canonicalPath(resolvePath(fernProjectRoot, descriptor.sourcePath)))
           // Fern pages often link by their source directory while a section
@@ -5638,6 +5643,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (navTitle && navTitle !== page.title) page.navTitle = navTitle
     }
     if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
+    if (platform === 'fern') {
+      // The page's own frontmatter icon wins over the one docs.yml gives its navigation node.
+      const icon = page.icon ?? fernPageIcons.get(navigationId)
+      if (icon) page.icon = mapFernIcon(icon, fernUnmappedIcons)
+    }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
@@ -7266,6 +7276,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     })
   }
   if (fernRawConfig) warnings.push(...fernDroppedConfigWarnings(fernRawConfig))
+  if (fernUnmappedIcons.size > 0) warnings.push({
+    code: 'unsupported-config',
+    message: `${fernUnmappedIcons.size} Font Awesome icon name(s) have no matching icon in Thally's default icon set and will show blank: ${cappedList([...fernUnmappedIcons].sort(), 10)}. Replace them with Lucide icon names (lucide.dev/icons) in docs.json and the page frontmatter.`,
+  })
   if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
     code: 'unsupported-config',
     message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,
