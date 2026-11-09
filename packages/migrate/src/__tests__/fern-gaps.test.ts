@@ -32,3 +32,27 @@ describe('B3: authored underscore slugs stay the route', () => {
     expect(bundle.docsConfig.redirects ?? []).not.toContainEqual(expect.objectContaining({ source: '/baml_client/with-options' }))
   })
 })
+
+/** A docs.yml with `count` tabs, one page each. */
+function manyTabs(count: number, layout = ''): Record<string, string> {
+  const ids = Array.from({ length: count }, (_, index) => `t${index}`)
+  const tabs = ids.map((id) => `  ${id}:\n    display-name: Tab ${id}\n`).join('')
+  const navigation = ids.map((id) => `  - tab: ${id}\n    layout:\n      - page: Page ${id}\n        path: ${id}.mdx\n`).join('')
+  return {
+    'docs.yml': `${layout}tabs:\n${tabs}navigation:\n${navigation}`,
+    ...Object.fromEntries(ids.map((id) => [`${id}.mdx`, `---\ntitle: Page ${id}\n---\n\nBody.`])),
+  }
+}
+
+describe('B5/V14: Fern header tabs keep the tab bar', () => {
+  it('does not force dropdown display for header or default tab placement', () => {
+    expect(migrateFern(manyTabs(7, 'layout:\n  tabs-placement: header\n')).docsConfig.navigation?.display).toBeUndefined()
+    expect(migrateFern(manyTabs(7)).docsConfig.navigation?.display).toBeUndefined()
+  })
+
+  it('warns when sidebar-placed tabs still switch to a dropdown', () => {
+    const bundle = migrateFern(manyTabs(7, 'layout:\n  tabs-placement: sidebar\n'))
+    expect(bundle.docsConfig.navigation?.display).toBe('dropdown')
+    expect(bundle.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/more than six tabs.*dropdown/))
+  })
+})

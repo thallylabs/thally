@@ -6985,8 +6985,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Dense version menus should fit in one header row. A dozen archived
   // Docusaurus releases otherwise turn the collection tabs into a tall wall
   // above every document.
-  if (!docsConfig.navigation?.display && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
+  // Fern's header tab bar holds many tabs, so only a sidebar-placed Fern tab list is collapsed (with a warning).
+  const fernTabsInHeader = fernRawConfig !== null
+    && ((fernRawConfig.layout as Record<string, unknown> | undefined)?.['tabs-placement'] ?? 'header') !== 'sidebar'
+  if (!docsConfig.navigation?.display && !fernTabsInHeader && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
     docsConfig = { ...docsConfig, navigation: { ...docsConfig.navigation, display: 'dropdown' } }
+    if (fernRawConfig) warnings.push({
+      code: 'unsupported-config',
+      message: 'Fern lists more than six tabs in the sidebar, so the migrated site shows them as a dropdown. Set "navigation.display" to "tabs" in docs.json to show them as a tab bar.',
+    })
   }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
