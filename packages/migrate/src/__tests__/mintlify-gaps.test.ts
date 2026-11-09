@@ -85,3 +85,19 @@ describe('slug frontmatter', () => {
     expect(messages(run([{ source: '/cookbook/landing', destination: '/index' }])).join('\n')).toContain('fields were omitted: slug')
   })
 })
+
+describe('a page with no title', () => {
+  it('is titled from its file name the way Mintlify does: separators to spaces, first letter capitalized', () => {
+    const bundle = migrate({
+      'index.mdx': 'Home\n',
+      'features/transaction-management.mdx': 'Body\n',
+      'features/export_wallets.mdx': 'Body\n',
+      'features/with-title.mdx': '---\ntitle: Keep The Title\n---\n\nBody\n',
+    }, { navigation: { pages: ['index', 'features/transaction-management', 'features/export_wallets', 'features/with-title'] } })
+    const title = (id: string) => bundle.pages.find((page) => page.id === id)?.title
+    expect(title('features/transaction-management')).toBe('Transaction management')
+    expect(title('features/export_wallets')).toBe('Export wallets')
+    expect(title('features/with-title')).toBe('Keep The Title')
+    expect(title('introduction')).toBe('Introduction')
+  })
+})

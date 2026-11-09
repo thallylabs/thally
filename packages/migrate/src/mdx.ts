@@ -41,9 +41,14 @@ export function fernAvailabilityBadge(value: unknown): string | undefined {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 40)
 }
 
-function titleFromId(id: string): string {
+/** Mintlify takes the last path segment, with dashes and underscores as spaces and the first letter capitalized; the other platforms capitalize every word. */
+function titleFromId(id: string, sentenceCase = false): string {
   const value = id.split('/').at(-1) ?? id
   if (value === 'introduction') return 'Introduction'
+  if (sentenceCase) {
+    const words = value.split(/[-_]/).filter(Boolean).join(' ')
+    return words.charAt(0).toUpperCase() + words.slice(1)
+  }
   return value
     .split(/[-_]/)
     .filter(Boolean)
@@ -3330,7 +3335,7 @@ export function parseMarkdownPage(input: {
   // A page that names an operation keeps taking its heading as the title.
   const heading = input.platform === 'mintlify' && !namesOperation ? undefined : leadingPageHeading(body)
   const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
-  const title = authoredTitle ?? (input.fallbackTitle?.trim() || titleFromId(identity.navigationId))
+  const title = authoredTitle ?? (input.fallbackTitle?.trim() || titleFromId(identity.navigationId, input.platform === 'mintlify'))
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
