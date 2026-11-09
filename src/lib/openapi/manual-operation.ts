@@ -170,19 +170,39 @@ function attributeValue(attribute: MdxAttribute | undefined): string | boolean |
   }
 }
 
+/** The page's MDX tree; undefined when the page does not parse. */
+function parseMdx(mdx: string): MdxNode | undefined {
+  try {
+    return unified().use(remarkParse).use(remarkMdx).parse(mdx) as unknown as MdxNode
+  } catch {
+    return undefined
+  }
+}
+
+function isJsxElement(node: MdxNode): boolean {
+  return node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement'
+}
+
+/** Whether the tree holds a JSX element with one of `names`. Text in a code block or a comment is not an element. */
+function hasElement(node: MdxNode, ...names: Array<string>): boolean {
+  return (isJsxElement(node) && names.includes(node.name ?? '')) || (node.children ?? []).some((child) => hasElement(child, ...names))
+}
+
 /** Collect `<ParamField>` elements from MDX source; unparsable MDX yields none. */
 export function extractParamFields(mdx: string, warn: Warn = () => {}): Array<ParamFieldSpec> {
-  let tree: MdxNode
-  try {
-    tree = unified().use(remarkParse).use(remarkMdx).parse(mdx) as unknown as MdxNode
-  } catch {
+  return paramFields(parseMdx(mdx), warn)
+}
+
+/** The `<ParamField>` elements of a parsed page; a page that did not parse (`undefined`) has none. */
+function paramFields(tree: MdxNode | undefined, warn: Warn): Array<ParamFieldSpec> {
+  if (!tree) {
     warn('Could not parse the page MDX to read its ParamField elements; the playground will have no parameters.')
     return []
   }
   const fields: Array<ParamFieldSpec> = []
   const seen = new Set<string>()
   const visit = (node: MdxNode) => {
-    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && node.name === 'ParamField') {
+    if (isJsxElement(node) && node.name === 'ParamField') {
       const attrs = new Map<string, MdxAttribute>()
       for (const attribute of node.attributes ?? []) {
         if (attribute.type === 'mdxJsxAttribute' && attribute.name) attrs.set(attribute.name, attribute)
@@ -338,7 +358,8 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
   const warn = input.warn ?? (() => {})
   const target = parseApiFrontmatter(input.api, warn)
   if (!target) return null
-  const fields = extractParamFields(input.mdx, warn)
+  const tree = parseMdx(input.mdx)
+  const fields = paramFields(tree, warn)
   const servers = (target.server ? [target.server] : input.config.servers).map((url) => ({ url }))
   if (servers.length === 0) {
     warn('No server for this API page: use a full URL in the "api" frontmatter or set docs.json "api.mdx.server". The playground is disabled.')
@@ -397,11 +418,7 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     prefill,
     manualPage: input.pageId,
     ...(input.locale ? { manualLocale: input.locale } : {}),
-    ...(/<(?:RequestExample|Panel)[\s>/]/.test(withoutCode(input.mdx)) ? {} : { manualSamples: true as const }),
+    // Generated samples are for a page that authors none of its own. A page that does not parse gets none: what it holds is unknown.
+    ...(tree && !hasElement(tree, 'RequestExample', 'Panel') ? { manualSamples: true as const } : {}),
   }
-}
-
-/** `mdx` without fenced code blocks (an unclosed fence runs to the end) and inline code spans. */
-function withoutCode(mdx: string): string {
-  return mdx.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?^[ \t]*\1[ \t]*$|[\s\S]*)/gm, '').replace(/`[^`\n]+`/g, '')
 }
