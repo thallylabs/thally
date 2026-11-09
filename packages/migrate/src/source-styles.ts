@@ -439,3 +439,24 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
   root.walkComments((comment) => { comment.remove() })
   return { css: root.toString(), omittedSelectors, omittedAtRules, omittedNestedRules, skippedProperties, skippedVariables: [...skippedVariables], skippedThemeDeclarations }
 }
+
+/** The root-relative file paths (`/fonts/a.woff2`, query and fragment removed) that `url()` values and `@import` rules of a stylesheet name. */
+export function rootRelativeCssUrls(css: string): Array<string> {
+  const found = new Set<string>()
+  const add = (raw: string): void => {
+    const value = raw.trim().replace(/[?#].*$/, '')
+    if (value.startsWith('/') && !value.startsWith('//')) found.add(value)
+  }
+  let root: postcss.Root
+  try {
+    root = postcss.parse(css)
+  } catch {
+    return []
+  }
+  const scan = (value: string): void => {
+    for (const match of value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)/gi)) add(match[1] ?? match[2] ?? match[3] ?? '')
+  }
+  root.walkDecls((declaration) => scan(declaration.value))
+  root.walkAtRules('import', (rule) => scan(rule.params))
+  return [...found]
+}

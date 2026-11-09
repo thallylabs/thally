@@ -34,7 +34,7 @@ import * as ts from 'typescript'
 import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
 import { isThallyBuiltinComponent } from './builtin-components.js'
 import { COMPONENT_ANALYSIS_FAILED, createComponentMigrator, pageHasComponentWork, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
-import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
+import { navbarLinkButtons, projectAuthoredStyles, rootRelativeCssUrls } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -6020,6 +6020,27 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     addPathReferences(rootStyleProjection.css, '', publishedExact, publishedLoose)
   }
   const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
+  // Files that the declared stylesheets load by a root-relative url() (fonts, images), copied with the site.
+  const styleUrlTargets = new Set<string>()
+  const unsafeStyleUrls = new Set<string>()
+  const addStyleUrls = (css: string): void => {
+    for (const url of rootRelativeCssUrls(css)) {
+      let path = url
+      try { path = decodeURIComponent(url) } catch { /* keep the raw path */ }
+      const normalized = normalizeAssetPath(path)
+      if (normalized) styleUrlTargets.add(normalized)
+      else unsafeStyleUrls.add(url)
+    }
+  }
+  if (platform === 'mintlify') {
+    if (rootStyleProjection?.css) addStyleUrls(rootStyleProjection.css)
+    for (const file of files) {
+      if (file.absolutePath === rootStylesheetPath || !isMintlifyServedScriptOrStyle(file.relativePath)
+        || extname(file.relativePath).toLowerCase() !== '.css' || importedComponentSources.has(file.absolutePath)
+        || lstatSync(file.absolutePath).size > MAX_ASSET_BYTES) continue
+      addStyleUrls(readFileSync(file.absolutePath, 'utf8'))
+    }
+  }
   const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
     if (rootStylesheetPath && file.absolutePath === rootStylesheetPath) continue
@@ -6029,7 +6050,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         : isMintlifyServedScriptOrStyle(file.relativePath) && !importedComponentSources.has(file.absolutePath)
           ? (extname(file.relativePath).toLowerCase() === '.css' ? 'style' as const : 'script' as const)
           : undefined
-    if (!siteKind && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    const loadedByStylesheet = platform === 'mintlify' && !siteKind && styleUrlTargets.has(file.relativePath)
+    if (!siteKind && !loadedByStylesheet && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
@@ -6044,6 +6066,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (destinations.has(assetPath)) continue
     destinations.add(assetPath)
     seenAssetSources.set(sourceKey, destinations)
+    if (loadedByStylesheet) siteAssetPaths.set(assetPath, 'font')
     if (siteKind) {
       siteAssetPaths.set(assetPath, siteKind)
       if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
@@ -6172,11 +6195,24 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
       }
     }
-    for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
+    const styles = copiedSite.filter((item) => item.kind === 'style')
+    if (styles.length > 0) {
+      docsConfig = {
+        ...docsConfig,
+        stylesheets: [...(docsConfig.stylesheets ?? []), ...styles.map((entry) => `/${entry.path.split('/').map(encodeURIComponent).join('/')}`)],
+      }
       warnings.push({
         code: 'unsupported-config',
-        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but was not declared in docs.json stylesheets; its selectors may target Mintlify's markup. Review and port its authored rules into a Thally stylesheet.`,
-        source: entry.path,
+        message: `${styles.length} stylesheet(s) from the content directory (${cappedList(styles.map((entry) => entry.path), 5)}) now load on every page via docs.json stylesheets, as they did on Mintlify. They may target Mintlify's page structure, so selectors for its own markup (a sidebar or tab bar, say) match nothing here; review them.`,
+      })
+    }
+    const sourcePaths = new Set(files.map((file) => file.relativePath))
+    const missingStyleUrls = [...styleUrlTargets].filter((path) => !sourcePaths.has(path)).map((path) => `/${path}`)
+    const unreadableStyleUrls = [...missingStyleUrls, ...unsafeStyleUrls]
+    if (unreadableStyleUrls.length > 0) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `${unreadableStyleUrls.length} file(s) that site stylesheets load by url() were not found in the content directory, or point outside it, and were not copied: ${cappedList(unreadableStyleUrls, 5)}. Add them to public/ at the same path, or the stylesheet shows a broken font or image there.`,
       })
     }
     for (const font of mintlifyFonts) {
