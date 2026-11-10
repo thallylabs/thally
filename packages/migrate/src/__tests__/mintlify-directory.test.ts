@@ -187,7 +187,7 @@ describe('Mintlify group directory', () => {
     // The result is valid MDX whose attributes and text hold exactly what the source wrote.
     const compiled = String(await compile(pages[0].body, { outputFormat: 'function-body' }))
     expect(compiled).toContain('title: "Say \\"hi\\" {x} <b> & more"')
-    expect(compiled).toContain('"Use {braces}, <tags>, `code`, *stars*, _under_ [brackets] \\\\ & more."')
+    expect(compiled).toContain('"Use {braces}, <tags>, `code`, stars, under [brackets] \\\\ & more."')
     expect(compiled).toContain('title: "Sub <odd>"')
     expect(compiled).toContain('"Line one line two"')
     expect(compiled).toContain('"Sub \\"q\\" {y} <z> *w*"')

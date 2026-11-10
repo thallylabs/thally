@@ -141,6 +141,8 @@ export interface NormalizedOperation {
   manualPage?: string
   /** Locale the manual page was rendered from; absent for the default locale. */
   manualLocale?: string
+  /** Manual page with no authored RequestExample or Panel: the generated request samples fill its code rail. */
+  manualSamples?: true
 }
 
 export interface OperationPrefill {

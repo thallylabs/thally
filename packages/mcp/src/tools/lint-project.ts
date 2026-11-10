@@ -5,6 +5,7 @@ import { parseFrontmatter } from '../lib/frontmatter.js'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
 import { scanMdxFiles } from './search-docs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
+import { parseMdxTree } from '@thallylabs/core/markdown'
 
 export const lintProjectSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
@@ -37,6 +38,16 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
   if (!existing.includes(pageId)) {
     lastGroup.pages.push(pageId)
     writeDocsJson(projectDir, config)
+  }
+}
+
+/** A body that is a single component tag is a page in itself, however short its source. */
+function isOnlyComponent(content: string): boolean {
+  try {
+    const children = (parseMdxTree(content) as unknown as { children?: Array<{ type: string; name?: string | null }> }).children ?? []
+    return children.length === 1 && children[0].type === 'mdxJsxFlowElement' && /^[A-Z]/.test(children[0].name ?? '')
+  } catch {
+    return false
   }
 }
 
@@ -117,7 +128,7 @@ export async function handleLintProject(input: LintProjectInput): Promise<string
     if (!data.description) {
       issues.push({ severity: 'warning', message: `Missing "description" in frontmatter`, file: filePath.slice(projectDir.length + 1) })
     }
-    if (content.trim().length < 50) {
+    if (data.mode !== 'custom' && content.trim().length < 50 && !isOnlyComponent(content)) {
       issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: filePath.slice(projectDir.length + 1) })
     }
   }

@@ -59,7 +59,7 @@ describe('a snippet that uses its props as variables', () => {
       'home.mdx': page('<Role mode="strict" />'),
       'snippets/role.mdx': '<Card title={`Mode ${mode}`} />\n\n{JSON.stringify({ mode })}\n',
     })
-    expect(body).toContain('title={`Mode ${"strict"}`}')
+    expect(body).toContain('title="Mode strict"')
     expect(body).toContain('{JSON.stringify({ mode: "strict" })}')
   })
 

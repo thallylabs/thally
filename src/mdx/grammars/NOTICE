@@ -1,0 +1,9 @@
+baml.tmLanguage.json and baml-jinja.tmLanguage.json are TextMate grammars from
+https://github.com/BoundaryML/baml (typescript/apps/vscode-ext/syntaxes/, commit
+36adf40540998cc8c2e5ee72fcb673c23f460b4a), Copyright BoundaryML, licensed under the
+Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). The full
+text of the license is in the LICENSE file in this directory.
+
+Changed from upstream: baml-jinja.tmLanguage.json has "name" set to "baml-jinja"
+(was "jinja") so it does not collide with the bundled jinja grammar. Nothing else
+was modified.

@@ -107,7 +107,7 @@ describe('titles of Mintlify operation pages', () => {
     expect(titles(migrate('openapi.json'))).toMatchObject({
       'api-reference/webhooks/hidden': 'Hidden',
       'api-reference/webhooks/extension': 'Extension',
-      'api-reference/webhooks/other-case': 'Other Case',
+      'api-reference/webhooks/other-case': 'Other case',
       'api-reference/webhooks/missing': 'Missing',
     })
   })

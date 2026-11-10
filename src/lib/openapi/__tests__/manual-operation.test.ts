@@ -148,6 +148,47 @@ describe('buildManualOperation', () => {
     return buildManualOperation({ pageId: 'p/users', title: 'Users', api: 'POST https://httpbin.org/anything/users/{id}', mdx, config: noConfig, ...overrides })
   }
 
+  it('asks for generated samples unless the page authors its own request panel', () => {
+    expect(build()).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '<RequestExample>\n```bash\ncurl x\n```\n</RequestExample>' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: '<Panel>\nhello\n</Panel>' })).not.toHaveProperty('manualSamples')
+  })
+
+  it('still asks for generated samples when RequestExample or Panel only appears in code', () => {
+    expect(build({ mdx: 'Wrap it in a `<RequestExample>` block.\n' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '````mdx\n<RequestExample>\n```bash\ncurl x\n```\n</RequestExample>\n````\n' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '~~~\n<Panel>x</Panel>\n~~~\n\nAfter.' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '```\ncode\n```\n\n<RequestExample>\nx\n</RequestExample>' })).not.toHaveProperty('manualSamples')
+  })
+
+  it('still asks for generated samples when RequestExample or Panel is commented out', () => {
+    expect(build({ mdx: '{/* <RequestExample>\n```bash\ncurl x\n```\n</RequestExample> */}\n\nBody.' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: 'Text {/* <Panel>x</Panel> */} more.' })).toMatchObject({ manualSamples: true })
+    expect(build({ mdx: '{/* <Panel>x</Panel> */}\n\n<Panel>\nreal\n</Panel>' })).not.toHaveProperty('manualSamples')
+  })
+
+  it('finds a RequestExample or Panel nested in another element or written inline', () => {
+    expect(build({ mdx: '<Tabs>\n<Tab title="A">\n<RequestExample>\nx\n</RequestExample>\n</Tab>\n</Tabs>' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: 'See <Panel>x</Panel> here.' })).not.toHaveProperty('manualSamples')
+  })
+
+  it('finds a RequestExample or Panel written inside an expression, without running it', () => {
+    expect(build({ mdx: '{<Panel>Custom request</Panel>}' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: 'Text {<><RequestExample>x</RequestExample></>} more.' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: '<Card extra={<Panel>x</Panel>} />' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: 'Text {"<Panel>"} more.' })).toMatchObject({ manualSamples: true })
+  })
+
+  it('parses the page as the renderer does, GFM included', () => {
+    const page = 'Send it to https://bundler.particle.network/{chainId?} with:\n\n<ParamField path="chainId" type="string" />\n'
+    expect(build({ mdx: page })).toMatchObject({ manualSamples: true })
+    expect(extractParamFields(page).map((field) => field.name)).toEqual(['chainId'])
+  })
+
+  it('does not ask for generated samples on a page it cannot parse', () => {
+    expect(build({ mdx: '<RequestExample>\nx\n\n<ParamField query="a"' })).not.toHaveProperty('manualSamples')
+  })
+
   it('sets manualLocale only when a locale is given', () => {
     expect(build({ locale: 'fr' })).toMatchObject({ manualPage: 'p/users', manualLocale: 'fr' })
     expect(build()).not.toHaveProperty('manualLocale')

@@ -57,6 +57,10 @@ export interface FernPageDescriptor {
   navTitle?: string
   /** Keep routable pages excluded by Fern's `hidden` navigation flag. */
   hidden?: boolean
+  /** The docs.yml node's own `icon`, carried to the page's frontmatter. */
+  icon?: string
+  /** The docs.yml node's own `availability` (beta, alpha, ...), used when the page's frontmatter sets none. */
+  availability?: unknown
   /** Listed under a docs.yml node that sets `viewers` or `authed`: Fern shows it only to signed-in roles. */
   restricted?: boolean
 }
@@ -92,12 +96,71 @@ export interface FernNavigationResult {
   restrictedApiSections: Array<FernApiSection>
   /** Fern changelog tabs render their entries as a feed at the bare route. */
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
+  /** Icon names written in a Font Awesome Pro style (light, thin, duotone, sharp), which Thally draws from the Free set. */
+  proStyleIcons: Array<string>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+/** At most five entries, with the remainder counted. */
+export function cappedList(values: Array<string>, limit = 5): string {
+  const shown = values.slice(0, limit).join(', ')
+  return values.length > limit ? `${shown}, and ${values.length - limit} more` : shown
+}
+
+function configEntries(value: unknown): Array<string> {
+  return (Array.isArray(value) ? value : [value]).flatMap((entry) => {
+    const object = objectValue(entry)
+    const text = typeof entry === 'string' ? entry : object ? [object.path, object.url, object.src].find((item) => typeof item === 'string') : undefined
+    return typeof text === 'string' && text.trim() ? [text.trim().slice(0, 120)] : []
+  })
+}
+
+/** Fern `css`, `typography` font files, `analytics` and `js` have no Thally equivalent; say so instead of dropping them silently. */
+export function fernDroppedConfigWarnings(config: Record<string, unknown>): Array<MigrationWarning> {
+  const warnings: Array<MigrationWarning> = []
+  const warn = (source: string, message: string): void => { warnings.push({ code: 'unsupported-config', message, source }) }
+  const css = configEntries(config.css)
+  if (css.length > 0) {
+    warn('css', `Fern custom stylesheets were not imported (${cappedList(css)}). They style Fern's own page markup, so they do not carry over; add the rules you still need to a stylesheet listed under "stylesheets" in docs.json.`)
+  }
+  const fonts = Object.entries(objectValue(config.typography) ?? {}).flatMap(([role, value]) => {
+    const font = objectValue(value)
+    return font && configEntries([font.path, font.paths].flat()).length > 0 ? [role] : []
+  })
+  if (fonts.length > 0) {
+    warn('typography', `Fern custom font files (${cappedList(fonts)}) were not imported, so the migrated site uses its default fonts. Set a Google font family under "fonts" in docs.json to match them.`)
+  }
+  const analytics = Object.keys(objectValue(config.analytics) ?? {})
+  if (analytics.length > 0) {
+    warn('analytics', `Fern analytics settings (${cappedList(analytics)}) were not imported; trackers are never migrated. Add the analytics you want under "integrations" in docs.json.`)
+  }
+  const scripts = configEntries(config.js)
+  if (scripts.length > 0) {
+    warn('js', `Fern custom scripts were not imported (${cappedList(scripts)}). Review what they did and re-create anything you still need as a custom component.`)
+  }
+  return warnings
+}
+
+/**
+ * A Fern icon as the runtime reads it. Fern writes Font Awesome class strings (`fa-light fa-browser`); the runtime takes the last
+ * `fa-` token as the name and the style from `iconType`, so the name is returned bare and the prefix becomes the style (brands and
+ * solid keep theirs, every other style is the regular outline). A name in a Pro-only style is added to `proStyled`. Anything that
+ * is not a class string (an image path, a bare name) is unchanged.
+ */
+export function fernIcon(icon: string, proStyled: Set<string>): { icon: string; iconType?: 'regular' | 'solid' | 'brands' } {
+  const tokens = icon.trim().toLowerCase().split(/\s+/)
+  const last = tokens.at(-1) ?? ''
+  if (!last.startsWith('fa-') || last.length === 3) return { icon }
+  const name = last.slice(3)
+  const styles = tokens.slice(0, -1)
+  if (styles.includes('fa-brands')) return { icon: name, iconType: 'brands' }
+  if (styles.some((style) => /^fa-(?:light|thin|duotone|sharp)/.test(style))) proStyled.add(name)
+  return { icon: name, ...(styles.length > 0 ? { iconType: styles.includes('fa-solid') ? 'solid' as const : 'regular' as const } : {}) }
 }
 
 function titleCase(value: string): string {
@@ -139,6 +202,7 @@ interface WalkContext {
   /** `api:` nodes under a node that sets `viewers`: never published, and their specs stay out of public/. */
   restrictedApiSections: Array<FernApiSection>
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
+  proStyleIcons: Set<string>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** External navigation leaves cannot live inside Thally groups; keep them as navbar links. */
@@ -220,7 +284,7 @@ function fernBasicSlug(value: string): string {
  * live site's sitemap. Only the label fallback needs this; an authored
  * `slug` is used as literal, already-intended path text.
  */
-function fernLabelSlug(label: string): string {
+export function fernLabelSlug(label: string): string {
   const decamelized = label
     .replace(/[()]/g, '')
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
@@ -250,6 +314,12 @@ function segmentFor(value: Record<string, unknown>, label: string, context?: Wal
   const explicit = value.slug.trim()
   if (!explicit) return null
   const slugified = fernBasicSlug(explicit)
+  // Fern serves an authored lowercase slug literally, underscores included,
+  // so that form stays the route and the hyphenated spelling redirects to it.
+  if (/^[a-z0-9_-]+$/.test(explicit) && explicit.includes('_') && !/^[-_]|[-_]$/.test(explicit)) {
+    if (context && slugified !== explicit) context.segmentAliases.set(explicit, slugified)
+    return explicit
+  }
   if (context && explicit !== slugified && FERN_SEGMENT_ALIAS.test(explicit)) {
     context.segmentAliases.set(slugified, explicit)
   }
@@ -263,7 +333,7 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
   return `${base}-${index}`
 }
 
-function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false): string {
+function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false, icon?: string, availability?: unknown): string {
   let sourcePath: string
   try {
     const absolute = withinRealRoot(resolveWithinRoot(
@@ -279,7 +349,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   const isHidden = hidden || context.hiddenInherited === true
-  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(isHidden ? { hidden: true } : {}) })
+  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(icon ? { icon } : {}), ...(typeof availability === 'string' ? { availability } : {}), ...(isHidden ? { hidden: true } : {}) })
   // `repository.ts` creates exactly one page per physical file, keyed off
   // the first nav location that registers it — a file listed at a second
   // nav location (Fern allows the same page under several sections) must
@@ -373,7 +443,7 @@ function registerPage(
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
   const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
-  return registerPageAt(object.path, base, context, label, object.hidden === true) || null
+  return registerPageAt(object.path, base, context, label, object.hidden === true, typeof object.icon === 'string' && object.icon.trim() ? object.icon.trim() : undefined, object.availability) || null
 }
 
 /** Fern role-based access: any non-empty `viewers`, or a truthy `authed`, on a navigation node. Ambiguity counts as restricted. */
@@ -477,7 +547,7 @@ function convertNodeContents(
       group: label,
       ...(['open-by-default', 'closed-by-default', true, false].includes(object.collapsed as string | boolean)
         ? { defaultOpen: object.collapsed === 'open-by-default' || object.collapsed === false } : {}),
-      ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
+      ...(typeof object.icon === 'string' ? { icon: fernIcon(object.icon, context.proStyleIcons).icon } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages,
     }
@@ -549,12 +619,28 @@ function convertNodes(
   })
 }
 
+/**
+ * Pages listed directly in a tab (Fern allows that) go into a group named after the tab, whose heading the
+ * sidebar leaves out, and stay where docs.yml put them so the tab opens on its first listed page.
+ */
 function groupsFromConverted(
   converted: Array<string | MigrationNavigationGroup>,
+  tabLabel: string,
 ): Array<MigrationNavigationGroup> {
-  const loosePages = converted.filter((entry): entry is string => typeof entry === 'string')
-  const groups = converted.filter((entry): entry is MigrationNavigationGroup => typeof entry !== 'string')
-  return loosePages.length > 0 ? [{ group: 'Overview', pages: loosePages }, ...groups] : groups
+  const groups: Array<MigrationNavigationGroup> = []
+  let looseRun: MigrationNavigationGroup | undefined
+  for (const entry of converted) {
+    if (typeof entry !== 'string') {
+      groups.push(entry)
+      looseRun = undefined
+    } else if (looseRun) {
+      looseRun.pages.push(entry)
+    } else {
+      looseRun = { group: tabLabel, pages: [entry] }
+      groups.push(looseRun)
+    }
+  }
+  return groups
 }
 
 /**
@@ -676,7 +762,7 @@ function buildUnrestrictedTabs(
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
       const descriptorsBefore = restrictionMark(context)
-      const groups = groupsFromConverted(convertNodes(layout, segments, context))
+      const groups = groupsFromConverted(convertNodes(layout, segments, context), label)
       if (isRestrictedNode(entry) || isRestrictedNode(meta)) {
         markRestricted(context, descriptorsBefore)
         return []
@@ -685,7 +771,7 @@ function buildUnrestrictedTabs(
         context.apiSections[index].tabLabel ??= label
       }
       if (groups.length === 0 && typeof meta.href === 'string' && /^https?:\/\//i.test(meta.href)) {
-        return [{ tab: label, href: meta.href }]
+        return [{ tab: label, ...(typeof meta.icon === 'string' ? { icon: fernIcon(meta.icon, context.proStyleIcons).icon } : {}), href: meta.href }]
       }
       if (groups.length === 0 && typeof meta.changelog === 'string') {
         // A Fern changelog tab names a directory rather than explicit page
@@ -735,14 +821,14 @@ function buildUnrestrictedTabs(
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
       return [{
         tab: label,
-        ...(typeof meta.icon === 'string' ? { icon: meta.icon } : {}),
+        ...(typeof meta.icon === 'string' ? { icon: fernIcon(meta.icon, context.proStyleIcons).icon } : {}),
         groups,
       }]
     })
   }
   if (Array.isArray(navigation)) {
     const sectionsBefore = context.apiSections.length
-    const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context))
+    const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context), fallbackTabLabel)
     for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
       context.apiSections[index].tabLabel ??= fallbackTabLabel
     }
@@ -841,6 +927,7 @@ export function projectFernNavigation(input: {
     apiSections: [],
     restrictedApiSections: [],
     changelogIndexes: [],
+    proStyleIcons: new Set(),
     warnings: [],
     warningKeys: new Set(),
     externalLinks: [],
@@ -961,8 +1048,15 @@ export function projectFernNavigation(input: {
     if (kept === descriptor.navigationId) return []
     return [{ source: `/${descriptor.navigationId}`, destination: `/${kept}` }]
   })
+  // Fern serves a changelog entry at `/<route>/YYYY/M/D` (no zero padding); the migrated page is dated `YYYY-MM-DD`.
+  const changelogDateRedirects = context.changelogIndexes.flatMap(({ route, entries }) => entries.flatMap((entry) => {
+    const sourcePath = context.descriptors.find((descriptor) => descriptor.navigationId === entry)?.sourcePath ?? ''
+    const date = basename(sourcePath).match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/)
+    return date ? [{ source: `/${[route, date[1], Number(date[2]), Number(date[3])].filter((part) => part !== '').join('/')}`, destination: `/${entry}` }] : []
+  })).filter((redirect, index, all) => all.findIndex((other) => other.source === redirect.source) === index)
   const allRedirects = [
     ...redirects,
+    ...changelogDateRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...context.bareRouteRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...duplicateNavRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
@@ -1016,5 +1110,6 @@ export function projectFernNavigation(input: {
     apiSections: disambiguatedApiSections,
     restrictedApiSections: context.restrictedApiSections,
     changelogIndexes: context.changelogIndexes,
+    proStyleIcons: [...context.proStyleIcons],
   }
 }

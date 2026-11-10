@@ -99,6 +99,26 @@ describe('interpretMDX', () => {
     expect(render(content)).toContain('data-definition="flowchart LR\nA --&gt; B"')
   })
 
+  it('evaluates template literals whose interpolations are constants in attributes', async () => {
+    const { content } = await interpretMDX({
+      source: '<img alt="" src={`/images/${"embedded-wallets"}.svg`} /><a href={`#${1 + 1}`}>x</a><i data-n={`n${2}-${true}`} />',
+      components: {},
+    })
+    const html = render(content)
+    expect(html).toContain('src="/images/embedded-wallets.svg"')
+    // Binary expressions stay unsupported, so that attribute is dropped rather than half-built.
+    expect(html).toContain('<a>x</a>')
+    expect(html).toContain('data-n="n2-true"')
+  })
+
+  it('drops a template attribute whose interpolation cannot be evaluated', async () => {
+    const { content } = await interpretMDX({
+      source: '<img alt="" src={`/images/${name}.svg`} />',
+      components: {},
+    })
+    expect(render(content)).not.toContain('src=')
+  })
+
   it('renders dynamic expressions as nothing instead of failing the page', async () => {
     const { content } = await interpretMDX({
       source: 'Before {process.env.SECRET} after.',

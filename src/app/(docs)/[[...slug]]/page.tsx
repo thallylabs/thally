@@ -9,6 +9,7 @@ import { notFound, redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { ManualApiEndpoint } from '@/components/api/manual-api-endpoint'
 import { OperationPanel } from '@/components/api/operation-panel'
+import { packValue } from '@/lib/openapi/pack-operation'
 import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
@@ -298,7 +299,7 @@ export default async function DocsPage({ params }: PageProps) {
             <DocHeader doc={doc} eyebrow={getEyebrowMode() === 'path' ? nav.groupPath : nav.group} showDescription={doc.descriptionPlacement !== 'operation'} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} showDescription={!doc.description || doc.descriptionPlacement === 'operation'} playground={'revealed' in lookup && playground === 'interactive' ? 'simple' : playground} locale={contentLocale}>
+            <OperationPanel operation={packValue(operationNode.operation)} showDescription={!doc.description || doc.descriptionPlacement === 'operation'} playground={'revealed' in lookup && playground === 'interactive' ? 'simple' : playground} locale={contentLocale}>
               <Body />
             </OperationPanel>
           </ApiLayout>

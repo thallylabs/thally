@@ -1310,11 +1310,18 @@ function convertContainerToTabs(
     }
     return [placeholder]
   }
+  // Mintlify shows a tab's top-level groups as section headers that are always open. Thally draws a group listed in a tab's `pages` as a
+  // collapsible node, closed unless it says otherwise, and a tab's `groups` as headers: a tab that holds only groups is projected as the
+  // latter, and the top-level groups of a tab that also lists loose pages (one flat list in Thally) are marked open.
+  const onlyGroups = hasRootNodes && children.every((child) => typeof child !== 'string')
+  const topLevel = hasRootNodes && !onlyGroups
+    ? children.map((child) => typeof child !== 'string' && child.defaultOpen === undefined ? { ...child, defaultOpen: true } : child)
+    : children
   return children.length > 0
     ? [{
         tab: fallbackTab,
-        ...(hasRootNodes
-          ? { pages: children }
+        ...(hasRootNodes && !onlyGroups
+          ? { pages: topLevel }
           : { groups: children as Array<MigrationNavigationGroup> }),
         ...containerPresentation(container),
         ...(projectedHref(container.href) ? { href: projectedHref(container.href) } : {}),

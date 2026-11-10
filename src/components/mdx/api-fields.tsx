@@ -150,23 +150,32 @@ export function ParamField({ id, name, type, required, deprecated, body, query, 
 interface ExpandableProps {
   title?: string
   defaultOpen?: boolean
+  /** Mounts the children on first open, so a large generated schema is not in the page until asked for. */
+  lazy?: boolean
+  /** With `lazy`: the id prefix of the fields inside; a link to one of them opens this, as it cannot be found in the DOM. */
+  anchor?: string
   children?: ReactNode
 }
 
-export function Expandable({ title, defaultOpen = false, children }: ExpandableProps) {
+export function Expandable({ title, defaultOpen = false, lazy = false, anchor, children }: ExpandableProps) {
   const t = useApiLabels()
   const [open, setOpen] = useState(defaultOpen)
+  const [mounted, setMounted] = useState(defaultOpen)
+  if (open && !mounted) setMounted(true)
   const contentId = useId()
   const content = useRef<HTMLDivElement>(null)
-  const target = useRef<HTMLElement | null>(null)
+  const target = useRef<string | null>(null)
   // A link to a field inside a collapsed Expandable opens it, as the <details> Mintlify renders does.
   useEffect(() => {
     const reveal = () => {
       let id: string
       try { id = decodeURIComponent(window.location.hash.slice(1)) } catch { return }
-      const element = id ? document.getElementById(id) : null
-      if (!element || !content.current?.hidden || !content.current.contains(element)) return
-      target.current = element
+      if (!id || !content.current?.hidden) return
+      const element = document.getElementById(id)
+      // A lazy field is not in the DOM until opened: its id says whose it is. Rows below it are mounted as their own Expandables open.
+      const inside = element ? content.current.contains(element) : lazy && anchor !== undefined && id.startsWith(`${anchor}-`)
+      if (!inside) return
+      target.current = id
       setOpen(true)
     }
     reveal()
@@ -178,11 +187,12 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
       observer.disconnect()
       window.removeEventListener('hashchange', reveal)
     }
-  }, [])
+  }, [lazy, anchor])
   // The browser could not scroll to a hidden field when the page loaded; once it has a box, go there.
   useEffect(() => {
-    if (!open || !target.current || target.current.closest('[hidden]')) return
-    target.current.scrollIntoView()
+    const element = open && target.current ? document.getElementById(target.current) : null
+    if (!element || element.closest('[hidden]')) return
+    element.scrollIntoView()
     target.current = null
   }, [open])
   return (
@@ -203,7 +213,7 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
         hidden={!open}
         className="mt-3 border-l border-border pl-4"
       >
-        {children}
+        {lazy && !mounted ? null : children}
       </div>
     </div>
   )

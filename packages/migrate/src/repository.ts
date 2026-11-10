@@ -34,7 +34,7 @@ import * as ts from 'typescript'
 import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
 import { isThallyBuiltinComponent } from './builtin-components.js'
 import { COMPONENT_ANALYSIS_FAILED, createComponentMigrator, pageHasComponentWork, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
-import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
+import { navbarLinkButtons, projectAuthoredStyles, rootRelativeCssUrls } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -53,7 +53,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
-import { projectFernNavigation, readFernConfig } from './fern.js'
+import { cappedList, fernDroppedConfigWarnings, fernIcon, fernLabelSlug, projectFernNavigation, readFernConfig } from './fern.js'
 import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
@@ -76,7 +76,7 @@ import {
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { appendMintlifyDirectories } from './mintlify-directory.js'
-import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
+import { mdxTextWithoutInlineElements, mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, wrapPageContent, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, fernAvailabilityBadge, esmTemplateLiteralRanges, MDX_COMPILE_OPTIONS, normalizeFlowParagraphContainers, normalizeHtmlComments, removeUndefinedExpressions, splitFrontmatterBlock, functionDeclaredNames, indentSnippetLines, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -204,6 +204,13 @@ const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
   '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
 ])
+/** The English description a changelog index gets when it has none: for the default locale only, other locales keep theirs or stay empty. */
+export function changelogIndexDescription(locale: string | undefined, defaultLocale: string | undefined): string {
+  return !locale || locale === defaultLocale ? 'Latest release notes and product updates.' : ''
+}
+
+/** What a stylesheet's root-relative `url()` may copy as a site asset: the usual assets and fonts, never a page or script. */
+const STYLESHEET_URL_EXTENSIONS = new Set([...ASSET_EXTENSIONS, '.woff', '.woff2', '.ttf', '.otf', '.eot'])
 const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'agents.md', 'claude.md', 'code_of_conduct.md', 'contributing.md',
   'license.md', 'readme.md', 'security.md',
@@ -2097,6 +2104,9 @@ interface OpenApiOperationForLinking {
   summary?: string
   operationId?: string
   description?: string
+  /** Fern's `x-fern-sdk-group-name` (one name or a nested list) and `x-fern-sdk-method-name`, which name the operation's URL. */
+  sdkGroup?: Array<string>
+  sdkMethod?: string
 }
 
 /** `x-hidden: true` and `x-excluded: true` (or the string `"true"`), as the renderer reads them. */
@@ -2184,6 +2194,8 @@ function visibleOperations(document: unknown, entries: unknown): Array<OpenApiOp
         summary: typeof op.summary === 'string' ? op.summary : undefined,
         operationId: typeof op.operationId === 'string' ? op.operationId : undefined,
         description: typeof op.description === 'string' ? op.description : undefined,
+        sdkGroup: [op['x-fern-sdk-group-name']].flat().filter((name): name is string => typeof name === 'string' && name.trim() !== ''),
+        sdkMethod: typeof op['x-fern-sdk-method-name'] === 'string' ? op['x-fern-sdk-method-name'] : undefined,
       })
     }
   }
@@ -2263,6 +2275,10 @@ export interface ApiOperationLinkMaps {
   mintlifyPages: Map<string, string>
   /** Mintlify endpoint URLs that two operations share; the first operation keeps the URL. */
   duplicatePages: Array<string>
+  /** Fern operation URL (lowercased, no leading slash) -> Thally operation route, for redirects. */
+  fernPages: Map<string, string>
+  /** Fern operation URLs that two operations share; the first operation keeps the URL. */
+  fernDuplicates: Array<string>
 }
 
 /** The operations a source served under its prefix: the listed ones in listed order, else every operation of the spec. */
@@ -2358,6 +2374,8 @@ export function apiOperationLinkMap(
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
+  const fernPages = new Map<string, string>()
+  const fernDuplicates: Array<string> = []
   const duplicatePages: Array<string> = []
   const parsedByFile = new Map<string, Array<OpenApiOperationForLinking>>()
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
@@ -2414,6 +2432,20 @@ export function apiOperationLinkMap(
       if (operation.summary) leafCandidates.add(mintlifyOperationSlugSegment(operation.summary))
       if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
       leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
+      // Fern's own URL: `<section>/<sdk group>/<sdk method>`, else its tag and the derived leaf above.
+      // Fern also splits a digit from the letter before it (`V2` -> `v-2`).
+      const fernSlug = (value: string): string => fernLabelSlug(value.replace(/([A-Za-z])(\d)/g, '$1-$2'))
+      const fernLeaf = operation.sdkMethod ? fernSlug(operation.sdkMethod)
+        : operation.operationId ? fernSlug(operation.operationId) : [...leafCandidates][0]
+      const fernGroups = (operation.sdkGroup?.length ? operation.sdkGroup : operation.tag ? [operation.tag] : []).map(fernSlug)
+      const fernUrl = [base, ...fernGroups, fernLeaf].filter(Boolean).join('/').toLowerCase()
+      if (fernLeaf && !underDeeperMount(fernUrl, prefix)) {
+        if (specId !== undefined) {
+          if (!fernPages.has(fernUrl)) fernPages.set(fernUrl, thallyHref)
+          else if (fernPages.get(fernUrl) !== thallyHref && !fernDuplicates.includes(fernUrl)) fernDuplicates.push(fernUrl)
+        }
+        if (!map.has(fernUrl)) map.set(fernUrl, thallyHref)
+      }
       // Two prefix conventions get registered for every leaf candidate:
       // Mintlify nests auto-generated pages under a tag folder
       // ("<prefix>/<tag>/<leaf>"); Fern's default layout serves them flat
@@ -2446,7 +2478,7 @@ export function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages }
+  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages, fernPages, fernDuplicates }
 }
 
 /**
@@ -2932,6 +2964,18 @@ function rewriteApiOperationLinks(
   }).join('\n')
 }
 
+/** File extensions a relative link such as `[guide](setup.md)` ends in, which are not top-level domains. */
+const RELATIVE_LINK_EXTENSIONS = new Set(['md', 'mdx', 'html', 'htm', 'json', 'yml', 'yaml', 'xml', 'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js', 'ts', 'csv', 'zip'])
+
+/** Markdown link targets in a spec that look like a host (`dashboard.vapi.ai`) but have no scheme, so they resolve as relative paths. Unique, in order of appearance. */
+export function schemelessSpecLinks(content: Buffer): Array<string> {
+  const found = new Set<string>()
+  for (const match of content.toString('utf8').matchAll(/\]\(([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\.([a-z]{2,24})(?:[/?#][^)\s"'\\]*)?)\)/gi)) {
+    if (!RELATIVE_LINK_EXTENSIONS.has(match[2].toLowerCase())) found.add(match[1].slice(0, 120))
+  }
+  return [...found]
+}
+
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
 
 function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<string> {
@@ -2946,6 +2990,44 @@ function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<stri
     const openapi = (spec as Record<string, unknown>).openapi
     return typeof openapi === 'string' ? [openapi] : []
   })
+}
+
+/** The `overrides` files (one path or a list) of the `api.specs[]` entry that names `specPath`. */
+function fernGeneratorsOverridePaths(config: Record<string, unknown>, specPath: string): Array<string> {
+  const specs = (config.api as Record<string, unknown> | undefined)?.specs
+  if (!Array.isArray(specs)) return []
+  const entry = specs.find((spec) => spec && typeof spec === 'object' && (spec as Record<string, unknown>).openapi === specPath) as Record<string, unknown> | undefined
+  return [entry?.overrides].flat().filter((path): path is string => typeof path === 'string' && !/^(?:https?:)?\/\//i.test(path))
+}
+
+/**
+ * Fern names an operation's URL from the SDK group and method names its `overrides` files add to the spec. Copy just those names
+ * onto the operations of a spec for linking (the published spec is untouched), so links and redirects use the names Fern served.
+ */
+function withFernSdkNames(content: Buffer, overrideFiles: Array<string>): Buffer {
+  const document = readSpecDocument(content)
+  if (!isRecord(document) || !isRecord(document.paths)) return content
+  let changed = false
+  for (const file of overrideFiles) {
+    let overrides: unknown
+    try {
+      if (lstatSync(file).size > MAX_FERN_GENERATORS_BYTES) continue
+      overrides = (parseYaml(readFileSync(file, 'utf8')) as Record<string, unknown> | null)?.paths
+    } catch { continue }
+    if (!isRecord(overrides)) continue
+    for (const [path, item] of Object.entries(overrides)) {
+      const target = document.paths[path]
+      if (!isRecord(item) || !isRecord(target)) continue
+      for (const [method, patch] of Object.entries(item)) {
+        const operation = target[method]
+        if (!isRecord(patch) || !isRecord(operation)) continue
+        for (const key of ['x-fern-sdk-group-name', 'x-fern-sdk-method-name']) {
+          if (patch[key] !== undefined) { operation[key] = patch[key]; changed = true }
+        }
+      }
+    }
+  }
+  return changed ? Buffer.from(JSON.stringify(document)) : content
 }
 
 /**
@@ -3004,6 +3086,8 @@ function fernOpenApiCandidateDirs(fernRoot: string, apiName: string | undefined,
 /** `findFernConfiguredOpenApi`'s result, plus any AsyncAPI/OpenRPC specs seen along the way (Thally has no renderer for either). */
 interface FernOpenApiResolution {
   spec: ScannedFile | null
+  /** Absolute paths of the `overrides` files configured beside the spec. */
+  overrides?: Array<string>
   unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }>
 }
 
@@ -3042,7 +3126,13 @@ function findFernConfiguredOpenApi(
           continue
         }
         if (kind !== 'openapi') continue
-        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, unsupported }
+        const overrides = fernGeneratorsOverridePaths(config, specPath).flatMap((path) => {
+          try {
+            const file = withinRealRoot(resolveWithinRoot(dir, path, repositoryDir), repositoryDir)
+            return existsSync(file) && lstatSync(file).isFile() ? [file] : []
+          } catch { return [] }
+        })
+        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, overrides, unsupported }
       } catch {
         warnings.push({
           code: 'unsupported-config',
@@ -3509,14 +3599,61 @@ function fernSourceSiteUrl(config: Record<string, unknown>): string | undefined 
   }
 }
 
+/** The hosts (and the path each is served under) docs.yml names as this site's own `custom-domain`s. */
+function fernCustomDomains(config: Record<string, unknown>): Array<{ host: string; path: string }> {
+  const domains: Array<{ host: string; path: string }> = []
+  for (const instance of Array.isArray(config.instances) ? config.instances : []) {
+    const address = (instance as Record<string, unknown> | null)?.['custom-domain']
+    if (typeof address !== 'string') continue
+    try {
+      const url = new URL(/^https?:\/\//i.test(address) ? address : `https://${address}`)
+      domains.push({ host: url.hostname.toLowerCase(), path: url.pathname.replace(/\/+$/, '') })
+    } catch { /* an invalid domain names no site */ }
+  }
+  return domains
+}
+
+/**
+ * Turn absolute links to the site's own custom domain into internal paths, but only when `internalTarget` gives the address that
+ * serves the link's path and fragment (a page, or a redirect to one). The rest stay absolute and are collected in `unresolved`.
+ */
+function rewriteFernOwnDomainLinks(
+  body: string,
+  domains: ReadonlyArray<{ host: string; path: string }>,
+  versionPath: string,
+  internalTarget: (pathname: string, fragment: string) => string | undefined,
+  unresolved: Set<string>,
+): string {
+  const rewrite = (target: string): string => {
+    let url: URL
+    try { url = new URL(target) } catch { return target }
+    const domain = domains.find((entry) => entry.host === url.hostname.toLowerCase())
+    if (!domain || url.port || url.username || url.password) return target
+    if (domain.path && url.pathname !== domain.path && !url.pathname.startsWith(`${domain.path}/`)) return target
+    let pathname = url.pathname.slice(domain.path.length) || '/'
+    if (versionPath && (pathname === versionPath || pathname.startsWith(`${versionPath}/`))) pathname = pathname.slice(versionPath.length) || '/'
+    if (pathname.startsWith('//') || pathname.includes('\\')) return target
+    // A fragment the page does not answer would turn into a broken anchor, so such a link stays on the live site.
+    const internal = internalTarget(pathname, url.hash.slice(1))
+    if (!internal) {
+      unresolved.add(`${url.hostname}${url.pathname}${url.hash}`.slice(0, 120))
+      return target
+    }
+    return `${internal}${url.search}${url.hash}`
+  }
+  return replaceOutsideCode(body, (text) => text
+    .replace(/(\]\()(https?:\/\/[^\s)]{1,2048})(\))/g, (_match, before: string, target: string, after: string) => `${before}${rewrite(target)}${after}`)
+    .replace(/(\b(?:href|to)=(['"]))(https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
+}
+
 /** Keep unresolved root-relative links usable on the source site, with an explicit warning. */
-function externalizeMissingFernLinks(body: string, pageIds: ReadonlySet<string>, sourceSiteUrl: string, externalized: Set<string>): string {
+function externalizeMissingFernLinks(body: string, isServed: (path: string, fragment: string) => boolean, sourceSiteUrl: string, externalized: Set<string>): string {
   const rewrite = (target: string): string => {
     const path = target.split(/[?#]/, 1)[0].replace(/^\//, '').replace(/\/$/, '')
     // Only unresolved page routes belong on the source site. Fern pages may
     // reference copied public assets with root-relative Markdown links; an
     // image or download is not a missing docs page.
-    if (!path || pageIds.has(path) || ASSET_EXTENSIONS.has(extname(path).toLowerCase())) return target
+    if (!path || isServed(path, target.includes('#') ? target.slice(target.indexOf('#') + 1) : '') || ASSET_EXTENSIONS.has(extname(path).toLowerCase())) return target
     try {
       const base = new URL(`${sourceSiteUrl}/`)
       const sourceLinkUrl = new URL(target.slice(1), base)
@@ -3612,6 +3749,113 @@ export function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<s
     .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]{1,2048}|https?:\/\/[^'"\n]{1,2048})\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
+/** A fragment `preserveLinkedAnchors` can add as an element id. Encoded fragments are common in exported docs, including names with `$`. */
+const ALIAS_FRAGMENT = /^[\p{L}\p{N}_.:$-]{1,120}$/u
+
+/**
+ * How a page answers the fragments links name: `existing` holds the ids it already serves, and `target` gives the heading or table
+ * row (an index into `lines`) a source-site fragment names, where `preserveLinkedAnchors` adds that fragment as an alias. `local`
+ * also reads the page's own `#fragment` links, which pick among repeated rows.
+ */
+export function pageAnchors(body: string): {
+  existing: Set<string>
+  lines: Array<string>
+  target: (fragment: string, local: boolean) => { index: number; kind: 'heading' | 'table' } | undefined
+} {
+  const comparable = (value: string): string => value
+    .replace(/&(?:lt|gt|amp|quot);/g, ' ')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+  const definitions = new Map<string, string>()
+  replaceOutsideCodeAndComments(body, (text) => {
+    for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
+      const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
+      if (!definitions.has(label)) definitions.set(label, match[0])
+    }
+    return text
+  })
+  const lines = body.split('\n')
+  let fence: string | undefined
+  const tableCells: Array<{ index: number; text: string }> = []
+  const headings = lines.map((line, index) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      return null
+    }
+    if (fence) return null
+    // Each pattern below runs in one pass over a line, so a long run of blanks or `#` cannot make it backtrack.
+    const tableCell = /^ {0,3}\|([^|]*)\|/.exec(line)?.[1].trim()
+    if (tableCell && !/^[:\s-]+$/.test(tableCell)) tableCells.push({ index, text: tableCell })
+    const match = /^ {0,3}#{1,6}\s+(\S.*)$/.exec(line.trimEnd())
+    if (!match) return null
+    // A closing run of `#` is the parser's to drop, like the rest of the heading's syntax.
+    const source = match[1].replace(/\{\/\*\s*#\S{1,120}?\s*\*\/\}$/, '').trimEnd()
+    // `own`: the text the renderer makes the id from, which leaves out inline components and what they hold.
+    return { index, text: mdxVisibleText(source, definitions), own: mdxTextWithoutInlineElements(source, definitions) }
+  }).filter((entry): entry is { index: number; text: string; own: string | undefined } => entry !== null)
+  const existing = new Set<string>()
+  // An `id` attribute in a comment is no element; an explicit heading id is written as a comment.
+  replaceOutsideCodeAndComments(body, (text) => {
+    for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
+    return text
+  })
+  replaceOutsideCode(body, (text) => {
+    for (const match of text.matchAll(/\{\/\*\s*#(\S{1,120}?)\s*\*\/\}/g)) existing.add(match[1])
+    return text
+  })
+  const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
+  for (const heading of headings) {
+    const key = comparable(heading.text)
+    candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: heading.index, kind: 'heading' }])
+  }
+  for (const cell of tableCells) {
+    const key = comparable(cell.text)
+    candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: cell.index, kind: 'table' }])
+  }
+  const headingSlugs = new Map<string, number>()
+  const slugCounts = new Map<string, number>()
+  for (const heading of headings) {
+    const slug = (heading.own ?? heading.text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+    existing.add(slug)
+    const seen = slugCounts.get(slug) ?? 0
+    slugCounts.set(slug, seen + 1)
+    if (slug) headingSlugs.set(seen === 0 ? slug : `${slug}-${seen}`, heading.index)
+  }
+  const target = (fragment: string, local: boolean): { index: number; kind: 'heading' | 'table' } | undefined => {
+    const matches = candidateIndexes.get(comparable(fragment)) ?? []
+    let match = matches.length === 1 ? matches[0] : undefined
+    if (!match && matches.length > 1 && local) {
+      // Repeated option names can occur in several tables. A same-page
+      // reference after one of them refers to the nearest preceding option;
+      // only add an alias when every real local link agrees on that row.
+      const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const linkPattern = new RegExp(`\\]\\(#${escaped}\\)|\\b(?:href|to)=["']#${escaped}["']`)
+      const linkIndexes = lines.flatMap((line, index) => linkPattern.test(line) ? [index] : [])
+      const selections = linkIndexes.map((index) => matches.filter((candidate) => candidate.index < index).at(-1))
+      if (selections.length && selections.every((candidate) => candidate?.index === selections[0]?.index)) match = selections[0]
+    }
+    // A fragment names a heading in the source site; option tables that
+    // repeat the same word are only extra candidates. When exactly one
+    // heading matches, that heading is the target.
+    if (!match && matches.length > 1) {
+      const headingMatches = matches.filter((candidate) => candidate.kind === 'heading')
+      if (headingMatches.length === 1) match = headingMatches[0]
+    }
+    // Repeated headings get numbered ids (`options`, `options-1`, ...). A
+    // fragment that differs from one of those only by letter case names
+    // that specific heading.
+    if (!match) {
+      const index = headingSlugs.get(fragment.toLowerCase())
+      if (index !== undefined) match = { index, kind: 'heading' }
+    }
+    return match
+  }
+  return { existing, lines, target }
+}
+
 /** Preserve source fragments that resolve to a unique heading or table row. */
 function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
   const pageById = new Map(pages.map((page) => [page.id, page]))
@@ -3622,9 +3866,7 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
     if (hash < 0) return
     let fragment: string
     try { fragment = decodeURIComponent(target.slice(hash + 1)) } catch { return }
-    // Only HTML-attribute-safe fragments can become explicit IDs. Encoded
-    // fragments are common in exported docs, including names with `$`.
-    if (!/^[\p{L}\p{N}_.:$-]{1,120}$/u.test(fragment)) return
+    if (!ALIAS_FRAGMENT.test(fragment)) return
     const path = target.slice(0, hash).split('?')[0]
     const id = target.startsWith('#') ? currentId : path.startsWith('/') && !path.startsWith('//')
       ? path.replace(/^\//, '').replace(/\/$/, '') || 'introduction' : ''
@@ -3640,95 +3882,15 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       return text
     })
   }
-  const comparable = (value: string): string => value
-    .replace(/&(?:lt|gt|amp|quot);/g, ' ')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '')
   for (const page of pages) {
     const fragments = requested.get(page.id)
     if (!fragments?.size) continue
-    const definitions = new Map<string, string>()
-    replaceOutsideCodeAndComments(page.body, (text) => {
-      for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
-        const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
-        if (!definitions.has(label)) definitions.set(label, match[0])
-      }
-      return text
-    })
-    const lines = page.body.split('\n')
-    let fence: string | undefined
-    const tableCells: Array<{ index: number; text: string }> = []
-    const headings = lines.map((line, index) => {
-      const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
-      if (marker) {
-        if (!fence) fence = marker[1]
-        else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
-          && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
-        return null
-      }
-      if (fence) return null
-      const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
-      if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
-      const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      if (!match) return null
-      const source = match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '')
-      // `own`: the text the renderer makes the id from, which leaves out inline components and what they hold.
-      return { index, text: mdxVisibleText(source, definitions), own: mdxTextWithoutInlineElements(source, definitions) }
-    }).filter((entry): entry is { index: number; text: string; own: string | undefined } => entry !== null)
-    const existing = new Set<string>()
-    replaceOutsideCode(page.body, (text) => {
-      for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
-      for (const match of text.matchAll(/\{\/\*\s*#(\S+?)\s*\*\/\}/g)) existing.add(match[1])
-      return text
-    })
-    const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
-    for (const heading of headings) {
-      const key = comparable(heading.text)
-      candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: heading.index, kind: 'heading' }])
-    }
-    for (const cell of tableCells) {
-      const key = comparable(cell.text)
-      candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: cell.index, kind: 'table' }])
-    }
-    const headingSlugs = new Map<string, number>()
-    const slugCounts = new Map<string, number>()
-    for (const heading of headings) {
-      const slug = (heading.own ?? heading.text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-      existing.add(slug)
-      const seen = slugCounts.get(slug) ?? 0
-      slugCounts.set(slug, seen + 1)
-      if (slug) headingSlugs.set(seen === 0 ? slug : `${slug}-${seen}`, heading.index)
-    }
+    const { existing, lines, target } = pageAnchors(page.body)
     const headingAliases = new Map<number, Array<string>>()
     const tableAliases = new Map<number, Array<string>>()
     for (const fragment of fragments) {
       if (existing.has(fragment)) continue
-      const matches = candidateIndexes.get(comparable(fragment)) ?? []
-      let match = matches.length === 1 ? matches[0] : undefined
-      if (!match && matches.length > 1 && !crossPageRequests.has(`${page.id}#${fragment}`)) {
-        // Repeated option names can occur in several tables. A same-page
-        // reference after one of them refers to the nearest preceding option;
-        // only add an alias when every real local link agrees on that row.
-        const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const linkPattern = new RegExp(`\\]\\(#${escaped}\\)|\\b(?:href|to)=["']#${escaped}["']`)
-        const linkIndexes = lines.flatMap((line, index) => linkPattern.test(line) ? [index] : [])
-        const selections = linkIndexes.map((index) => matches.filter((candidate) => candidate.index < index).at(-1))
-        if (selections.length && selections.every((candidate) => candidate?.index === selections[0]?.index)) match = selections[0]
-      }
-      // A fragment names a heading in the source site; option tables that
-      // repeat the same word are only extra candidates. When exactly one
-      // heading matches, that heading is the target.
-      if (!match && matches.length > 1) {
-        const headingMatches = matches.filter((candidate) => candidate.kind === 'heading')
-        if (headingMatches.length === 1) match = headingMatches[0]
-      }
-      // Repeated headings get numbered ids (`options`, `options-1`, ...). A
-      // fragment that differs from one of those only by letter case names
-      // that specific heading.
-      if (!match) {
-        const index = headingSlugs.get(fragment.toLowerCase())
-        if (index !== undefined) match = { index, kind: 'heading' }
-      }
+      const match = target(fragment, !crossPageRequests.has(`${page.id}#${fragment}`))
       if (!match) continue
       const { index, kind } = match
       const aliases = kind === 'heading' ? headingAliases : tableAliases
@@ -4727,6 +4889,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernReferencedPaths = new Set<string>()
   const fernSourceLinkAliases = new Map<string, string>()
   const fernNavTitles = new Map<string, string>()
+  const fernPageIcons = new Map<string, string>()
+  const fernPageAvailability = new Map<string, string>()
+  const fernProStyleIcons = new Set<string>()
   const fernHiddenIds = new Set<string>()
   const fernRestrictedPaths = new Set<string>()
 
@@ -4805,11 +4970,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         fernRestrictedApiSections = projected.restrictedApiSections
         fernNavigationIncomplete = projected.navigationIncomplete
         fernChangelogIndexes = projected.changelogIndexes
+        for (const name of projected.proStyleIcons) fernProStyleIcons.add(name)
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
           if (descriptor.navTitle && !fernNavTitles.has(descriptor.navigationId)) {
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
+          if (typeof descriptor.availability === 'string' && !fernPageAvailability.has(descriptor.navigationId)) fernPageAvailability.set(descriptor.navigationId, descriptor.availability)
+          if (descriptor.icon && !fernPageIcons.has(descriptor.navigationId)) fernPageIcons.set(descriptor.navigationId, descriptor.icon)
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
           if (descriptor.restricted) fernRestrictedPaths.add(canonicalPath(resolvePath(fernProjectRoot, descriptor.sourcePath)))
           // Fern pages often link by their source directory while a section
@@ -5516,6 +5684,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warn: (message) => warnings.push({ code: 'unsupported-config', message, source: pageWarningSource }),
       ...(locale ? { locale } : {}),
       siteIconLibrary,
+      ...(platform === 'mintlify' ? { redirects: mintlifyAuthoredRedirects } : {}),
+      ...(platform === 'fern' && fernNavTitles.has(navigationId) ? { fallbackTitle: fernNavTitles.get(navigationId) } : {}),
       raw,
       platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
@@ -5575,6 +5745,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (navTitle && navTitle !== page.title) page.navTitle = navTitle
     }
     if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
+    if (platform === 'fern') {
+      // The page's own frontmatter icon wins over the one docs.yml gives its navigation node.
+      const icon = page.icon ?? fernPageIcons.get(navigationId)
+      if (icon) {
+        const { icon: name, iconType } = fernIcon(icon, fernProStyleIcons)
+        page.icon = name
+        if (iconType && !page.iconType) page.iconType = iconType
+      }
+      page.badge ??= fernAvailabilityBadge(fernPageAvailability.get(navigationId))
+    }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
@@ -5604,8 +5784,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // body (after `parseMarkdownPage`'s `normalizeMdx`), so a tag that a
       // platform-specific rename still resolves (Docusaurus `TabItem` ->
       // `Tab`, Mintlify `Warn` -> `Warning`, ...) is never mistaken for
-      // unknown. Fern-native components with no Thally equivalent
-      // (`Markdown`, `Button`, `Download`, ...) fall into the same generic
+      // unknown. Fern's `Button` and `Download` become anchors in the next
+      // step; other Fern-native components with no Thally equivalent
+      // (`Markdown`, ...) fall into the same generic
       // path below — there is no separate Fern-specific detector, so each
       // unknown tag gets exactly one warning.
       page.body = replaceLinkWithAnchor(page.body)
@@ -5615,7 +5796,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // throw "Expected component X to be defined" at render. Warn once per
       // component name and neutralize it: keep a paired tag's children,
       // drop a self-closing one outright.
-      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+      page.body = replaceUnknownComponents(page.body, (name) => { warnings.push(unresolvedComponentWarning(name, file.relativePath)) }, { fernLinks: platform === 'fern' })
     }
     if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
@@ -5631,7 +5812,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         let settled = escapeFernLiteralBraces(repair.body)
         settled = normalizeFlowParagraphContainers(settled)
         settled = removeUndefinedExpressions(settled, (message) => { settledWarnings.push({ code: 'unsupported-config', message, source: pageWarningSource }) })
-        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) })
+        settled = replaceUnknownComponents(replaceLinkWithAnchor(settled), (name) => { settledWarnings.push(unresolvedComponentWarning(name, file.relativePath)) }, { fernLinks: platform === 'fern' })
         if (invalidMdxReason(settled) === null) {
           page.body = settled
           mdxError = null
@@ -5862,6 +6043,27 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     addPathReferences(rootStyleProjection.css, '', publishedExact, publishedLoose)
   }
   const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
+  // Files that the declared stylesheets load by a root-relative url() (fonts, images), copied with the site.
+  const styleUrlTargets = new Set<string>()
+  const unsafeStyleUrls = new Set<string>()
+  const addStyleUrls = (css: string): void => {
+    for (const url of rootRelativeCssUrls(css)) {
+      let path = url
+      try { path = decodeURIComponent(url) } catch { /* keep the raw path */ }
+      const normalized = normalizeAssetPath(path)
+      if (normalized) styleUrlTargets.add(normalized)
+      else unsafeStyleUrls.add(url)
+    }
+  }
+  if (platform === 'mintlify') {
+    if (rootStyleProjection?.css) addStyleUrls(rootStyleProjection.css)
+    for (const file of files) {
+      if (file.absolutePath === rootStylesheetPath || !isMintlifyServedScriptOrStyle(file.relativePath)
+        || extname(file.relativePath).toLowerCase() !== '.css' || importedComponentSources.has(file.absolutePath)
+        || lstatSync(file.absolutePath).size > MAX_ASSET_BYTES) continue
+      addStyleUrls(readFileSync(file.absolutePath, 'utf8'))
+    }
+  }
   const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
     if (rootStylesheetPath && file.absolutePath === rootStylesheetPath) continue
@@ -5871,7 +6073,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         : isMintlifyServedScriptOrStyle(file.relativePath) && !importedComponentSources.has(file.absolutePath)
           ? (extname(file.relativePath).toLowerCase() === '.css' ? 'style' as const : 'script' as const)
           : undefined
-    if (!siteKind && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    const loadedByStylesheet = platform === 'mintlify' && !siteKind && styleUrlTargets.has(file.relativePath)
+      && STYLESHEET_URL_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+    if (!siteKind && !loadedByStylesheet && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
@@ -5886,6 +6090,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (destinations.has(assetPath)) continue
     destinations.add(assetPath)
     seenAssetSources.set(sourceKey, destinations)
+    if (loadedByStylesheet) siteAssetPaths.set(assetPath, 'font')
     if (siteKind) {
       siteAssetPaths.set(assetPath, siteKind)
       if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
@@ -6014,11 +6219,24 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
       }
     }
-    for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
+    const styles = copiedSite.filter((item) => item.kind === 'style')
+    if (styles.length > 0) {
+      docsConfig = {
+        ...docsConfig,
+        stylesheets: [...(docsConfig.stylesheets ?? []), ...styles.map((entry) => `/${entry.path.split('/').map(encodeURIComponent).join('/')}`)],
+      }
       warnings.push({
         code: 'unsupported-config',
-        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but was not declared in docs.json stylesheets; its selectors may target Mintlify's markup. Review and port its authored rules into a Thally stylesheet.`,
-        source: entry.path,
+        message: `${styles.length} stylesheet(s) from the content directory (${cappedList(styles.map((entry) => entry.path), 5)}) now load on every page via docs.json stylesheets, as they did on Mintlify. They may target Mintlify's page structure, so selectors for its own markup (a sidebar or tab bar, say) match nothing here; review them.`,
+      })
+    }
+    const sourcePaths = new Set(files.map((file) => file.relativePath))
+    const missingStyleUrls = [...styleUrlTargets].filter((path) => !sourcePaths.has(path)).map((path) => `/${path}`)
+    const unreadableStyleUrls = [...missingStyleUrls, ...unsafeStyleUrls]
+    if (unreadableStyleUrls.length > 0) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `${unreadableStyleUrls.length} file(s) that site stylesheets load by url() were not found in the content directory, or point outside it, and were not copied: ${cappedList(unreadableStyleUrls, 5)}. Add them to public/ at the same path, or the stylesheet shows a broken font or image there.`,
       })
     }
     for (const font of mintlifyFonts) {
@@ -6252,13 +6470,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // API's spec from another's, so once an explicit `api-name` names a
     // specific API, that naive scan is never consulted as a fallback (the
     // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
-    // with no `api:` node at all falls back to the naive scan, bound to
-    // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
-    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
-      ? fernApiSections
-      // Every `api:` node is restricted: none may fall back to a repository-wide spec scan.
-      : fernRestrictedApiSections.length > 0 ? [] : [{ nameExplicit: false }]
-    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
+    // with no `api:` node publishes no API reference: a spec file in the
+    // repository that navigation never references gets no tab.
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; linkContent?: Buffer; routeSegments: Array<string> }> = []
+    if (sections.length === 0) {
+      const unreferenced = files.filter((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase()) && classifyApiSpec(file.absolutePath) === 'openapi')
+        .map((file) => file.relativePath)
+      if (unreferenced.length > 0) warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec${unreferenced.length === 1 ? '' : 's'} ${cappedList(unreferenced, 5)} ${unreferenced.length === 1 ? 'is' : 'are'} in the repository, but docs.yml does not reference ${unreferenced.length === 1 ? 'it' : 'them'}, so no API tab was created. To publish an API reference from ${unreferenced.length === 1 ? 'it' : 'them'}, add an "api:" entry to the navigation in docs.yml, for example "- api: API Reference".`,
+      })
+    }
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
     // apis/<name>/openapi/openapi.json) — track which absolute file a
@@ -6279,10 +6502,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         specFilenameSources.set(filename, spec.absolutePath)
         const specContent = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
         if (!specContent) continue
+        const schemeless = schemelessSpecLinks(specContent)
+        if (schemeless.length > 0) warnings.push({
+          code: 'unsupported-config',
+          message: `The API spec ${spec.relativePath} has ${schemeless.length} link(s) written without https:// (${cappedList(schemeless, 5)}), so the API reference opens them as paths on this site. Add https:// to those links in the OpenAPI descriptions.`,
+          source: spec.relativePath,
+        })
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
           assets.push(specAsset(filename, specContent))
         }
-        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, routeSegments: section.routeSegments ?? [] })
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, linkContent: withFernSdkNames(specContent, resolution.overrides ?? []), routeSegments: section.routeSegments ?? [] })
         continue
       }
       if (resolution.unsupported.length > 0) {
@@ -6338,11 +6567,38 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // under that section's own route (e.g. "api-reference/messages/...")
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
-      const { operationLinks, prefixLandings } = apiOperationLinkMap(
-        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
+      const { operationLinks, prefixLandings, fernPages, fernDuplicates } = apiOperationLinkMap(
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.linkContent ?? spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
+      // Links first: an address a redirect answers is left as written, and the redirects below answer every operation URL.
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, { redirects: docsConfig.redirects })
+      // Fern's operation URLs redirect to the operation pages. A URL a page or an authored redirect already answers keeps it, and an
+      // authored redirect that ends on an operation URL goes straight to the page.
+      const taken = servedRoutes(pages)
+      for (const redirect of docsConfig.redirects ?? []) taken.add(literalRoute(redirect.source) ?? redirect.source)
+      const fernCandidates = [...fernPages].filter(([source]) => !taken.has(`/${source}`))
+      const operationRedirects = fernCandidates.slice(0, MAX_ENDPOINT_REDIRECTS).map(([source, destination]) => ({ source: `/${source}`, destination }))
+      const listUrls = (urls: ReadonlyArray<string>): string => `${urls.slice(0, 10).map((url) => `/${url}`).join(', ')}${urls.length > 10 ? ', ...' : ''}`
+      if (fernDuplicates.length > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `${fernDuplicates.length} Fern operation URL${fernDuplicates.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and name), so only the first operation is redirected from ${fernDuplicates.length === 1 ? 'it' : 'each'}: ${listUrls(fernDuplicates)}.`,
+        })
+      }
+      if (fernCandidates.length > operationRedirects.length) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Created ${operationRedirects.length} of ${fernCandidates.length} Fern operation redirects; skipped ${fernCandidates.length - operationRedirects.length} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to skipped operation URLs will not redirect: ${listUrls(fernCandidates.slice(MAX_ENDPOINT_REDIRECTS).map(([source]) => source))}.`,
+        })
+      }
+      const authored = (docsConfig.redirects ?? []).map((redirect) => {
+        const target = fernPages.get(redirect.destination.replace(/\/+$/, '').replace(/^\//, '').toLowerCase())
+        return target ? { ...redirect, destination: target } : redirect
+      })
+      if (operationRedirects.length > 0 || authored.some((redirect, index) => redirect !== docsConfig.redirects![index])) {
+        docsConfig = { ...docsConfig, redirects: [...authored, ...operationRedirects] }
+      }
     }
   } else if (platform === 'mintlify') {
     const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
@@ -6686,7 +6942,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           id: changelog.route,
           navigationId: changelog.route,
           title: 'Release Notes',
-          description: 'Latest release notes and product updates.',
+          description: changelogIndexDescription(undefined, docsConfig.i18n?.defaultLocale),
           descriptionPlacement: 'body',
           keywords: [],
           body: '',
@@ -6696,6 +6952,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         byId.set(index.navigationId, index)
         docsConfig.redirects = docsConfig.redirects?.filter((redirect) => redirect.source !== `/${changelog.route}`)
       }
+      // A page whose own text is only a form or a card has no usable first paragraph.
+      index.description ||= changelogIndexDescription(index.locale, docsConfig.i18n?.defaultLocale)
       if (index.body.trim()) continue
       // Fern renders changelog directories as a dated feed at the bare tab
       // route. Its `overview.mdx` is often intentionally blank: leaving that
@@ -6705,7 +6963,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // and link/asset rewriting. Pages with module declarations need an
       // excerpt because imports cannot safely be concatenated into one MDX
       // document without renaming all their bindings.
-      index.description ||= 'Latest release notes and product updates.'
+      index.description ||= changelogIndexDescription(index.locale, docsConfig.i18n?.defaultLocale)
       index.body = entries.map((entry) => {
         const date = entry.source.match(/\d{4}-\d{2}-\d{2}/)?.[0]
         const escapeText = (value: string): string => value.replace(/([\\{}<>\[\]*_`])/g, '\\$1')
@@ -6812,19 +7070,92 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const page of pages) page.body = rewriteRelativeJsxHrefs(page.body, page.id)
   }
   appendMintlifyDirectories(pages, mintlifyDirectories, warnings)
-  preserveLinkedAnchors(pages)
+  // Before the anchor pass, so a fragment on a converted link is checked like any other.
   if (platform === 'fern' && fernRawConfig) {
+    const pageIds = new Set(pages.map((page) => page.id))
+    // The first redirect listed for an address is the one the site answers with.
+    const redirectsBySource = new Map<string, { source: string; destination: string }>()
+    for (const redirect of docsConfig.redirects ?? []) {
+      const source = trimTrailingSlashes(redirect.source) || '/'
+      if (!redirectsBySource.has(source.toLowerCase())) redirectsBySource.set(source.toLowerCase(), { source, destination: redirect.destination })
+    }
+    // The redirect checks further down drop a redirect the site cannot serve; a link may go to a redirect only when it stays.
+    let keptRedirectSources: Set<string> | undefined
+    const keepsRedirect = (source: string): boolean => (keptRedirectSources ??= new Set(
+      (dropConflictingRedirects(dropUnroutableRedirects(docsConfig, []), [...pages, ...sourceRefPages], []).redirects ?? []).map((redirect) => redirect.source),
+    )).has(source)
+    let apiRoutes: Set<string> | undefined
+    const pagesById = new Map(pages.map((page) => [page.id, page]))
+    const anchorsOf = new Map<string, ReturnType<typeof pageAnchors>>()
+    /**
+     * Whether the page at `route` answers `fragment` once migrated. A link straight to the page also reaches a fragment that
+     * `preserveLinkedAnchors` adds as an alias there; a link left on a redirect does not, because that pass reads page links only.
+     */
+    const hasAnchor = (route: string, fragment: string, direct: boolean): boolean => {
+      // Browser text fragments name no element.
+      if (fragment.startsWith(':~:')) return true
+      const page = pagesById.get(route.slice(1) || 'introduction')
+      // A generated API page has no headings to check here; a home page the migration does not hold has nothing to check against.
+      if (!page) return route !== '/'
+      if (!anchorsOf.has(page.id)) anchorsOf.set(page.id, pageAnchors(page.body))
+      const anchors = anchorsOf.get(page.id)!
+      let decoded: string
+      try { decoded = decodeURIComponent(fragment) } catch { return anchors.existing.has(fragment) }
+      return anchors.existing.has(decoded) || (direct && ALIAS_FRAGMENT.test(decoded) && anchors.target(decoded, false) !== undefined)
+    }
+    /**
+     * The internal address for a link to a site path: the page or API operation page it reaches, through redirects when need be.
+     * Undefined when it reaches none, or when the page there does not answer `fragment` (see `hasAnchor`). A redirect that adds a
+     * query or a fragment of its own is left for the site to follow, because only the redirect applies them as the source site does
+     * (its query is merged into the link's, its fragment replaces the link's): the address is then the first redirect's own source.
+     * So is the address of a link that is `keptAsWritten`. A link left on a redirect needs every redirect on its way, so it has no
+     * address when one is dropped.
+     */
+    const internalTarget = (pathname: string, fragment: string, keptAsWritten = false): string | undefined => {
+      let current = trimTrailingSlashes(pathname) || '/'
+      const followed: Array<string> = []
+      let adds = false
+      let setsFragment = false
+      for (let hop = 0; hop < 8; hop++) {
+        if (current === '/' || pageIds.has(current.slice(1)) || (apiRoutes ??= new Set(migrationApiRoutes({ docsConfig, assets }))).has(current)) {
+          const direct = followed.length === 0 || !(adds || keptAsWritten)
+          // The visitor arrives with the link's fragment unless a redirect on the way set one.
+          if (fragment && !setsFragment && !hasAnchor(current, fragment, direct)) return undefined
+          if (direct) return current
+          return followed.every(keepsRedirect) ? followed[0] : undefined
+        }
+        const redirect = redirectsBySource.get(current.toLowerCase())
+        if (!redirect?.destination.startsWith('/') || redirect.destination.startsWith('//')) return undefined
+        followed.push(redirect.source)
+        adds ||= /[?#]/.test(redirect.destination)
+        setsFragment ||= redirect.destination.includes('#')
+        current = trimTrailingSlashes(redirect.destination.split(/[?#]/, 1)[0]) || '/'
+      }
+      return undefined
+    }
+    const domains = fernCustomDomains(fernRawConfig)
+    if (domains.length > 0) {
+      const unresolved = new Set<string>()
+      for (const page of pages) page.body = rewriteFernOwnDomainLinks(page.body, domains, fernVersionPath, internalTarget, unresolved)
+      if (unresolved.size > 0) warnings.push({
+        code: 'unsupported-config',
+        message: `${unresolved.size} link(s) to this site's own address match no migrated page and still point to the live site: ${cappedList([...unresolved].sort(), 10)}. Update them if the live site is going away.`,
+      })
+    }
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
     if (sourceSiteUrl) {
       const externalized = new Set<string>()
-      const pageIds = new Set(pages.map((page) => page.id))
-      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, pageIds, sourceSiteUrl, externalized)
+      // A route the site answers itself (a page, an API operation page, a redirect it keeps that leads to one) is not missing, and
+      // neither is a fragment that page answers. The link stays as it is written, so it relies on that redirect.
+      const isServed = (path: string, fragment: string): boolean => pageIds.has(path) || internalTarget(`/${path}`, fragment, true) !== undefined
+      for (const page of pages) page.body = externalizeMissingFernLinks(page.body, isServed, sourceSiteUrl, externalized)
       if (externalized.size > 0) warnings.push({
         code: 'unsupported-config',
         message: `${externalized.size} unresolved Fern link(s) still point to ${sourceSiteUrl}; import those sections separately for a fully independent site.`,
       })
     }
   }
+  preserveLinkedAnchors(pages)
   if (docsConfig.redirects) {
     // Every platform's redirects meet here: none may fail the build, hide a page or loop.
     // Mintlify answers a redirect from its own config before it looks for a page, so there the redirect wins over a page at its source:
@@ -6985,8 +7316,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Dense version menus should fit in one header row. A dozen archived
   // Docusaurus releases otherwise turn the collection tabs into a tall wall
   // above every document.
-  if (!docsConfig.navigation?.display && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
+  // Fern's header tab bar holds many tabs, so only a sidebar-placed Fern tab list is collapsed (with a warning).
+  const fernTabsInHeader = fernRawConfig !== null
+    && ((fernRawConfig.layout as Record<string, unknown> | undefined)?.['tabs-placement'] ?? 'header') !== 'sidebar'
+  if (!docsConfig.navigation?.display && !fernTabsInHeader && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
     docsConfig = { ...docsConfig, navigation: { ...docsConfig.navigation, display: 'dropdown' } }
+    if (fernRawConfig) warnings.push({
+      code: 'unsupported-config',
+      message: 'Fern lists more than six tabs in the sidebar, so the migrated site shows them as a dropdown. Set "navigation.display" to "tabs" in docs.json to show them as a tab bar.',
+    })
   }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
@@ -7158,6 +7496,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         + 'Confirm nothing here was meant to stay private before deploying.',
     })
   }
+  if (fernRawConfig) warnings.push(...fernDroppedConfigWarnings(fernRawConfig))
+  if (fernRawConfig) docsConfig = { ...docsConfig, icons: { library: 'fontawesome' } }
+  if (fernProStyleIcons.size > 0) warnings.push({
+    code: 'unsupported-config',
+    message: `${fernProStyleIcons.size} icon name(s) use a Font Awesome Pro style (light, thin, duotone or sharp): ${cappedList([...fernProStyleIcons].sort(), 10)}. Thally draws them from Font Awesome Free, in the regular or solid style, and a name that exists only in Pro shows blank. Look the names up in the Font Awesome Free icon list and rename the ones that show blank.`,
+  })
   if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
     code: 'unsupported-config',
     message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,

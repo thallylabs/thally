@@ -205,3 +205,21 @@ describe('Font Awesome icon resolution', () => {
     }
   })
 })
+
+describe('Pro-only names used by the Vapi docs', () => {
+  it('map to a Lucide icon that exists, or to the Free solid name', () => {
+    const names = Object.fromEntries(['book-user', 'calendar-clock', 'phone-arrow-right', 'phone-arrow-up-right', 'phone-hangup', 'phone-office', 'shield-xmark', 'square-terminal', 'waveform-lines', 'running'].map((name) => [name, resolution(name, 'regular')]))
+    expect(names).toEqual({
+      'book-user': { kind: 'lucide', file: 'book-user' },
+      'calendar-clock': { kind: 'lucide', file: 'calendar-clock' },
+      'phone-arrow-right': { kind: 'lucide', file: 'phone-forwarded' },
+      'phone-arrow-up-right': { kind: 'lucide', file: 'phone-outgoing' },
+      'phone-hangup': { kind: 'lucide', file: 'phone-off' },
+      'phone-office': { kind: 'lucide', file: 'phone' },
+      'shield-xmark': { kind: 'lucide', file: 'shield-x' },
+      'square-terminal': { kind: 'lucide', file: 'square-terminal' },
+      'waveform-lines': { kind: 'lucide', file: 'audio-lines' },
+      running: { kind: 'solid', file: 'person-running' },
+    })
+  })
+})

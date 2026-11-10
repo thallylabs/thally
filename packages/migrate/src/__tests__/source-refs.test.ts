@@ -134,7 +134,7 @@ describe('importSourceRef', () => {
     const ids = imported.pages.map((page) => page.id).sort()
     expect(ids).toEqual(['client-sdks/typescript/models/orphan', 'client-sdks/typescript/overview', 'client-sdks/typescript/sdks/chat/README'])
     expect(imported.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/logo.png')
-    expect(imported.navigation).toEqual(['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }])
+    expect(imported.navigation).toEqual(['client-sdks/typescript/overview', { group: 'Chat', defaultOpen: true, pages: ['client-sdks/typescript/sdks/chat/README'] }])
     const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
     const overview = bundle.pages.find((page) => page.id.endsWith('/overview'))!
     expect(overview.body).toContain('[chat](/client-sdks/typescript/sdks/chat/README)')
@@ -185,7 +185,7 @@ describe('migrateRepository with sourceRefs', () => {
     const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
     const group = bundle.docsConfig.tabs[0].groups!.find((candidate) => candidate.group === 'TypeScript SDK')!
     expect(group.icon).toBe('code')
-    expect(group.pages).toEqual(['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }])
+    expect(group.pages).toEqual(['client-sdks/typescript/overview', { group: 'Chat', defaultOpen: true, pages: ['client-sdks/typescript/sdks/chat/README'] }])
     const ids = bundle.pages.map((page) => page.id)
     expect(ids).toContain('introduction')
     expect(ids).toContain('client-sdks/typescript/models/orphan')

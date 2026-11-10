@@ -25,6 +25,15 @@ describe('trusted local migration boundary', () => {
     expect(readFileSync(join(output, 'inside.md'), 'utf8')).toBe('# Guide')
     for (const excluded of ['.env', 'node_modules', 'escape.md', 'pretend.md']) expect(existsSync(join(output, excluded))).toBe(false)
   })
+  it('keeps the font files a stylesheet loads', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-local-fonts-'))
+    const source = join(root, 'source')
+    mkdirSync(join(source, 'fonts'), { recursive: true })
+    writeFileSync(join(source, 'docs.json'), '{"navigation":{}}')
+    for (const name of ['a.woff', 'a.woff2', 'a.ttf', 'a.otf']) writeFileSync(join(source, 'fonts', name), 'font')
+    snapshotLocalMigration(source, join(root, 'snapshot'))
+    for (const name of ['a.woff', 'a.woff2', 'a.ttf', 'a.otf']) expect(existsSync(join(root, 'snapshot', 'fonts', name))).toBe(true)
+  })
   it('rejects source/output overlap through an existing symlink ancestor', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-local-overlap-'))
     const source = join(root, 'source')

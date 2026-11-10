@@ -5,6 +5,7 @@ import { getContentSource, isRemoteContentSource } from '@/lib/content-source'
 import { redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
+import { packValue } from '@/lib/openapi/pack-operation'
 import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getSiteUrl } from '@/lib/site-url'
@@ -190,7 +191,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     </div>
   )

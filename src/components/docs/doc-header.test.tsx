@@ -19,7 +19,7 @@ describe('DocHeader', () => {
   })
   it('lets a long title break', () => {
     const html = renderToStaticMarkup(<DocHeader doc={{ title: 'Supercalifragilisticexpialidocious'.repeat(3) } as never} showCopyPage={false} />)
-    expect(html).toMatch(/<h1 class="[^"]*break-words/)
+    expect(html).toMatch(/<h1 class="[^"]*\[overflow-wrap:anywhere\]/)
   })
 
   describe('eyebrow', () => {

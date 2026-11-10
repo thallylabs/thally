@@ -12,7 +12,7 @@ import {
   defaultJavaScriptRegexConstructor,
 } from 'shiki/engine/javascript'
 import { createHighlighterCore } from 'shiki/core'
-import type { HighlighterCore, ThemedToken, ThemeRegistration } from 'shiki'
+import type { HighlighterCore, LanguageRegistration, ThemedToken, ThemeRegistration } from 'shiki'
 import langBash from 'shiki/langs/bash.mjs'
 import langC from 'shiki/langs/c.mjs'
 import langCpp from 'shiki/langs/cpp.mjs'
@@ -25,15 +25,19 @@ import langGraphql from 'shiki/langs/graphql.mjs'
 import langHcl from 'shiki/langs/hcl.mjs'
 import langHtml from 'shiki/langs/html.mjs'
 import langHttp from 'shiki/langs/http.mjs'
+import langIni from 'shiki/langs/ini.mjs'
+import langJinja from 'shiki/langs/jinja.mjs'
 import langJavascript from 'shiki/langs/javascript.mjs'
 import langJava from 'shiki/langs/java.mjs'
 import langJson from 'shiki/langs/json.mjs'
 import langJsonc from 'shiki/langs/jsonc.mjs'
 import langJsx from 'shiki/langs/jsx.mjs'
 import langKotlin from 'shiki/langs/kotlin.mjs'
+import langMakefile from 'shiki/langs/makefile.mjs'
 import langMarkdown from 'shiki/langs/markdown.mjs'
 import langMdx from 'shiki/langs/mdx.mjs'
 import langPhp from 'shiki/langs/php.mjs'
+import langPowershell from 'shiki/langs/powershell.mjs'
 import langPython from 'shiki/langs/python.mjs'
 import langRuby from 'shiki/langs/ruby.mjs'
 import langRust from 'shiki/langs/rust.mjs'
@@ -44,8 +48,11 @@ import langToml from 'shiki/langs/toml.mjs'
 import langTsx from 'shiki/langs/tsx.mjs'
 import langTypescript from 'shiki/langs/typescript.mjs'
 import langVue from 'shiki/langs/vue.mjs'
+import langXml from 'shiki/langs/xml.mjs'
 import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
+import bamlGrammar from './grammars/baml.tmLanguage.json'
+import bamlJinjaGrammar from './grammars/baml-jinja.tmLanguage.json'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
 import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, numberTabIds } from '../lib/field-anchor'
@@ -101,6 +108,10 @@ function getHighlighter(): Promise<HighlighterCore> {
       // render as plaintext, while the common documentation languages retain
       // full grammar-aware highlighting.
       langs: [
+        // BAML embeds source.baml-jinja, source.python and source.ts; grammars/NOTICE
+        // records where the first two come from.
+        bamlGrammar as unknown as LanguageRegistration,
+        bamlJinjaGrammar as unknown as LanguageRegistration,
         langBash,
         langC,
         langCpp,
@@ -113,15 +124,19 @@ function getHighlighter(): Promise<HighlighterCore> {
         langHcl,
         langHtml,
         langHttp,
+        langIni,
+        langJinja,
         langJava,
         langJavascript,
         langJson,
         langJsonc,
         langJsx,
         langKotlin,
+        langMakefile,
         langMarkdown,
         langMdx,
         langPhp,
+        langPowershell,
         langPython,
         langRuby,
         langRust,
@@ -132,6 +147,7 @@ function getHighlighter(): Promise<HighlighterCore> {
         langTsx,
         langTypescript,
         langVue,
+        langXml,
         langYaml,
       ],
     })
@@ -144,6 +160,8 @@ const languageAliases: Record<string, string> = {
   'c#': 'csharp',
   curl: 'bash',
   gql: 'graphql',
+  ps1: 'powershell',
+  make: 'makefile',
   sh: 'bash',
   shell: 'bash',
   shellscript: 'bash',
@@ -584,6 +602,7 @@ export function applyCodeNotation(code: string): { code: string; marks: LineMark
 //   ```ts icon="python"          (icon in the header)
 //   ```bash wrap lines           (soft-wrap, line numbers)
 //   ```ts expandable nocopy      (collapsible, no copy button)
+//   ```ts app.ts [expandable]    (bracketed form of expandable)
 // `twoslash` and unknown `key=value` options are accepted and ignored.
 // ---------------------------------------------------------------------------
 
@@ -727,6 +746,8 @@ export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
         // (`Show lines of code` is a title of "Show of code" plus `lines`);
         // quote the word (`"lines"`) to keep it in a title.
         if (token.value !== 'twoslash') result[token.value as 'wrap'] = true
+      } else if (!token.quoted && token.value === '[expandable]') {
+        result.expandable = true
       } else if (token.value && !/^[{}]+$/.test(token.value)) {
         words.push(token.value)
       }

@@ -243,6 +243,12 @@ function publicSpecWarning(projectDir: string, bundle: MigrationBundle): Migrati
   }
 }
 
+/** The source's own site description, else the home page's, else none: never a made-up placeholder. */
+export function migratedSiteDescription(bundle: Pick<MigrationBundle, 'site' | 'pages'>): string {
+  const home = bundle.pages.find((page) => page.id === 'introduction') ?? bundle.pages.find((page) => page.id === 'index') ?? bundle.pages[0]
+  return bundle.site?.description ?? home?.description?.trim() ?? ''
+}
+
 /** Import a repository, public docs URL, or explicitly trusted local checkout. */
 export async function migrateDocs(options: MigrateOptions): Promise<MigrateResult> {
   const projectDir = resolve(options.projectDir)
@@ -255,7 +261,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     await scaffold({
       projectDir,
       projectName: options.projectName ?? bundle.site?.name ?? 'My Docs',
-      description: bundle.site?.description ?? `Documentation migrated from ${options.sourceDirectory ? basename(resolve(options.sourceDirectory)) : new URL(options.sourceUrl).hostname}`,
+      description: migratedSiteDescription(bundle),
       brandPreset: 'primary',
       // Source provenance is not the destination repository. Migrated pages
       // live at new paths, so source URLs cannot power edit/issue actions.

@@ -74,6 +74,12 @@ describe('code-fence metadata', () => {
     expect(parseCodeFenceMeta('api-client.ts theme={"system"}')).toEqual({ title: 'api-client.ts' })
   })
 
+  it('reads the bracketed [expandable] flag like the bare one, outside the title', () => {
+    expect(parseCodeFenceMeta('app.ts [expandable]')).toEqual({ title: 'app.ts', expandable: true })
+    expect(parseCodeFenceMeta('[expandable] app.ts')).toEqual({ title: 'app.ts', expandable: true })
+    expect(parseCodeFenceMeta('app.ts "[expandable]"')).toEqual({ title: 'app.ts [expandable]' })
+  })
+
   it('keeps explicit filenames and portable display options', () => {
     expect(parseCodeFenceMeta('filename="client.ts" wrap {2,4-5}')).toEqual({
       title: 'client.ts',
@@ -505,5 +511,30 @@ describe('placeholder tokens', () => {
     const html = codeInnerHtml(block)
     expect(html).toContain('>{{MODEL}}</span>')
     expect(html).toContain('>{{N}}</span>')
+  })
+})
+
+describe('additional grammars', () => {
+  const samples: Record<string, string> = {
+    baml: 'function Extract(input: string) -> Resume {\n  client "openai/gpt-4o"\n  prompt #"\n    {% if input %}Parse {{ input }}{% endif %}\n  "#\n}',
+    jinja: '{% for item in items %}{{ item.name }}{% endfor %}',
+    ini: '[section]\nkey = value',
+    xml: '<root attr="1"><child/></root>',
+    makefile: 'build: deps\n\tgo build ./...',
+    powershell: 'Get-ChildItem -Path $env:HOME | Where-Object { $_.Length -gt 1 }',
+  }
+
+  for (const [language, code] of Object.entries(samples)) {
+    it(`highlights ${language} fences`, async () => {
+      const block = codeBlock(code, language)
+      await transformCodeBlocks([block])
+      expect(codeInnerHtml(block)).toContain('var(--shiki-token-')
+    })
+  }
+
+  it('highlights the jinja embedded in a baml prompt string', async () => {
+    const block = codeBlock(samples.baml, 'baml')
+    await transformCodeBlocks([block])
+    expect(codeInnerHtml(block)).toMatch(/var\(--shiki-token-keyword\)[^>]*>(?:\{%|if)/)
   })
 })

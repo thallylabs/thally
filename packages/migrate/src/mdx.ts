@@ -33,9 +33,22 @@ export interface MarkdownPageIdentity {
   locale?: string
 }
 
-function titleFromId(id: string): string {
+/** Fern's `availability` (beta, alpha, deprecated, ...) as the label Thally shows beside the page; a generally available page has none. */
+export function fernAvailabilityBadge(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const words = value.trim().toLowerCase().replace(/[-_]+/g, ' ')
+  if (!words || ['generally available', 'ga', 'stable'].includes(words)) return undefined
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 40)
+}
+
+/** Mintlify takes the last path segment, with dashes and underscores as spaces and the first letter capitalized; the other platforms capitalize every word. */
+function titleFromId(id: string, sentenceCase = false): string {
   const value = id.split('/').at(-1) ?? id
   if (value === 'introduction') return 'Introduction'
+  if (sentenceCase) {
+    const words = value.split(/[-_]/).filter(Boolean).join(' ')
+    return words.charAt(0).toUpperCase() + words.slice(1)
+  }
   return value
     .split(/[-_]/)
     .filter(Boolean)
@@ -53,7 +66,8 @@ interface DescriptionNode {
 const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
 /** `elements`, when given, leaves out every JSX element and what it holds, and is set once one is met. */
-function plainText(node: DescriptionNode, elements?: { found: boolean }): string {
+function plainText(node: DescriptionNode & { name?: string | null }, elements?: { found: boolean }, skipNames?: ReadonlySet<string>): string {
+  if (skipNames && (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement') && skipNames.has(String(node.name).toLowerCase())) return ''
   if (elements && (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement')) {
     elements.found = true
     return ''
@@ -61,7 +75,7 @@ function plainText(node: DescriptionNode, elements?: { found: boolean }): string
   if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
   if (node.type === 'image') return node.alt ?? ''
   if (node.type === 'break') return ' '
-  return (node.children ?? []).map((child) => plainText(child, elements)).join('')
+  return (node.children ?? []).map((child) => plainText(child, elements, skipNames)).join('')
 }
 
 function headingText(content: string, definitions?: ReadonlyMap<string, string>, elements?: { found: boolean }): string {
@@ -88,10 +102,18 @@ export function mdxTextWithoutInlineElements(content: string, definitions?: Read
   return elements.found && /[\p{L}\p{M}\p{N}]/u.test(text) ? text : undefined
 }
 
+/** Elements that hold form controls, scripts or styles: their text is interface chrome, never description copy. */
+const NON_PROSE_ELEMENTS = new Set(['form', 'label', 'input', 'select', 'textarea', 'button', 'script', 'style', 'noscript', 'template'])
+/** Of those, the ones whose text is dropped even inside a sentence; a `<label>` or `<button>` in prose keeps its text. */
+const NEVER_PROSE_ELEMENTS = new Set(['form', 'input', 'select', 'textarea', 'script', 'style', 'noscript', 'template'])
+
 function firstParagraph(content: string): string {
-  function findParagraph(node: DescriptionNode): string {
-    if (node.type === 'paragraph') {
-      const value = plainText(node).replace(/\s+/g, ' ').trim()
+  function findParagraph(node: DescriptionNode & { name?: string | null }): string {
+    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && NON_PROSE_ELEMENTS.has(String(node.name).toLowerCase())) return ''
+    // A paragraph made only of form controls and whitespace is chrome; the same elements inside a sentence are part of it.
+    if (node.type === 'paragraph' && !(node.children ?? []).every((child) => (child.type === 'text' && !(child.value ?? '').trim())
+      || ((child.type === 'mdxJsxTextElement' || child.type === 'mdxJsxFlowElement') && NON_PROSE_ELEMENTS.has(String((child as { name?: string }).name).toLowerCase())))) {
+      const value = plainText(node, undefined, NEVER_PROSE_ELEMENTS).replace(/\s+/g, ' ').trim()
       if (value) return value.slice(0, 240)
     }
     for (const child of node.children ?? []) {
@@ -120,25 +142,38 @@ interface PositionedNode extends DescriptionNode {
 const linkParser = unified().use(remarkParse)
 
 /**
- * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code, emphasis and
- * everything else stay as written. A link is read the way Markdown reads it, so one inside a code span, an escaped bracket, an image
- * and a bracket pair with no `(url)` are not links. Unchanged when it has none.
+ * `text` with each Markdown link (`[text](url)`, `<https://...>`) replaced by the source of its text, so inline code and
+ * everything else stay as written; with `markers`, bold and italic markers are removed too. A link is read the way Markdown reads it,
+ * so one inside a code span, an escaped bracket, an image and a bracket pair with no `(url)` are not links. Unchanged when it has none.
  */
-function withoutMarkdownLinks(text: string): string {
-  const links: Array<{ start: number; end: number; textStart: number; textEnd: number }> = []
+function withoutMarkdownLinks(text: string, markers = false): string {
+  const removed: Array<[number, number]> = []
+  const math = markers ? [...text.matchAll(/\$[^$\n]+\$/g)].map((match): [number, number] => [match.index, match.index + match[0].length]) : []
+  const isWord = (char: string | undefined): boolean => char !== undefined && /[\p{L}\p{N}_]/u.test(char)
+  // Emphasis is removed only when its markers stand at word boundaries and outside `$...$` math.
+  const removableEmphasis = (start: number, end: number): boolean => !isWord(text[start - 1]) && !isWord(text[end])
+    && !math.some(([from, to]) => start >= from && start < to)
   const collect = (node: PositionedNode): void => {
-    if (node.type === 'link') {
-      const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
-      const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
-      const start = node.position?.start.offset
-      const end = node.position?.end.offset
-      if (start !== undefined && end !== undefined) links.push({ start, end, textStart: first ?? start, textEnd: last ?? start })
-      return
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    const first = (node.children?.[0] as PositionedNode | undefined)?.position?.start.offset
+    const last = (node.children?.at(-1) as PositionedNode | undefined)?.position?.end.offset
+    if (node.type === 'link' && start !== undefined && end !== undefined) {
+      removed.push([start, first ?? start], [last ?? start, end])
+      if (first === undefined) return
+    } else if (markers && (node.type === 'strong' || node.type === 'emphasis') && start !== undefined && end !== undefined
+      && first !== undefined && last !== undefined && removableEmphasis(start, end)) {
+      removed.push([start, first], [last, end])
     }
     for (const child of node.children ?? []) collect(child)
   }
   collect(linkParser.parse(text) as PositionedNode)
-  return links.reduceRight((result, link) => result.slice(0, link.start) + result.slice(link.textStart, link.textEnd) + result.slice(link.end), text)
+  return removed.sort((a, b) => b[0] - a[0]).reduce((result, [from, to]) => result.slice(0, from) + result.slice(to), text)
+}
+
+/** `line` with a Markdown block marker at its start (`#`, `-`, `>`, `1.`, a fence) escaped, so the line stays a paragraph. */
+function escapeLeadingBlockMarker(line: string): string {
+  return line.replace(/^(\s*)(\d{1,9})([.)])(?=\s)/, '$1$2\\$3').replace(/^(\s*)(#{1,6}(?=\s|$)|[-+*](?=\s)|>|`{3}|~{3})/, '$1\\$2')
 }
 
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
@@ -405,6 +440,23 @@ function headingIdMarker(id: string): string {
   return `{/* #${id} */}`
 }
 
+/**
+ * Fern's custom heading anchor, `## Title [#custom-id]`: the suffix leaves the visible text and the id stays on the heading,
+ * in the marker form the renderer reads. Only a trailing `[#id]` on a heading line counts, and the id is a plain anchor name.
+ */
+export function normalizeFernHeadingIds(raw: string): string {
+  const { front, body } = splitFrontmatterBlock(raw)
+  return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+    if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
+    const trimmed = line.trimEnd()
+    const marker = trimmed.endsWith(']') ? trimmed.lastIndexOf('[#') : -1
+    if (marker <= 0) return line
+    const id = trimmed.slice(marker + 2, -1)
+    const heading = trimmed.slice(0, marker).trimEnd()
+    return /^[\w.:-]+$/.test(id) && /[^\s#]/.test(heading.replace(/^[ \t]{0,3}#{1,6}/, '')) ? `${heading} ${headingIdMarker(id)}` : line
+  }).join('\n'))
+}
+
 /** Characters Mintlify keeps in an id besides letters, marks and digits; the ones around which it also places a dash. */
 const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@%=<>|\u2019\u201c\u201d\u2014\u2013\u2192\u2026]/u
 
@@ -578,6 +630,11 @@ function pageIdClaims(body: string): { free: (id: string, line: number) => boole
   }
 }
 
+/** The id Mintlify gives a heading by the plain rule: lowercase, each run of ASCII characters that are not letters or digits one dash, nothing trimmed. */
+function mintlifyTrailingDashId(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g, '-')
+}
+
 /**
  * Give each Mintlify heading the id Mintlify serves, so in-page and cross-page
  * `#anchor` links from the source still land. Only headings whose id differs
@@ -591,6 +648,7 @@ function pageIdClaims(body: string): { free: (id: string, line: number) => boole
 export function markMintlifyHeadings(body: string): string {
   let fence: string | undefined
   let claims: ReturnType<typeof pageIdClaims> | undefined
+  const aliases = new Map<string, number>()
   return body.split('\n').map((line, index) => {
     const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
     if (marker) {
@@ -613,7 +671,20 @@ export function markMintlifyHeadings(body: string): string {
       const visible = mdxTextWithoutInlineElements(source)
       if (visible !== undefined && id !== thallyHeadingSlug(visible)) marked = (claims ??= pageIdClaims(body)).free(id, index + 1)
     }
-    return `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
+    // Mintlify keeps the dash a closing `?` makes at the end of an id (`what-is-mfa-`), where Thally's slug has none; the ids read from
+    // other sites that end in `)` or `.` have no such dash, so only a heading that ends in `?` gets the alias.
+    // The heading keeps its own id; an invisible anchor answers the one Mintlify serves, so deep links from outside still land.
+    const served = `${heading[1]}${source}${id && marked ? ` ${headingIdMarker(id)}` : ''}`
+    const own = id && marked ? id : thallyHeadingSlug(text)
+    const trailing = mintlifyTrailingDashId(text)
+    if (!own || !text.trimEnd().endsWith('?') || trailing !== `${own}-`) return served
+    // Mintlify numbers an id the page has already used, so a second `Why?` answers to `why--2`.
+    const occurrence = (aliases.get(trailing) ?? 0) + 1
+    aliases.set(trailing, occurrence)
+    const alias = occurrence === 1 ? trailing : `${trailing}-${occurrence}`
+    // One id on two elements is invalid, so the anchor is left out when something else on the page could hold its id.
+    // The anchor takes the heading's indent, which keeps both in the same list item.
+    return (claims ??= pageIdClaims(body)).free(alias, index + 1) ? `${line.match(/^ */)![0]}<a id="${alias}" />\n\n${served}` : served
   }).join('\n')
 }
 
@@ -982,7 +1053,60 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
       edits.push({ start: at, end: at + match[0].length, value: match[1] === 'children' || !isJsx ? bound : `{${JSON.stringify(bound)}}` })
     }
   }
-  return applyEdits(body, edits)
+  return foldConstantTemplates(applyEdits(body, edits))
+}
+
+/** The string a template literal comes to when every `${}` in it is a string literal, or undefined when any is not. */
+function constantTemplate(node: EstreeNode | undefined): string | undefined {
+  if (node?.type !== 'TemplateLiteral') return undefined
+  const { quasis, expressions } = node as unknown as { quasis: Array<{ value: { cooked: string | null } }>; expressions: Array<EstreeNode> }
+  let text = ''
+  for (const [index, quasi] of quasis.entries()) {
+    if (quasi.value.cooked === null) return undefined
+    text += quasi.value.cooked
+    const expression = expressions[index]
+    if (expression === undefined) continue
+    if (expression.type !== 'Literal' || typeof expression.value !== 'string') return undefined
+    text += expression.value
+  }
+  return text
+}
+
+/**
+ * Write an attribute given as a template literal of string literals (`src={`/a/${"b"}.svg`}`, which inlining a component leaves
+ * behind) as the plain string it is: `src="/a/b.svg"`. A template that reads a variable stays as it is.
+ */
+export function foldConstantTemplates(body: string): string {
+  if (!body.includes('`')) return body
+  let tree: MdxOffsetNode
+  try { tree = descriptionParser.parse(body) as MdxOffsetNode } catch { return body }
+  const edits: Array<SourceEdit> = []
+  const attribute = (name: string, text: string, start: number, end: number): void => {
+    edits.push({ start, end, value: /^[^"&<>{}\\\r\n]*$/.test(text) ? `${name}="${text}"` : `${name}={${JSON.stringify(text)}}` })
+  }
+  const walkEstree = (node: EstreeNode): void => {
+    const attr = node as unknown as { name?: { type: string; name?: string }; value?: EstreeNode }
+    if (node.type === 'JSXAttribute' && attr.name?.type === 'JSXIdentifier' && attr.value?.type === 'JSXExpressionContainer') {
+      const text = constantTemplate(attr.value.expression)
+      if (text !== undefined) attribute(attr.name.name ?? '', text, node.start, node.end)
+    }
+    for (const child of estreeChildren(node)) walkEstree(child)
+  }
+  const walk = (node: MdxOffsetNode): void => {
+    const attributes = (node as { attributes?: Array<{ type: string; name?: string; value?: { data?: { estree?: acorn.Program | null } } | string | null; position?: MdxOffsetNode['position'] }> }).attributes
+    for (const item of attributes ?? []) {
+      const estree = typeof item.value === 'object' && item.value ? item.value.data?.estree : undefined
+      const expression = (estree?.body[0] as unknown as EstreeNode | undefined)?.expression
+      const text = item.type === 'mdxJsxAttribute' && item.name ? constantTemplate(expression) : undefined
+      const start = item.position?.start.offset
+      const end = item.position?.end.offset
+      if (text !== undefined && start !== undefined && end !== undefined) attribute(item.name!, text, start, end)
+    }
+    if (node.data?.estree) walkEstree(node.data.estree as unknown as EstreeNode)
+    for (const child of node.children ?? []) walk(child)
+  }
+  walk(tree)
+  return edits.length > 0 ? applyEdits(body, edits) : body
 }
 
 /** Use a page's leading H1 as its title without rendering it twice. */
@@ -1517,7 +1641,7 @@ export function replaceLinkWithAnchor(raw: string): string {
 export function replaceUnknownComponents(
   raw: string,
   warn: (name: string) => void,
-  options: { onlyRenameLinkTag?: boolean } = {},
+  options: { onlyRenameLinkTag?: boolean; fernLinks?: boolean } = {},
 ): string {
   const { front, body } = splitFrontmatterBlock(raw)
 
@@ -1551,6 +1675,16 @@ export function replaceUnknownComponents(
       return renameTagOccurrences(body.slice(start, openEnd), node.name!, 'a')
         + renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)
         + renameTagOccurrences(body.slice(closeStart, end), node.name!, 'a')
+    }
+
+    // Fern's `<Download src>` and `<Button href>` are links: a plain anchor keeps the target and the label.
+    if (options.fernLinks && isJsx && (node.name === 'Download' || node.name === 'Button') && !declared.has(node.name)) {
+      const openEnd = isSelfClosingJsx(text) || !node.children?.length ? end : node.children[0].position?.start.offset ?? start
+      const rest = openEnd === end ? '' : renderChildrenSpan(node.children!, openEnd, node.children!.at(-1)!.position?.end.offset ?? end, body, renderNode)
+        + renameTagOccurrences(body.slice(node.children!.at(-1)!.position?.end.offset ?? end, end), node.name, 'a')
+      const open = body.slice(start, openEnd).replace(/\s(?:intent|variant|rounded|size|icon|rightIcon|minimal|mono)=(?:"[^"]*"|'[^']*'|\{[^}]*\})/g, '')
+      const anchor = node.name === 'Download' ? open.replace(/\ssrc=/, ' download href=') : open
+      return renameTagOccurrences(anchor, node.name, 'a') + rest
     }
 
     if (!options.onlyRenameLinkTag && isJsx && tagRoot && /^[A-Z]/.test(tagRoot)
@@ -2919,6 +3053,50 @@ export function removeUndefinedExpressions(body: string, warn?: (message: string
     .reduce((text, edit) => text.slice(0, edit.start) + text.slice(edit.end), body)
 }
 
+/** Callout-style components that render a block; one that starts straight after a text line is read as part of that line's paragraph. */
+const BLOCK_COMPONENT_NAMES = new Set(['Note', 'Warning', 'Info', 'Tip', 'Check', 'Danger', 'Error', 'Callout', 'Steps', 'Tabs', 'CodeGroup', 'Accordion', 'AccordionGroup', 'Expandable', 'Frame', 'CardGroup', 'Columns'])
+
+/**
+ * Put a blank line before a block component that starts on the line directly after text. Without it MDX folds the component into that
+ * paragraph, the runtime serves a `<div>` inside a `<p>`, and the page fails to hydrate. Read from the syntax tree, so code fences,
+ * comments and components nested in a line of prose are never touched.
+ */
+export function separateBlockComponents(body: string): string {
+  if (!/\n[ \t>]*<[A-Z]/.test(body)) return body
+  interface FlowNode {
+    type: string
+    name?: string | null
+    value?: string
+    children?: Array<FlowNode>
+    position?: { start: { offset?: number } }
+  }
+  let tree: FlowNode
+  try {
+    tree = descriptionParser.parse(body) as FlowNode
+  } catch {
+    return body
+  }
+  const inserts: Array<[number, string]> = []
+  const visit = (node: FlowNode): void => {
+    const children = node.children ?? []
+    if (node.type === 'paragraph') {
+      children.forEach((child, index) => {
+        const start = child.position?.start.offset
+        const before = children[index - 1]
+        if (child.type !== 'mdxJsxTextElement' || !BLOCK_COMPONENT_NAMES.has(child.name ?? '') || start === undefined
+          || before?.type !== 'text' || !/\S[ \t]*\n[ \t]*$/.test(before.value ?? '')) return
+        const lineStart = body.lastIndexOf('\n', start - 1) + 1
+        // Inside a blockquote the separating line carries the quote marker, so the component stays in the quote.
+        const quote = /^[ \t]*(?:>[ \t]?)+/.exec(body.slice(lineStart, start))?.[0].trimEnd() ?? ''
+        inserts.push([lineStart, `${quote}\n`])
+      })
+    }
+    children.forEach(visit)
+  }
+  visit(tree)
+  return inserts.sort((a, b) => b[0] - a[0]).reduce((text, [offset, blank]) => `${text.slice(0, offset)}${blank}${text.slice(offset)}`, body)
+}
+
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
 export function normalizeFlowParagraphContainers(body: string): string {
   if (!body.includes('<p')) return body
@@ -2981,6 +3159,8 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     undefined,
     { headingMarkers: runMintlify },
   )
+  // After the `{#id}` pass above, which would turn the marker this writes into an anchor element.
+  if (runFern) rewritten = normalizeFernHeadingIds(rewritten)
   if (runDocusaurus) rewritten = normalizeDocusaurusAdmonitions(rewritten)
   if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {
@@ -3096,7 +3276,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       return normalizeMdx(body, platform, false)
     }
   }
-  return normalizeFlowParagraphContainers(normalized)
+  return normalizeFlowParagraphContainers(separateBlockComponents(normalized))
 }
 
 /**
@@ -3153,6 +3333,10 @@ export function parseMarkdownPage(input: {
   warn?: (message: string) => void
   /** The icon library the migrated site uses; a page icon naming another one is reported, and none is when omitted. */
   siteIconLibrary?: string
+  /** The redirects the source's own config lists: a `slug` one of them already answers is not reported as lost. */
+  redirects?: ReadonlyArray<{ source: string; destination: string }>
+  /** The navigation label that titles a page with no title or heading of its own, before the file name does. */
+  fallbackTitle?: string
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
   if (input.platform === 'mintlify') {
@@ -3162,7 +3346,12 @@ export function parseMarkdownPage(input: {
       // Access settings are enforced by the repository classifier, never lost here.
       'groups', 'public', ...PAGE_META_FIELDS.map(([field]) => field),
     ])
-    const dropped = Object.keys(parsed.data).filter((key) => !supported.has(key))
+    const route = (value: string): string => value.trim().replace(/^\/+|\/+$/g, '')
+    const slug = typeof parsed.data.slug === 'string' ? route(parsed.data.slug) : undefined
+    // The redirect the source already has sends the slug's address to this page, so nothing is lost.
+    const slugRedirected = slug !== undefined && (input.redirects ?? []).some((redirect) => route(redirect.source) === slug
+      && [input.id, input.navigationId ?? input.id].some((id) => route(redirect.destination) === id || (id === 'introduction' && route(redirect.destination) === '')))
+    const dropped = Object.keys(parsed.data).filter((key) => !supported.has(key) && !(key === 'slug' && slugRedirected))
     if (dropped.length) input.warn?.(`Unsupported Mintlify frontmatter fields were omitted: ${dropped.join(', ')}. Review their behavior before publishing.`)
 
   }
@@ -3182,7 +3371,7 @@ export function parseMarkdownPage(input: {
   // A page that names an operation keeps taking its heading as the title.
   const heading = input.platform === 'mintlify' && !namesOperation ? undefined : leadingPageHeading(body)
   const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
-  const title = authoredTitle ?? titleFromId(identity.navigationId)
+  const title = authoredTitle ?? (input.fallbackTitle?.trim() || titleFromId(identity.navigationId, input.platform === 'mintlify'))
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
@@ -3211,7 +3400,7 @@ export function parseMarkdownPage(input: {
     ? parsed.data.tag.trim()
     : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
       ? parsed.data.badge.trim()
-      : undefined
+      : input.platform === 'fern' ? fernAvailabilityBadge(parsed.data.availability) : undefined
   const sourceMode = typeof parsed.data.mode === 'string' ? parsed.data.mode : undefined
   // Mintlify's frame mode and Thally's wide mode both retain the sidebar while
   // removing the on-page table of contents. Other shared modes map directly.
@@ -3227,8 +3416,18 @@ export function parseMarkdownPage(input: {
   }
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
   const authoredDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim() ? parsed.data.description.trim() : undefined
+  // Fern shows `subtitle` as the lead line under the title. With no description of its own the page is described by it, which Thally
+  // shows under the title; otherwise the description stays as it is and the subtitle opens the body.
+  const writtenSubtitle = input.platform === 'fern' && typeof parsed.data.subtitle === 'string' ? parsed.data.subtitle.trim() : ''
+  const subtitleWithoutLinks = writtenSubtitle ? withoutMarkdownLinks(writtenSubtitle) : undefined
+  const subtitleIsDescription = subtitleWithoutLinks !== undefined && authoredDescription === undefined
+  // As a description it is plain text, so emphasis markers go too; as the first line of the body they render as written.
+  const subtitle = subtitleWithoutLinks === undefined ? undefined : subtitleIsDescription ? withoutMarkdownLinks(writtenSubtitle, true) : subtitleWithoutLinks
+  if (subtitleWithoutLinks !== undefined && subtitleWithoutLinks !== writtenSubtitle) {
+    input.warn?.(`Page "${identity.id}": its subtitle had links, which Thally shows as plain text; only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.`)
+  }
   // An API reference page is described by its operation, not by its prose.
-  const description = authoredDescription ?? (namesOperation ? '' : firstParagraph(body))
+  const description = authoredDescription ?? (subtitleIsDescription && subtitle !== undefined ? subtitle : namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
@@ -3240,7 +3439,7 @@ export function parseMarkdownPage(input: {
     iconType,
     description,
     // A description taken from the body is the paragraph the body already shows, so it must not also appear under the title.
-    ...(input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== '')
+    ...(!subtitleIsDescription && (input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== ''))
       ? { descriptionPlacement: 'body' as const }
       : {}),
     badge,
@@ -3253,16 +3452,23 @@ export function parseMarkdownPage(input: {
     ...(Object.keys(meta).length > 0 ? { meta } : {}),
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),
-    body,
+    body: subtitle !== undefined && !subtitleIsDescription
+      ? `${escapeLeadingBlockMarker(subtitle.replace(/([\\{}<>])/g, '\\$1'))}\n\n${body}`.trim()
+      : body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
   // Thally shows an authored description as plain text (with inline code), so the raw `[text](url)` of a link would be shown as typed.
   const writtenDescription = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
-  const plainDescription = withoutMarkdownLinks(writtenDescription)
-  if (plainDescription !== writtenDescription) {
-    page.description = plainDescription
-    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; the link text was kept.`)
+  const plainDescription = withoutMarkdownLinks(writtenDescription, true)
+  if (plainDescription !== writtenDescription) page.description = plainDescription
+  if (withoutMarkdownLinks(writtenDescription) !== writtenDescription) {
+    // A page whose description is all it has would lose its links: the description is printed as plain text.
+    const emptyBody = page.body.trim() === '' && !page.openapi && !page.api
+    if (emptyBody) page.body = writtenDescription.replace(/([\\{}<>])/g, '\\$1')
+    input.warn?.(`Page "${identity.id}": its description had links, which Thally shows as plain text; ${emptyBody
+      ? 'the link text was kept in the description and the original description, with its links, was added to the top of the empty page body.'
+      : 'only the link text was kept and the link addresses were dropped; add the links to the page body if you need them.'}`)
   }
   resolvePageDisplayHeading(page, input.platform)
   return page

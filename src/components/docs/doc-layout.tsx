@@ -90,7 +90,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
   // custom mode: render children directly, no shell chrome
   if (mode === 'custom') {
     return (
-      <div lang={locale} dir={localeDirection(locale)}>
+      <div lang={locale} dir={localeDirection(locale)} data-doc-mode="custom">
         {children}
       </div>
     )

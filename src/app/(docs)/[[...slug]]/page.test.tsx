@@ -45,9 +45,11 @@ vi.mock('@/components/docs/doc-header', () => ({ DocHeader: ({ eyebrow, showDesc
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 vi.mock('@/components/api/operation-panel', async () => {
   const { Markdown } = await import('@/components/mdx/markdown')
-  return { OperationPanel: ({ children, operation, showDescription = true, playground }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean; playground?: string }) => (
-    <section data-playground={playground}>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
-  ) }
+  const { unpackValue } = await import('@/lib/openapi/pack-operation')
+  return { OperationPanel: ({ children, operation: wire, showDescription = true, playground }: { children: React.ReactNode; operation: never; showDescription?: boolean; playground?: string }) => {
+    const operation = unpackValue<{ description?: string }>(wire)
+    return <section data-playground={playground}>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
+  } }
 })
 vi.mock('@/components/api/manual-api-endpoint', () => ({ ManualApiEndpoint: () => null }))
 vi.mock('@/components/seo/json-ld-script', () => ({ JsonLdScript: () => null }))
