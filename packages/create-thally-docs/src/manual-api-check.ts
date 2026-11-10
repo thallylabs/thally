@@ -9,6 +9,7 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkMdx from 'remark-mdx'
+import remarkGfm from 'remark-gfm'
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 
@@ -77,7 +78,8 @@ function attributeValue(attribute: MdxAttribute | undefined): string | boolean |
 export function paramFieldPathNames(mdx: string): Array<string> {
   let tree: MdxNode
   try {
-    tree = unified().use(remarkParse).use(remarkMdx).parse(mdx) as unknown as MdxNode
+    // The site parses pages with GFM too (`remarkPlugins` in src/mdx/remark.ts).
+    tree = unified().use(remarkParse).use(remarkMdx).use(remarkGfm).parse(mdx) as unknown as MdxNode
   } catch {
     return []
   }

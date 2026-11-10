@@ -12,6 +12,7 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkMdx from 'remark-mdx'
+import { remarkPlugins } from '@/mdx/remark'
 import type { NormalizedOperation, OperationPrefill } from '@/lib/openapi/types'
 
 export const MANUAL_SPEC_ID = 'manual'
@@ -170,10 +171,10 @@ function attributeValue(attribute: MdxAttribute | undefined): string | boolean |
   }
 }
 
-/** The page's MDX tree; undefined when the page does not parse. */
+/** The page's MDX tree, read with the renderer's Markdown extensions; undefined when the page does not parse. */
 function parseMdx(mdx: string): MdxNode | undefined {
   try {
-    return unified().use(remarkParse).use(remarkMdx).parse(mdx) as unknown as MdxNode
+    return unified().use(remarkParse).use(remarkMdx).use(remarkPlugins).parse(mdx) as unknown as MdxNode
   } catch {
     return undefined
   }
@@ -183,9 +184,16 @@ function isJsxElement(node: MdxNode): boolean {
   return node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement'
 }
 
-/** Whether the tree holds a JSX element with one of `names`. Text in a code block or a comment is not an element. */
-function hasElement(node: MdxNode, ...names: Array<string>): boolean {
-  return (isJsxElement(node) && names.includes(node.name ?? '')) || (node.children ?? []).some((child) => hasElement(child, ...names))
+/**
+ * Whether the tree holds a JSX element with one of `names`, in the Markdown or inside an expression (`{<Panel>x</Panel>}`, an
+ * attribute value), read from the parsed program and never run. Text in a code block, a string or a comment is not an element.
+ */
+function hasElement(node: unknown, ...names: Array<string>): boolean {
+  if (!node || typeof node !== 'object') return false
+  const value = node as MdxNode & { openingElement?: { name?: { type?: string; name?: string } } }
+  if (isJsxElement(value) && names.includes(value.name ?? '')) return true
+  if (value.type === 'JSXElement' && value.openingElement?.name?.type === 'JSXIdentifier' && names.includes(value.openingElement.name.name ?? '')) return true
+  return Object.values(node).some((child) => hasElement(child, ...names))
 }
 
 /** Collect `<ParamField>` elements from MDX source; unparsable MDX yields none. */

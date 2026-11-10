@@ -210,6 +210,8 @@ describe('thally check manual api parity', () => {
       'text <ParamField path="inline" /> text',
       '<ParamField path="a">\n  <ParamField path="nested" />\n</ParamField>',
       '<ParamField path="broken"', '{unclosed',
+      // GFM reads the bare URL, braces included, as a link, so the page parses as it does on the site.
+      'Send it to https://bundler.particle.network/{chainId?} with:\n\n<ParamField path="chainId" />',
     ]) {
       expect(paramFieldPathNames(mdx), mdx).toEqual(extractParamFields(mdx).filter((field) => field.location === 'path').map((field) => field.name))
     }

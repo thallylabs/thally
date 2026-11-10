@@ -172,6 +172,19 @@ describe('buildManualOperation', () => {
     expect(build({ mdx: 'See <Panel>x</Panel> here.' })).not.toHaveProperty('manualSamples')
   })
 
+  it('finds a RequestExample or Panel written inside an expression, without running it', () => {
+    expect(build({ mdx: '{<Panel>Custom request</Panel>}' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: 'Text {<><RequestExample>x</RequestExample></>} more.' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: '<Card extra={<Panel>x</Panel>} />' })).not.toHaveProperty('manualSamples')
+    expect(build({ mdx: 'Text {"<Panel>"} more.' })).toMatchObject({ manualSamples: true })
+  })
+
+  it('parses the page as the renderer does, GFM included', () => {
+    const page = 'Send it to https://bundler.particle.network/{chainId?} with:\n\n<ParamField path="chainId" type="string" />\n'
+    expect(build({ mdx: page })).toMatchObject({ manualSamples: true })
+    expect(extractParamFields(page).map((field) => field.name)).toEqual(['chainId'])
+  })
+
   it('does not ask for generated samples on a page it cannot parse', () => {
     expect(build({ mdx: '<RequestExample>\nx\n\n<ParamField query="a"' })).not.toHaveProperty('manualSamples')
   })
