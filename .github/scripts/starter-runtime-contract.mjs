@@ -34,10 +34,9 @@ const STARTER_LOCK_PATH = "package-lock.json";
 const SHA_1 = /^[0-9a-f]{40}$/;
 const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 
-// This is the authoritative runtime ownership boundary. The starter manifest
-// carries a generated copy for update tooling, but may not broaden the set of
-// files that synchronization can overwrite.
-export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
+// Freeze the exact pre-grammar inventory for retained snapshots. Deriving it by
+// removing rules from the current inventory would accidentally admit future drift.
+const PRE_GRAMMAR_FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "BUILD-WARNINGS.md",
   "src/app/**",
   "src/cloud/**",
@@ -69,6 +68,15 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "scripts/check-cloudflare-worker-size.mts",
   "scripts/smoke-cloudflare.mts",
   "scripts/mint-reader-token.ts",
+]);
+
+// This is the authoritative runtime ownership boundary. The starter manifest
+// carries a generated copy for update tooling, but may not broaden the set of
+// files that synchronization can overwrite. Only grammar assets are newly owned:
+// customer-authored MDX components in the surrounding directory remain untouched.
+export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
+  ...PRE_GRAMMAR_FRAMEWORK_SYNC_ELIGIBLE,
+  "src/mdx/grammars/**",
 ]);
 
 // The standalone snapshot contains executable runtime only. Keep the broad
@@ -139,7 +147,21 @@ function parseRule(rule) {
   return { kind: "file", projectPath: rule };
 }
 
-function readManifest(starterDirectory, { allowOwnershipDrift = false } = {}) {
+/** Historical ownership is valid only when neither the checkout nor its immutable tree contains grammar assets. */
+function isPreGrammarRuntime(runtimeDirectory) {
+  if (lstatSync(inside(runtimeDirectory, "src/mdx/grammars"), { throwIfNoEntry: false })) return false;
+  try {
+    // A removed working directory must not make a newer pinned runtime look like
+    // a historical one. This also catches a tracked file or symlink at the path.
+    return execFileSync("git", ["-C", runtimeDirectory, "ls-tree", "-r", "--name-only", "HEAD", "--", "src/mdx/grammars"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }).trim() === "";
+  } catch {
+    return false;
+  }
+}
+
+function readManifest(starterDirectory, { allowOwnershipDrift = false, runtimeDirectory } = {}) {
   const manifestPath = inside(starterDirectory, MANIFEST_PATH);
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   invariant(
@@ -163,9 +185,15 @@ function readManifest(starterDirectory, { allowOwnershipDrift = false } = {}) {
     inside(starterDirectory, rule.projectPath);
   }
   if (!allowOwnershipDrift) {
+    const inventory = JSON.stringify(manifest.ownership.frameworkSyncEligible);
+    // Old releases could not own grammar assets that their pinned runtime did
+    // not yet contain. Admit exactly that historical inventory, never arbitrary
+    // drift; lstat also refuses to treat a dangling grammar symlink as absent.
+    const isPreGrammarSnapshot = runtimeDirectory &&
+      inventory === JSON.stringify(PRE_GRAMMAR_FRAMEWORK_SYNC_ELIGIBLE) &&
+      isPreGrammarRuntime(runtimeDirectory);
     invariant(
-      JSON.stringify(manifest.ownership.frameworkSyncEligible) ===
-        JSON.stringify(FRAMEWORK_SYNC_ELIGIBLE),
+      inventory === JSON.stringify(FRAMEWORK_SYNC_ELIGIBLE) || isPreGrammarSnapshot,
       "starter-release.json runtime ownership does not match the canonical contract.",
     );
   }
@@ -340,7 +368,7 @@ export function checkStarterRuntimeContract({
 }) {
   const starterRoot = resolve(starterDirectory);
   const runtimeRoot = resolve(runtimeDirectory);
-  const { manifest } = readManifest(starterRoot);
+  const { manifest } = readManifest(starterRoot, { runtimeDirectory: runtimeRoot });
   const identity = runtimeIdentity(runtimeRoot);
   const expectedCore = runtimeCoreIdentity(runtimeRoot);
   const { manifest: starterPackage } = readStarterPackage(starterRoot);
