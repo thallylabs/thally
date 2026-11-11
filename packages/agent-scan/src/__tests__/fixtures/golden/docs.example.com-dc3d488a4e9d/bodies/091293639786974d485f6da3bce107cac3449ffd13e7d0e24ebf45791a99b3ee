@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head>
+<title>Page 00 | Example Docs</title>
+<meta name="description" content="Page 00 description">
+<link rel="canonical" href="https://docs.example.com/guide/page-00">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Page 00","description":"Page 00 description","dateModified":"2026-01-01","publisher":{"@type":"Organization","name":"Example"}}</script>
+
+</head><body><nav></nav><main>
+<h1>Page 00</h1>
+<p>This page explains the feature in enough detail for a reader to use it. This page explains the feature in enough detail for a reader to use it. This page explains the feature in enough detail for a reader to use it. This page explains the feature in enough detail for a reader to use it. This page explains the feature in enough detail for a reader to use it. </p>
+<h2>Usage</h2><p>Use it.</p>
+<a href="https://github.com/example/docs/edit/main/page.md">Edit this page</a>
+</main><footer>© 2026 <a href="https://example.com">Example Inc.</a></footer></body></html>
