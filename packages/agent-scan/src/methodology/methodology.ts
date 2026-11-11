@@ -54,12 +54,13 @@ export interface Methodology {
     llmsFullPrefixBytes: number
     sitemapMaxIndexChildren: number
     sitemapMaxRobotsLines: number
+    sitemapMaxRequests: number
     sitemapPaths: string[]
     jsonLdPageTypes: string[]
     serverRenderedMinChars: number
     maxStatusRedirects: number
   }
-  sampling: { pages: number; order: string; method: string; robotsFiltered: boolean; fallback: string }
+  sampling: { pages: number; order: string; method: string; robotsFiltered: boolean; fallback: string; metaRefresh: string }
   grades: Array<{ grade: Grade; min: number }>
   categories: MethodologyCategory[]
   checks: MethodologyCheck[]

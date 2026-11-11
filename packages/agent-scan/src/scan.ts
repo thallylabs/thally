@@ -64,7 +64,7 @@ export async function scanSite(url: string, options: ScanOptions = {}): Promise<
       status: gathered.status,
       reason: gathered.reason,
       scannedAt,
-      sample: { source: 'root_only', sitemapUrlCount: 0, pages: [], droppedForBudget: [] },
+      sample: { source: 'root_only', sitemapUrlCount: 0, pages: [], droppedForBudget: [], metaRefreshes: [] },
       requests,
       checks: unscannedChecks(gathered.reason === 'robots_disallowed' ? 'robots_disallowed' : 'site_not_scanned'),
       categories: methodology.categories.map((category) => ({ id: category.id, weight: category.weight, applicable: false, score: null })),

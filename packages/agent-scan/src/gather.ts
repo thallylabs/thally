@@ -10,15 +10,15 @@ import { gunzipSync } from 'node:zlib'
 
 import { isJsonType, isPlausibleMcpEndpoint, isValidLlmsFull, isValidLlmsTxt, isValidManifest, mcpUrlIn, parseJsonObject } from './checks/discovery.js'
 import type { AlternateAttempt, PageRecord, ProbeSet, SiteFacts } from './facts.js'
-import { parsePage, type PageFacts } from './html.js'
+import { metaRefreshTarget, parsePage, type PageFacts } from './html.js'
 import { methodology } from './methodology/methodology.js'
 import { checkFetchableUrl } from './net/guard.js'
-import type { Fetcher, RequestCap } from './net/fetcher.js'
+import type { Fetcher, GetOptions, RequestCap } from './net/fetcher.js'
 import { bfsCandidates, eligibleUrls, pickSample } from './sample.js'
 import { parseSitemap } from './sitemap.js'
 import { jsonTitle, markdownTitle } from './text.js'
 import type { ErrorCode, FetchOutcome, RobotsRules } from './types.js'
-import { compareCodeUnits, deriveDocsRoot, isSameSite, isUnderRoot, normalizeUrl, robotsPath, rootPathOf } from './url.js'
+import { compareCodeUnits, deriveDocsRoot, isSameSite, isUnderRoot, normalizeUrl, robotsPath, rootPathOf, sameUrl } from './url.js'
 
 /** Sample bookkeeping reported in the result. */
 export interface SampleInfo {
@@ -26,6 +26,7 @@ export interface SampleInfo {
   sitemapUrlCount: number
   pages: string[]
   droppedForBudget: string[]
+  metaRefreshes: Array<{ from: string; to: string }>
 }
 
 /** A gathered site, or the reason it could not be scanned. */
@@ -142,6 +143,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   if (!isHtmlType(root.contentType)) return failure('not_html')
   if (root.truncated) return failure('body_too_large')
 
+  // The docs root comes from the HTTP final URL; a meta refresh on it is
+  // followed for evaluation but never moves the root.
   const docsRoot = deriveDocsRoot(normalized, root.finalUrl)
   const origin = new URL(docsRoot).origin
   const robotsState = await fetcher.robotsFor(origin)
@@ -150,9 +153,31 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const robots: RobotsRules = robotsState.rules
   if (!robots.isAllowed(methodology.robotsProductToken, robotsPath(docsRoot))) return failure('robots_disallowed', docsRoot)
 
-  const rootFacts = parsePage(root.text ?? '', root.finalUrl)
-  const rootRecord: PageRecord = { url: root.finalUrl, isRoot: true, outcome: root, html: rootFacts }
-  const rootLinkHeaderMcp = linkHeaders(root).some((entry) => relHas(entry.params, 'mcp'))
+  // An immediate, same-site meta refresh is a redirect: follow it within the
+  // redirect limit (each hop is a request) and evaluate the target page.
+  const metaRefreshes: SampleInfo['metaRefreshes'] = []
+  const followMetaRefresh = async (first: FetchOutcome, opts: GetOptions): Promise<FetchOutcome> => {
+    let current = first
+    while (current.error === null && current.status === 200 && isHtmlType(current.contentType) && !current.truncated) {
+      const target = metaRefreshTarget(current.text ?? '', current.finalUrl)
+      if (!target || sameUrl(target, current.finalUrl) || !isSameSite(current.finalUrl, target)) break
+      if (current.redirects + 1 > methodology.limits.maxRedirects) break
+      const next = await fetcher.get(target, opts)
+      if (isBudgetSkip(next)) break
+      metaRefreshes.push({ from: current.finalUrl, to: next.finalUrl })
+      current = { ...next, requestedUrl: first.requestedUrl, redirects: current.redirects + 1 + next.redirects }
+    }
+    return current
+  }
+  const refreshed = await followMetaRefresh(root, { purpose: 'html' })
+  // A refresh target that is not a usable HTML page leaves the stub as the root page.
+  const rootOutcome = refreshed.error === null && refreshed.status === 200 && isHtmlType(refreshed.contentType) && !refreshed.truncated
+    ? refreshed
+    : root
+  const rootTarget = rootOutcome === root ? null : rootOutcome.finalUrl
+  const rootFacts = parsePage(rootOutcome.text ?? '', rootOutcome.finalUrl)
+  const rootRecord: PageRecord = { url: root.finalUrl, isRoot: true, outcome: rootOutcome, html: rootFacts }
+  const rootLinkHeaderMcp = linkHeaders(rootOutcome).some((entry) => relHas(entry.params, 'mcp'))
   const rootPath = rootPathOf(docsRoot)
 
   // 3. llms.txt, root-relative first.
@@ -192,9 +217,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const maxChildren = methodology.probes.sitemapMaxIndexChildren
   const maxSitemapFetches = 1 + maxChildren
   // Every sitemap request (attempts, retries and redirect hops) also counts
-  // against a hard cap one above the slot allocation, so one redirect to an
-  // already-fetched sitemap stays affordable.
-  const sitemapRequests: RequestCap = { max: maxSitemapFetches + 1, spent: 0 }
+  // against a hard cap, so failed candidates and redirects stay bounded.
+  const sitemapRequests: RequestCap = { max: methodology.probes.sitemapMaxRequests, spent: 0 }
   const fromRobots = robots.sitemaps.filter((url) => isSameSite(docsRoot, url))
   const isUnderDocsRoot = (url: string) => {
     const normalized = normalizeUrl(url)
@@ -227,11 +251,14 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     fetchedSitemaps.add(sitemapKey(url))
     if (fetchedSitemaps.has(finalKey) && finalKey !== sitemapKey(url)) return null
     fetchedSitemaps.add(finalKey)
-    sitemapSlots++
+    // Only a fetched sitemap document uses a slot; a 404 or other failure does not.
     const text = sitemapText(outcome)
     if (text === null) return null
     const parsed = parseSitemap(text)
-    if (parsed.kind) sitemapFacts.parsed.push(outcome.requestedUrl)
+    if (parsed.kind) {
+      sitemapSlots++
+      sitemapFacts.parsed.push(outcome.requestedUrl)
+    }
     return parsed
   }
   const underRootCount = (locs: string[]) => locs.filter((loc) => {
@@ -266,7 +293,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     if (underRootCount(pageLocs) > 0) break
   }
   sitemapFacts.locsUnderRoot = underRootCount(pageLocs)
-  const eligible = eligibleUrls(pageLocs, docsRoot, robots)
+  // The root's meta-refresh target is already evaluated as the root page.
+  const eligible = eligibleUrls(pageLocs, docsRoot, robots).filter((url) => rootTarget === null || !sameUrl(url, rootTarget))
 
   // 6. Agent and MCP discovery, within one allocation of probe URLs (the
   // number of well-known paths). An MCP URL from llms.txt is verified first
@@ -313,7 +341,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     source = 'sitemap'
     queue.push(...pickSample(eligible))
   } else {
-    const links = bfsCandidates(rootFacts.links, docsRoot, robots, [docsRoot]).slice(0, methodology.sampling.pages)
+    const links = bfsCandidates(rootFacts.links, docsRoot, robots, [docsRoot, ...(rootTarget ? [rootTarget] : [])]).slice(0, methodology.sampling.pages)
     source = links.length > 0 ? 'bfs' : 'root_only'
     queue.push(...links)
   }
@@ -323,11 +351,12 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const droppedForBudget: string[] = []
 
   const fetchPage = async (url: string): Promise<PageRecord | null> => {
-    const outcome = await fetcher.get(url, { purpose: 'html' })
-    if (isBudgetSkip(outcome)) {
+    const fetched = await fetcher.get(url, { purpose: 'html' })
+    if (isBudgetSkip(fetched)) {
       droppedForBudget.push(url)
       return null
     }
+    const outcome = await followMetaRefresh(fetched, { purpose: 'html' })
     const isHtml = outcome.error === null && outcome.status === 200 && isHtmlType(outcome.contentType) &&
       !outcome.truncated && isSameSite(docsRoot, outcome.finalUrl)
     let html: PageFacts | null = null
@@ -428,8 +457,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   return {
     ok: true,
     facts,
-    sample: { source, sitemapUrlCount: eligible.length, pages: sampledPages, droppedForBudget },
-    rootHeaders: root.headers,
-    rootFinalUrl: root.finalUrl,
+    sample: { source, sitemapUrlCount: eligible.length, pages: sampledPages, droppedForBudget, metaRefreshes },
+    rootHeaders: rootOutcome.headers,
+    rootFinalUrl: rootOutcome.finalUrl,
   }
 }

@@ -152,6 +152,20 @@ function readJsonLd($: CheerioAPI, pageUrl: string): JsonLdFacts {
 }
 
 /**
+ * Target of an immediate `<meta http-equiv="refresh">` (delay of at most one
+ * second), resolved against `pageUrl`; null when there is none.
+ */
+export function metaRefreshTarget(html: string, pageUrl: string): string | null {
+  const $ = load(html)
+  const meta = $('meta[http-equiv]').filter((_, el) => ($(el).attr('http-equiv') ?? '').trim().toLowerCase() === 'refresh').first()
+  const content = meta.attr('content')
+  if (!content) return null
+  const match = /^\s*(\d+(?:\.\d*)?)\s*[;,]?\s*(?:url\s*=\s*)?(['"]?)(.*?)\2\s*$/i.exec(content)
+  if (!match || Number(match[1]) > 1 || !match[3]) return null
+  return normalizeUrl(match[3], pageUrl)
+}
+
+/**
  * Parse one HTML page. `finalUrl` is the URL the body came from after
  * redirects; relative URLs resolve against it (or against `<base href>`).
  */

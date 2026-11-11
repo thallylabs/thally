@@ -186,6 +186,8 @@ export interface SiteResult {
     /** Sampled URLs including the docs root, in fetch order. */
     pages: string[]
     droppedForBudget: string[]
+    /** Immediate same-site meta refreshes followed, as from -> to. */
+    metaRefreshes: Array<{ from: string; to: string }>
   }
   requests: { used: number; budget: number; exhausted: boolean }
   /** Every methodology check, methodology order. */

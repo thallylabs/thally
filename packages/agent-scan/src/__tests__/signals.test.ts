@@ -315,13 +315,90 @@ describe('sitemap for docs on a subpath', () => {
     for (let i = 1; i < 11; i++) routes[`${origin}/maps/s${i}.xml`] = { status: 301, headers: { location: `${origin}/maps/s0.xml` } }
     const { result, requested } = await scanWith(routes)
     const sitemapRequests = requested.filter((url) => url.endsWith('.xml'))
-    expect(sitemapRequests.length).toBeLessThanOrEqual(4)
-    // s0 (slot 1), s1 redirecting to s0 (no slot, two requests), then the cap.
-    expect(sitemapRequests).toEqual([`${origin}/maps/s0.xml`, `${origin}/maps/s1.xml`, `${origin}/maps/s0.xml`, `${origin}/maps/s2.xml`])
+    expect(sitemapRequests.length).toBeLessThanOrEqual(5)
+    // s0 (slot 1), then s1 and s2 each redirecting to s0 (no slot, two requests each), then the cap.
+    expect(sitemapRequests).toEqual([`${origin}/maps/s0.xml`, `${origin}/maps/s1.xml`, `${origin}/maps/s0.xml`, `${origin}/maps/s2.xml`, `${origin}/maps/s0.xml`])
     expect(result.status).toBe('ok')
     expect(result.requests.exhausted).toBe(false)
     expect(result.sample.source).toBe('bfs')
     expect(check(result, 'discovery.sitemap').status).toBe('fail')
+  })
+})
+
+describe('docs on a subpath with a meta-refresh root (Astro-like)', () => {
+  const stub = (to: string) => html(`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=${to}"></head><body></body></html>`)
+  const xml = (body: string) => ({ status: 200, headers: { 'content-type': 'application/xml' }, body })
+
+  function astroSite(): FakeRoutes {
+    const enPaths = Array.from({ length: 12 }, (_, i) => `/en/guide/page-${String(i).padStart(2, '0')}`)
+    const routes: FakeRoutes = {
+      [`${origin}/robots.txt`]: text('User-agent: *\nAllow: /\n'),
+      [`${origin}/en/`]: stub('/en/getting-started/'),
+      [`${origin}/en/getting-started/`]: html(docPage({ url: `${origin}/en/getting-started/`, title: 'Getting started', links: enPaths.slice(0, 3).map((p) => `${origin}${p}`) })),
+      [`${origin}/en/llms.txt`]: notFound,
+      [`${origin}/llms.txt`]: notFound,
+      [`${origin}/llms-full.txt`]: notFound,
+      [`${origin}/en/sitemap.xml`]: notFound,
+      [`${origin}/sitemap.xml`]: notFound,
+      [`${origin}/sitemap-index.xml`]: xml(`<sitemapindex><sitemap><loc>${origin}/sitemap-0.xml</loc></sitemap></sitemapindex>`),
+      [`${origin}/sitemap-0.xml`]: xml(`<urlset>${[...enPaths, '/en/getting-started/', '/de/guide/page-00'].map((p) => `<url><loc>${origin}${p}</loc></url>`).join('')}</urlset>`),
+    }
+    for (const path of ['/.well-known/mcp.json', '/.well-known/mcp/server-card.json', '/.well-known/agent-card.json']) routes[`${origin}${path}`] = notFound
+    routes[`${origin}/en/getting-started/index.md`] = notFound
+    routes[`${origin}/en/getting-started/ ${NEGOTIATE}`] = notFound
+    routes[`${origin}/en/getting-started/?format=json`] = notFound
+    for (const path of enPaths) {
+      routes[`${origin}${path}`] = html(docPage({ url: `${origin}${path}`, title: `Page ${path.slice(-2)}` }))
+      routes[`${origin}${path}.md`] = notFound
+      routes[`${origin}${path} ${NEGOTIATE}`] = notFound
+      routes[`${origin}${path}?format=json`] = notFound
+    }
+    return routes
+  }
+
+  it('does not spend sitemap slots on 404 candidates, so the index child is still fetched', async () => {
+    const { result, requested } = await scanWith(astroSite(), `${origin}/en/`)
+    expect(result.status).toBe('ok')
+    expect(requested.filter((url) => url.includes('sitemap'))).toEqual([
+      `${origin}/en/sitemap.xml`, `${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`, `${origin}/sitemap-0.xml`,
+    ])
+    expect(check(result, 'discovery.sitemap')).toMatchObject({ status: 'pass', detail: 'Sitemap lists 13 URLs under the docs root.' })
+    expect(result.sample.source).toBe('sitemap')
+    // Root plus ten sampled pages; the stub's refresh hop may push a tail page out of the budget.
+    expect(result.sample.pages.length + result.sample.droppedForBudget.length).toBe(11)
+  })
+
+  it('follows the root meta refresh, evaluates the target, and keeps the input docs root', async () => {
+    const { result } = await scanWith(astroSite(), `${origin}/en/`)
+    expect(result.docsRoot).toBe(`${origin}/en/`)
+    expect(result.sample.metaRefreshes).toEqual([{ from: `${origin}/en/`, to: `${origin}/en/getting-started/` }])
+    // The target is the root page, so it is not sampled a second time.
+    expect(result.sample.pages.filter((url) => url === `${origin}/en/getting-started/`)).toEqual([])
+    for (const id of ['identity.canonical', 'identity.lang', 'identity.title_description', 'structure.single_h1', 'retrieval.server_rendered', 'retrieval.status_health']) {
+      expect(check(result, id).status, id).toBe('pass')
+    }
+  })
+
+  it('does not follow an offsite meta refresh', async () => {
+    const routes = astroSite()
+    routes[`${origin}/en/`] = stub('https://elsewhere.test/en/')
+    const { result, requested } = await scanWith(routes, `${origin}/en/`)
+    expect(requested.some((url) => url.startsWith('https://elsewhere.test/'))).toBe(false)
+    expect(result.sample.metaRefreshes).toEqual([])
+    expect(check(result, 'identity.title_description').status).toBe('fail')
+  })
+
+  it('follows an immediate meta refresh on a sampled page but not a delayed one', async () => {
+    const routes = astroSite()
+    routes[`${origin}/en/guide/page-00`] = stub('/en/guide/page-00/moved')
+    routes[`${origin}/en/guide/page-00/moved`] = html(docPage({ url: `${origin}/en/guide/page-00/moved`, title: 'Page 00' }))
+    routes[`${origin}/en/guide/page-00/moved.md`] = notFound
+    routes[`${origin}/en/guide/page-00/moved ${NEGOTIATE}`] = notFound
+    routes[`${origin}/en/guide/page-00/moved?format=json`] = notFound
+    routes[`${origin}/en/guide/page-01`] = html('<html><head><meta http-equiv="refresh" content="5; url=/en/guide/page-02"></head><body></body></html>')
+    const { result } = await scanWith(routes, `${origin}/en/`)
+    expect(result.sample.metaRefreshes).toContainEqual({ from: `${origin}/en/guide/page-00`, to: `${origin}/en/guide/page-00/moved` })
+    expect(result.sample.metaRefreshes.some((entry) => entry.from === `${origin}/en/guide/page-01`)).toBe(false)
   })
 })
 

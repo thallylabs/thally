@@ -34,6 +34,7 @@
     "llmsFullPrefixBytes": 2048,
     "sitemapMaxIndexChildren": 2,
     "sitemapMaxRobotsLines": 5,
+    "sitemapMaxRequests": 5,
     "sitemapPaths": ["/sitemap.xml", "/sitemap-index.xml"],
     "jsonLdPageTypes": [
       "TechArticle",
@@ -52,7 +53,8 @@
     "order": "code-unit",
     "method": "k = floor(n/10); U[i*k], i=0..9; plus docs root",
     "robotsFiltered": true,
-    "fallback": "breadth-first same-site links from the docs root in document order, extended by links from already-sampled pages"
+    "fallback": "breadth-first same-site links from the docs root in document order, extended by links from already-sampled pages",
+    "metaRefresh": "an immediate (delay <= 1 s) same-site <meta http-equiv=refresh> on the docs root or a sampled page is followed like a redirect, within limits.maxRedirects and counting each hop as a request; the target page is evaluated and reported in sample.metaRefreshes, and the docs root is not moved. Offsite refreshes are not followed."
   },
   "grades": [
     { "grade": "A", "min": 90 },
@@ -94,7 +96,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "Sitemap candidates, in order and de-duplicated: the first probes.sitemapMaxRobotsLines robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the first probes.sitemapMaxRobotsLines other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap fetches are made in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a fetch whose final URL after redirects was already fetched does not use one of the 3. Separately, at most 4 sitemap requests are made, counting every attempt, retry and redirect hop. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
+      "rule": "Sitemap candidates, in order and de-duplicated: the first probes.sitemapMaxRobotsLines robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the first probes.sitemapMaxRobotsLines other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap documents (2xx responses that parse as XML) are fetched in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a 404 or other failed candidate does not count toward the 3, nor does a fetch whose final URL after redirects was already fetched. Separately, at most probes.sitemapMaxRequests sitemap requests are made, counting every attempt, retry and redirect hop. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
       "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
