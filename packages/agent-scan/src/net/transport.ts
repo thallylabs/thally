@@ -95,10 +95,12 @@ export function createNodeTransport(options: NodeTransportOptions = {}): Transpo
     request(req: TransportRequest): Promise<TransportResponse | TransportError> {
       return new Promise((resolve) => {
         let settled = false
+        // Early guard failures finish before the timer exists.
+        const timeout: { id?: ReturnType<typeof setTimeout> } = {}
         const finish = (value: TransportResponse | TransportError) => {
           if (settled) return
           settled = true
-          clearTimeout(timer)
+          clearTimeout(timeout.id)
           resolve(value)
         }
         let url: URL
@@ -125,7 +127,7 @@ export function createNodeTransport(options: NodeTransportOptions = {}): Transpo
           agent: false,
           ...(url.protocol === 'https:' && !isIP(host) ? { servername: host } : {}),
         })
-        const timer = setTimeout(() => {
+        timeout.id = setTimeout(() => {
           request.destroy(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }))
         }, req.timeoutMs)
 

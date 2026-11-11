@@ -265,7 +265,6 @@ async function runFrame(argv: string[], io: CliIo): Promise<number> {
     ...(io.rateLimiter ? { rateLimiter: io.rateLimiter } : {}),
     ...(io.sleep ? { sleep: io.sleep } : {}),
     ...(io.now ? { now: io.now } : {}),
-    ...(env.THALLY_SCAN_GITHUB_API ? { apiBase: env.THALLY_SCAN_GITHUB_API } : {}),
     onRow: (row) => io.stderr(`${String(row.rank).padStart(4)} ${row.decision.padEnd(7)} ${row.reason.padEnd(19)} ${row.repo}\n`),
   })
   io.stdout(`Repositories: ${rows.length}  included: ${rows.filter((row) => row.decision === 'include').length}\nWrote ${values.out}\n`)

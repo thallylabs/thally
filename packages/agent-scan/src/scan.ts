@@ -118,14 +118,13 @@ export interface ReplayOptions {
 
 /**
  * Re-run a scan from a capture directory recorded with bodies. Uses the
- * captured `scannedAt`, no rate limiting and no retry sleeps, so the result
- * is byte-identical to the original scan under `stableStringify`.
+ * captured `scannedAt`, no rate limiting and no retry sleeps, so with the
+ * same scanner version the result is byte-identical to the original scan
+ * under `stableStringify`. `scannerVersion` in the result is always the
+ * running scanner's version.
  */
 export async function replaySite(captureSiteDir: string, options: ReplayOptions = {}): Promise<SiteResult> {
   const meta = readCaptureMeta(captureSiteDir)
-  if (meta.scannerVersion !== scannerVersion) {
-    throw new Error(`Capture was recorded by scanner ${meta.scannerVersion}; this is ${scannerVersion}.`)
-  }
   return scanSite(meta.input, {
     transport: createReplayTransport(captureSiteDir),
     rateLimiter: noopRateLimiter(),

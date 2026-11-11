@@ -37,9 +37,9 @@ export function checkFetchableUrl(input: string, allowPrivateNetwork: boolean): 
   if (allowPrivateNetwork) return null
   const host = bareHostname(url.hostname).toLowerCase()
   if (!host) return 'invalid_url'
-  if (url.port && url.port !== '80' && url.port !== '443') return 'invalid_url'
-  if (ipaddr.isValid(host)) return isPublicAddress(host) ? null : 'private_address'
+  if (ipaddr.isValid(host) && !isPublicAddress(host)) return 'private_address'
   if (host === 'localhost' || host.endsWith('.localhost')) return 'private_address'
-  if (!host.includes('.')) return 'private_address'
+  if (!ipaddr.isValid(host) && !host.includes('.')) return 'private_address'
+  if (url.port && url.port !== '80' && url.port !== '443') return 'invalid_url'
   return null
 }

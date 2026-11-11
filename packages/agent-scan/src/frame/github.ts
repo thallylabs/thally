@@ -26,6 +26,7 @@ export interface SearchOptions {
   sleep: (ms: number) => Promise<void>
   /** Milliseconds clock for rate-limit resets; default `Date.now`. */
   nowMs?: () => number
+  /** Override the API base (tests). The token is never sent to an override. */
   apiBase?: string
 }
 
@@ -36,6 +37,8 @@ export interface SearchResult {
   fetched: number
   repos: GitHubRepo[]
 }
+
+const GITHUB_API = 'https://api.github.com'
 
 /** The search query the frame uses. */
 export const FRAME_QUERY = 'stars:>1000'
@@ -54,8 +57,10 @@ function header(headers: Array<[string, string]>, name: string): string | null {
 export async function searchTopRepos(options: SearchOptions): Promise<SearchResult> {
   const limit = Math.min(MAX_RESULTS, Math.max(1, Math.floor(options.limit)))
   const nowMs = options.nowMs ?? Date.now
-  const apiBase = options.apiBase ?? 'https://api.github.com'
-  const pacingMs = options.token ? 2100 : 6500
+  const apiBase = options.apiBase ?? GITHUB_API
+  // The token is only ever sent to the real GitHub API host.
+  const token = apiBase === GITHUB_API ? options.token : undefined
+  const pacingMs = token ? 2100 : 6500
   const seen = new Set<number>()
   const repos: GitHubRepo[] = []
   let totalCount = 0
@@ -73,7 +78,7 @@ export async function searchTopRepos(options: SearchOptions): Promise<SearchResu
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28',
           'user-agent': methodology.userAgent,
-          ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
         timeoutMs: methodology.limits.timeoutMs,
         maxBodyBytes: methodology.limits.maxBodyBytes,

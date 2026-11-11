@@ -196,9 +196,11 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
       const children = [...new Set(parsed.locs)]
         .filter((loc) => normalizeUrl(loc) !== null && isSameSite(loc, docsRoot))
         .sort(compareCodeUnits)
+      // Every path is "under" a root of `/`, so only the `docs` hint can
+      // discriminate there.
       const preferred = children.filter((loc) => {
         const path = new URL(loc).pathname
-        return path.startsWith(rootPath) || path.toLowerCase().includes('docs')
+        return (rootPath !== '/' && path.startsWith(rootPath)) || path.toLowerCase().includes('docs')
       })
       const rest = children.filter((loc) => !preferred.includes(loc))
       for (const child of [...preferred, ...rest].slice(0, maxChildren)) {

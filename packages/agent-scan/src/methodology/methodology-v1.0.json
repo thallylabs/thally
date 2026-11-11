@@ -66,7 +66,7 @@
       "scored": true,
       "scope": "site",
       "rule": "The llms.txt location returns 200 with a text/* media type that is not text/html, and the decoded body, after removing the BOM and leading whitespace, starts with '# '.",
-      "notApplicableWhen": null
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
       "id": "discovery.llms_full_txt",
@@ -75,7 +75,7 @@
       "scored": true,
       "scope": "site",
       "rule": "llms-full.txt returns 200 with a text/* media type that is not text/html, and more than 1024 bytes. Only the first 2048 bytes are read.",
-      "notApplicableWhen": null
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
       "id": "discovery.sitemap",
@@ -84,7 +84,7 @@
       "scored": true,
       "scope": "site",
       "rule": "At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
-      "notApplicableWhen": null
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
       "id": "discovery.robots_ai_agents",
