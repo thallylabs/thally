@@ -180,6 +180,7 @@ describe('discovery.agent_manifest and MCP URLs from llms.txt', () => {
     ['405 JSON', { status: 405, headers: { 'content-type': 'application/json' }, body: '{}' }],
     ['400 HTML', { status: 400, headers: { 'content-type': 'text/html' }, body: '<p>bad request</p>' }],
     ['200 event stream', { status: 200, headers: { 'content-type': 'text/event-stream' }, body: 'event: endpoint\n\n' }],
+    ['401 with WWW-Authenticate', { status: 401, headers: { 'content-type': 'text/html', 'www-authenticate': 'Bearer resource_metadata="https://docs.example.com/.well-known/oauth-protected-resource"' }, body: '<p>unauthorized</p>' }],
     ['200 plain text at /mcp', { status: 200, headers: { 'content-type': 'text/plain' }, body: 'ok' }],
   ])('passes on a plausible endpoint: %s', async (_, route) => {
     const { result } = await scanWith(site(route))
@@ -213,6 +214,11 @@ describe('discovery.agent_manifest and MCP URLs from llms.txt', () => {
     expect(requested.filter((url) => url.includes('/.well-known/'))).toEqual([`${origin}/.well-known/mcp.json`])
   })
 
+  it('does not count a 401 without WWW-Authenticate', async () => {
+    const { result } = await scanWith(site({ status: 401, headers: { 'content-type': 'text/html' }, body: '<p>sign in</p>' }))
+    expect(check(result, 'discovery.agent_manifest')).toMatchObject({ status: 'fail', detail: 'No agent or MCP manifest found; the MCP URL in llms.txt is not an endpoint.' })
+  })
+
   it('judges endpoint plausibility from status, media type and path', () => {
     const at = (url: string, status: number, contentType: string | null): FetchOutcome => ({
       requestedUrl: url, finalUrl: url, status, error: null, redirects: 0, contentType, headers: [],
@@ -225,6 +231,7 @@ describe('discovery.agent_manifest and MCP URLs from llms.txt', () => {
     expect(isPlausibleMcpEndpoint(at('https://mcp.example.test/sse', 406, 'text/plain'))).toBe(true)
     expect(isPlausibleMcpEndpoint(at('https://mcp.example.test/', 200, 'application/json'))).toBe(true)
     expect(isPlausibleMcpEndpoint(at('https://x.test/mcp', 404, 'application/json'))).toBe(false)
+    expect(isPlausibleMcpEndpoint(at('https://mcp.example.test/sse', 401, 'application/json'))).toBe(false)
   })
 
   it('is not applicable (budget) when the MCP check was skipped for budget', () => {

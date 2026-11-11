@@ -98,13 +98,15 @@ export function mcpUrlIn(text: string): string | null {
 /**
  * Whether a response to an MCP URL from llms.txt looks like an endpoint
  * rather than a documentation page: 400, 405 or 406 (a protocol endpoint
- * refusing a plain GET), or a 2xx JSON or event-stream response, or any 2xx
+ * refusing a plain GET), a 401 carrying `WWW-Authenticate` (an MCP server
+ * asking for authorization), or a 2xx JSON or event-stream response, or any 2xx
  * non-HTML response at a path whose last segment is `mcp`. A 200 HTML page
  * is not.
  */
 export function isPlausibleMcpEndpoint(outcome: FetchOutcome): boolean {
   if (outcome.error || outcome.status === null) return false
   if ([400, 405, 406].includes(outcome.status)) return true
+  if (outcome.status === 401) return outcome.headers.some(([name]) => name.toLowerCase() === 'www-authenticate')
   if (outcome.status < 200 || outcome.status > 299) return false
   const type = outcome.contentType
   if (isJsonType(type) || type === 'text/event-stream') return true
