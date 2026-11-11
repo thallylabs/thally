@@ -19,8 +19,10 @@ import { scanSite } from '../scan.js'
 import { jsonTitle } from '../text.js'
 import type { FetchOutcome, SiteResult } from '../types.js'
 import { isSameSite } from '../url.js'
+import { createNodeTransport } from '../net/transport.js'
 import { createFakeTransport, docPage, html, NEGOTIATE, notFound, text, type FakeRoutes } from './helpers.js'
 import { fixturePaths, fixtureSite } from './fixture-site.js'
+import { startFixtureServer } from './fixture-server.js'
 
 const origin = 'https://docs.example.com'
 const probe = `${origin}/guide/page-00`
@@ -305,20 +307,21 @@ describe('sitemap for docs on a subpath', () => {
     expect(requested.filter((url) => url.includes('sitemap'))).toEqual([`${site}/docs/sitemap.xml`, `${site}/docs/sitemap-pages.xml`])
   })
 
-  it('does not spend a sitemap slot on a redirect to an already-fetched sitemap', async () => {
-    const routes = fixtureSite({ robots: `User-agent: *\nAllow: /\nSitemap: ${origin}/maps/a.xml\nSitemap: ${origin}/maps/b.xml\n` })
-    const docsSitemap = routes[`${origin}/sitemap.xml`]
+  it('caps sitemap requests, including redirect hops, when robots.txt lists many redirecting sitemaps', async () => {
+    const lines = Array.from({ length: 11 }, (_, i) => `Sitemap: ${origin}/maps/s${i}.xml`).join('\n')
+    const routes = fixtureSite({ robots: `User-agent: *\nAllow: /\n${lines}\n` })
     const empty = { status: 200, headers: { 'content-type': 'application/xml' }, body: '<urlset></urlset>' }
-    routes[`${origin}/maps/a.xml`] = empty
-    routes[`${origin}/maps/b.xml`] = { status: 301, headers: { location: `${origin}/maps/a.xml` } }
-    routes[`${origin}/sitemap.xml`] = empty
-    routes[`${origin}/sitemap-index.xml`] = docsSitemap
+    routes[`${origin}/maps/s0.xml`] = empty
+    for (let i = 1; i < 11; i++) routes[`${origin}/maps/s${i}.xml`] = { status: 301, headers: { location: `${origin}/maps/s0.xml` } }
     const { result, requested } = await scanWith(routes)
-    // a.xml (slot 1), b.xml redirecting to a.xml (no slot), sitemap.xml (slot 2), sitemap-index.xml (slot 3).
-    expect(requested.filter((url) => url.includes('.xml'))).toEqual([
-      `${origin}/maps/a.xml`, `${origin}/maps/b.xml`, `${origin}/maps/a.xml`, `${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`,
-    ])
-    expect(check(result, 'discovery.sitemap').status).toBe('pass')
+    const sitemapRequests = requested.filter((url) => url.endsWith('.xml'))
+    expect(sitemapRequests.length).toBeLessThanOrEqual(4)
+    // s0 (slot 1), s1 redirecting to s0 (no slot, two requests), then the cap.
+    expect(sitemapRequests).toEqual([`${origin}/maps/s0.xml`, `${origin}/maps/s1.xml`, `${origin}/maps/s0.xml`, `${origin}/maps/s2.xml`])
+    expect(result.status).toBe('ok')
+    expect(result.requests.exhausted).toBe(false)
+    expect(result.sample.source).toBe('bfs')
+    expect(check(result, 'discovery.sitemap').status).toBe('fail')
   })
 })
 
@@ -343,5 +346,27 @@ describe('isSameSite', () => {
     expect(isSameSite('https://docs.example.com/', 'https://docs.example.com:8443/a')).toBe(false)
     expect(isSameSite('http://127.0.0.1:8080/', 'http://127.0.0.1:9090/a')).toBe(false)
     expect(isSameSite('https://docs.example.com/', 'https://api.example.com/a')).toBe(false)
+  })
+})
+
+describe('MCP endpoint over a live event stream', () => {
+  it('passes on an open text/event-stream response with one request, without waiting for the stream to end', async () => {
+    const server = await startFixtureServer((base) => {
+      const routes = fixtureSite({ origin: base, manifest: false })
+      routes[`${base}/mcp`] = { status: 200, headers: { 'content-type': 'text/event-stream' }, body: 'event: ping\ndata: x\n\n', hold: true }
+      return routes
+    })
+    try {
+      const inner = createNodeTransport({ allowPrivateNetwork: true })
+      const seen: string[] = []
+      const transport = { request: (request: Parameters<typeof inner.request>[0]) => (seen.push(request.url), inner.request(request)) }
+      const started = Date.now()
+      const result = await scanSite(`${server.origin}/`, { transport, allowPrivateNetwork: true, ...quiet })
+      expect(Date.now() - started).toBeLessThan(5000)
+      expect(seen.filter((url) => url === `${server.origin}/mcp`)).toHaveLength(1)
+      expect(check(result, 'discovery.agent_manifest')).toMatchObject({ status: 'pass', detail: 'llms.txt links an MCP endpoint.' })
+    } finally {
+      await server.close()
+    }
   })
 })

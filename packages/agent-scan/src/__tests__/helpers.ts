@@ -14,6 +14,8 @@ export interface FakeRoute {
   body?: string | Uint8Array
   /** Simulate a transport error instead of a response. */
   error?: TransportError['error']
+  /** Fixture server only: send the body and keep the response open (a live stream). */
+  hold?: boolean
 }
 
 /** A route table: URL -> response, or URL -> (request) -> response, or URL -> list served in order. */

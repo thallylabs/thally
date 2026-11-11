@@ -33,6 +33,7 @@
     "llmsFullMinBytes": 1024,
     "llmsFullPrefixBytes": 2048,
     "sitemapMaxIndexChildren": 2,
+    "sitemapMaxRobotsLines": 5,
     "sitemapPaths": ["/sitemap.xml", "/sitemap-index.xml"],
     "jsonLdPageTypes": [
       "TechArticle",
@@ -93,7 +94,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "Sitemap candidates, in order and de-duplicated: robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap fetches are made in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a fetch whose final URL after redirects was already fetched does not use one of the 3. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
+      "rule": "Sitemap candidates, in order and de-duplicated: the first probes.sitemapMaxRobotsLines robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the first probes.sitemapMaxRobotsLines other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap fetches are made in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a fetch whose final URL after redirects was already fetched does not use one of the 3. Separately, at most 4 sitemap requests are made, counting every attempt, retry and redirect hop. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
       "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
@@ -111,7 +112,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "Probe URLs share one allocation of 3 (the number of well-known paths). If llms.txt contains an absolute http(s) URL whose host starts with 'mcp.' or whose path has a segment 'mcp', that URL is fetched first with Accept: application/json, text/event-stream and takes one slot, or two when it is on another origin (that origin's robots.txt is fetched and honoured as well); the remaining slots go to the well-known paths in order. Passes on any of: (a) a well-known probe returns 200, a JSON media type and a JSON object; (b) the llms.txt MCP URL is plausibly an endpoint: status 400, 405 or 406, or status 401 with a WWW-Authenticate header (a 401 without it does not count), or a 2xx response with a JSON or text/event-stream media type, or any 2xx non-HTML response at a path whose last segment is 'mcp' (a 200 HTML page is not an endpoint); (c) the docs root HTML has <link rel=\"mcp\"> or the response has a Link header with rel=\"mcp\".",
+      "rule": "Probe URLs share one allocation of 3 (the number of well-known paths). If llms.txt contains an absolute http(s) URL whose host starts with 'mcp.' or whose path has a segment 'mcp', that URL is fetched first with Accept: application/json, text/event-stream, judged by its status line and headers (a text/event-stream response ends when its headers arrive, and a timeout after the headers is not an error; at most 4096 body bytes are read), and takes one slot, or two when it is on another origin (that origin's robots.txt is fetched and honoured as well); the remaining slots go to the well-known paths in order. Passes on any of: (a) a well-known probe returns 200, a JSON media type and a JSON object; (b) the llms.txt MCP URL is plausibly an endpoint: status 400, 405 or 406, or status 401 with a WWW-Authenticate header (a 401 without it does not count), or a 2xx response with a JSON or text/event-stream media type, or any 2xx non-HTML response at a path whose last segment is 'mcp' (a 200 HTML page is not an endpoint); (c) the docs root HTML has <link rel=\"mcp\"> or the response has a Link header with rel=\"mcp\".",
       "notApplicableWhen": "a probe was skipped for budget and nothing else passed (reason: budget)"
     },
     {

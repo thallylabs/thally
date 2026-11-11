@@ -49,12 +49,25 @@ export interface GetOptions {
   /** Override the purpose's Accept header. */
   accept?: string
   stopAfterBytes?: number
+  /** Judge the response by its headers; see `TransportRequest.probe`. */
+  probe?: boolean
+  /**
+   * A request allowance shared by several fetches (every attempt, retry and
+   * redirect hop counts). Once spent, further requests end with `request_cap`.
+   */
+  requestCap?: RequestCap
   /** Follow redirects to other sites (docs-root and frame candidate fetches). */
   allowOffsite?: boolean
   /** Extra request headers (lower-case names). Never recorded in captures. */
   headers?: Record<string, string>
   /** Skip the robots gate (robots.txt itself, API calls). */
   skipRobots?: boolean
+}
+
+/** A shared request allowance; see `GetOptions.requestCap`. */
+export interface RequestCap {
+  max: number
+  spent: number
 }
 
 /** A budgeted, robots-aware fetcher bound to one site scan. */
@@ -184,6 +197,10 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         exhausted = true
         return { error: 'budget_exhausted' as const }
       }
+      if (opts.requestCap) {
+        if (opts.requestCap.spent >= opts.requestCap.max) return { error: 'request_cap' as const }
+        opts.requestCap.spent++
+      }
       await options.rateLimiter.acquire(host)
       used++
       const result = await options.transport.request({
@@ -198,6 +215,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         timeoutMs,
         maxBodyBytes: methodology.limits.maxBodyBytes,
         ...(opts.stopAfterBytes !== undefined ? { stopAfterBytes: opts.stopAfterBytes } : {}),
+        ...(opts.probe ? { probe: true } : {}),
       })
       const canRetry = attemptIndex < methodology.limits.retries
       if ('error' in result) {

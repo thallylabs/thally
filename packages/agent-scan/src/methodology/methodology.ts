@@ -53,6 +53,7 @@ export interface Methodology {
     llmsFullMinBytes: number
     llmsFullPrefixBytes: number
     sitemapMaxIndexChildren: number
+    sitemapMaxRobotsLines: number
     sitemapPaths: string[]
     jsonLdPageTypes: string[]
     serverRenderedMinChars: number

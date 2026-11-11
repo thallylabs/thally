@@ -13,7 +13,7 @@ import type { AlternateAttempt, PageRecord, ProbeSet, SiteFacts } from './facts.
 import { parsePage, type PageFacts } from './html.js'
 import { methodology } from './methodology/methodology.js'
 import { checkFetchableUrl } from './net/guard.js'
-import type { Fetcher } from './net/fetcher.js'
+import type { Fetcher, RequestCap } from './net/fetcher.js'
 import { bfsCandidates, eligibleUrls, pickSample } from './sample.js'
 import { parseSitemap } from './sitemap.js'
 import { jsonTitle, markdownTitle } from './text.js'
@@ -84,6 +84,9 @@ function sitemapText(outcome: FetchOutcome): string | null {
     return null
   }
 }
+
+/** Bytes read from an MCP URL; the verdict rests on status and headers. */
+const MCP_PROBE_BYTES = 4096
 
 /** A site-wide feed is never a page alternate. */
 export function isFeedUrl(url: string): boolean {
@@ -188,15 +191,22 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const sitemapFacts: SiteFacts['sitemap'] = { attempts: [], parsed: [], locsUnderRoot: 0, skippedForBudget: false }
   const maxChildren = methodology.probes.sitemapMaxIndexChildren
   const maxSitemapFetches = 1 + maxChildren
+  // Every sitemap request (attempts, retries and redirect hops) also counts
+  // against a hard cap one above the slot allocation, so one redirect to an
+  // already-fetched sitemap stays affordable.
+  const sitemapRequests: RequestCap = { max: maxSitemapFetches + 1, spent: 0 }
   const fromRobots = robots.sitemaps.filter((url) => isSameSite(docsRoot, url))
-  const robotsUnderRoot = fromRobots.filter((url) => {
+  const isUnderDocsRoot = (url: string) => {
     const normalized = normalizeUrl(url)
     return normalized !== null && isUnderRoot(normalized, docsRoot)
-  })
+  }
+  const robotsLimit = methodology.probes.sitemapMaxRobotsLines
+  const robotsUnderRoot = fromRobots.filter(isUnderDocsRoot).slice(0, robotsLimit)
+  const robotsOther = fromRobots.filter((url) => !isUnderDocsRoot(url)).slice(0, robotsLimit)
   const topCandidates = [...new Set([
     ...robotsUnderRoot,
     ...(rootPath !== '/' ? [`${docsRoot}sitemap.xml`] : []),
-    ...fromRobots,
+    ...robotsOther,
     ...methodology.probes.sitemapPaths.map((path) => `${origin}${path}`),
   ])]
   const pageLocs: string[] = []
@@ -206,7 +216,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const fetchSitemap = async (url: string) => {
     if (fetchedSitemaps.has(sitemapKey(url))) return null
     if (sitemapSlots >= maxSitemapFetches) return null
-    const outcome = await fetcher.get(url, { purpose: 'sitemap' })
+    if (sitemapRequests.spent >= sitemapRequests.max) return null
+    const outcome = await fetcher.get(url, { purpose: 'sitemap', requestCap: sitemapRequests })
     if (isBudgetSkip(outcome)) {
       sitemapFacts.skippedForBudget = true
       return null
@@ -228,7 +239,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     return url !== null && isUnderRoot(url, docsRoot)
   }).length
   for (const candidate of topCandidates) {
-    if (sitemapFacts.skippedForBudget || sitemapSlots >= maxSitemapFetches) break
+    if (sitemapFacts.skippedForBudget || sitemapSlots >= maxSitemapFetches || sitemapRequests.spent >= sitemapRequests.max) break
     const parsed = await fetchSitemap(candidate)
     if (!parsed || !parsed.kind) continue
     if (parsed.kind === 'urlset') {
@@ -271,7 +282,8 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   }
   if (mcpEndpoint.url) {
     slots -= new URL(mcpEndpoint.url).origin === origin ? 1 : 2
-    const outcome = await fetcher.get(mcpEndpoint.url, { purpose: 'mcp' })
+    // Judged by status and headers; an open event stream must not hang the scan.
+    const outcome = await fetcher.get(mcpEndpoint.url, { purpose: 'mcp', probe: true, stopAfterBytes: MCP_PROBE_BYTES })
     if (isBudgetSkip(outcome)) mcpEndpoint.skippedForBudget = true
     else {
       mcpEndpoint.outcome = outcome

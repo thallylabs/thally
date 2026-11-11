@@ -127,8 +127,12 @@ export function createNodeTransport(options: NodeTransportOptions = {}): Transpo
           agent: false,
           ...(url.protocol === 'https:' && !isIP(host) ? { servername: host } : {}),
         })
+        // Set once headers arrive on a probe request: a timeout then ends the
+        // exchange with what arrived instead of failing it.
+        let endProbe: (() => void) | null = null
         timeout.id = setTimeout(() => {
-          request.destroy(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }))
+          if (endProbe) endProbe()
+          else request.destroy(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }))
         }, req.timeoutMs)
 
         request.on('error', (error) => finish({ error: mapNetworkError(error) }))
@@ -146,6 +150,18 @@ export function createNodeTransport(options: NodeTransportOptions = {}): Transpo
             response.resume()
             done()
             return
+          }
+          if (req.probe) {
+            endProbe = () => {
+              truncated = true
+              done()
+              response.destroy()
+            }
+            const type = String(response.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+            if (type === 'text/event-stream') {
+              endProbe()
+              return
+            }
           }
           const encoding = String(response.headers['content-encoding'] ?? '')
           const inflater = decompressor(encoding)

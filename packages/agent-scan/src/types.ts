@@ -16,12 +16,14 @@ export type Grade = 'A' | 'B' | 'C' | 'D' | 'F'
 /**
  * Closed set; never free text, so results stay byte-stable across OSes.
  * `decode` means the body could not be decompressed as its Content-Encoding
- * declared.
+ * declared. `request_cap` means a probe group (sitemaps) used up its own
+ * request allowance; it never applies to a whole site.
  */
 export type ErrorCode =
   | 'invalid_url' | 'private_address' | 'dns' | 'timeout' | 'connection' | 'tls'
   | 'http_status' | 'not_html' | 'body_too_large' | 'redirect_limit' | 'redirect_offsite'
   | 'robots_disallowed' | 'robots_unreachable' | 'budget_exhausted' | 'capture_miss' | 'decode'
+  | 'request_cap'
 
 /**
  * Why a check did not apply. `site_not_scanned` marks every check on a site
@@ -43,6 +45,13 @@ export interface TransportRequest {
   maxBodyBytes: number
   /** Prefix read; `truncated` is true when more bytes were available. */
   stopAfterBytes?: number
+  /**
+   * Endpoint probe: the response is judged by its status line and headers.
+   * A `text/event-stream` response ends as soon as its headers arrive, and a
+   * timeout after the headers returns what arrived (`truncated`) instead of
+   * an error.
+   */
+  probe?: boolean
 }
 
 /** Response to one `TransportRequest`. Redirects are never followed here. */

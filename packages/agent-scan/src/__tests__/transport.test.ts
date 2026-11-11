@@ -27,6 +27,9 @@ beforeAll(async () => {
     } else if (url === '/gzip') {
       res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' })
       res.end(gzipSync('hello gzip'))
+    } else if (url === '/stall') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.write('{"partial":')
     } else if (url === '/corrupt-gzip') {
       res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' })
       res.end(Buffer.from('this is not gzip data at all'))
@@ -118,6 +121,13 @@ describe('node transport against a local server', () => {
     const outcome = await fetcher.get(`${base}/corrupt-gzip`, { purpose: 'html' })
     expect(outcome.error).toBe('decode')
     expect(seen.filter((url) => url.endsWith('/corrupt-gzip'))).toHaveLength(1)
+  })
+
+  it('a probe that times out after its headers returns what arrived instead of an error', async () => {
+    const probed = await local.request(req('/stall', { probe: true, timeoutMs: 300 }))
+    expect(probed).toMatchObject({ status: 200, truncated: true })
+    expect(asText(probed)).toBe('{"partial":')
+    expect(await local.request(req('/stall', { timeoutMs: 300 }))).toEqual({ error: 'timeout' })
   })
 
   it('maps a refused connection to connection', async () => {

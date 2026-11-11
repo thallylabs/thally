@@ -37,6 +37,10 @@ export async function startFixtureServer(build: (origin: string) => FakeRoutes):
     }
     res.writeHead(route.status ?? 200, headers)
     const body = route.body ?? ''
+    if (route.hold) {
+      res.write(typeof body === 'string' ? body : Buffer.from(body))
+      return
+    }
     res.end(typeof body === 'string' ? body.replaceAll(FIXTURE_ORIGIN, origin) : Buffer.from(body))
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
