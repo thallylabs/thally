@@ -1,0 +1,50 @@
+{
+  "name": "@thallylabs/agent-scan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Black-box agent-readiness scanner for public documentation sites.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "thally-scan": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./methodology-v1.0.json": "./src/methodology/methodology-v1.0.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src/methodology/methodology-v1.0.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "cheerio": "1.0.0",
+    "ipaddr.js": "2.5.0",
+    "tldts": "7.4.19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "5.9.3",
+    "vitest": "^4.0.15"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thallylabs/thally.git",
+    "directory": "packages/agent-scan"
+  },
+  "homepage": "https://thally.io"
+}
