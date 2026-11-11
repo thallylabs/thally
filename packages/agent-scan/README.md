@@ -96,7 +96,7 @@ console.log(stableStringify(result))
 
 ## Sampling
 
-The scanner reads the site's sitemap (robots.txt `Sitemap:` lines first, then `/sitemap.xml` and `/sitemap-index.xml`, then `sitemap.xml` under the docs root; at most three are fetched), keeps URLs under the docs root that robots.txt allows, sorts them by code unit, and takes every k-th URL to get 10 pages, plus the docs root. Without a sitemap it takes the first 10 same-site links breadth-first from the docs root. The same inputs always give the same sample.
+The scanner reads the site's sitemap (robots.txt `Sitemap:` lines under the docs root first, then `sitemap.xml` under the docs root when the docs live on a subpath, then other `Sitemap:` lines, then `/sitemap.xml` and `/sitemap-index.xml`; candidates are tried until one lists a URL under the docs root, with at most three sitemap fetches including index children, and a redirect to an already-fetched sitemap does not count), keeps URLs under the docs root that robots.txt allows, sorts them by code unit, and takes every k-th URL to get 10 pages, plus the docs root. Without a sitemap it takes the first 10 same-site links breadth-first from the docs root. The same inputs always give the same sample.
 
 ## Captures and replay
 

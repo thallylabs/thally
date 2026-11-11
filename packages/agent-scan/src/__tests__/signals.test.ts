@@ -271,6 +271,57 @@ describe('sitemap candidates', () => {
   })
 })
 
+describe('sitemap for docs on a subpath', () => {
+  it('finds the docs sitemap index under the docs root when the site-wide sitemap lists no docs', async () => {
+    const site = 'https://brand.example.com'
+    const www = 'https://www.brand.example.com'
+    const docsPaths = Array.from({ length: 12 }, (_, i) => `/docs/guide/page-${String(i).padStart(2, '0')}`)
+    const routes: FakeRoutes = {
+      [`${site}/robots.txt`]: text(`User-agent: *\nAllow: /\nSitemap: ${www}/sitemap.xml\n`),
+      [`${site}/docs/`]: html(docPage({ url: `${site}/docs/`, title: 'Docs home', links: docsPaths.slice(0, 3).map((path) => `${site}${path}`) })),
+      // The site-wide marketing sitemap, reached directly and by redirect.
+      [`${www}/robots.txt`]: notFound,
+      [`${www}/sitemap.xml`]: { status: 200, headers: { 'content-type': 'application/xml' }, body: `<urlset><url><loc>${www}/pricing</loc></url><url><loc>${www}/blog/post</loc></url></urlset>` },
+      [`${site}/sitemap.xml`]: { status: 301, headers: { location: `${www}/sitemap.xml` } },
+      [`${site}/sitemap-index.xml`]: notFound,
+      // The docs sitemap index and its page sitemap.
+      [`${site}/docs/sitemap.xml`]: { status: 200, headers: { 'content-type': 'application/xml' }, body: `<sitemapindex><sitemap><loc>${site}/docs/sitemap-pages.xml</loc></sitemap></sitemapindex>` },
+      [`${site}/docs/sitemap-pages.xml`]: { status: 200, headers: { 'content-type': 'application/xml' }, body: `<urlset>${docsPaths.map((path) => `<url><loc>${site}${path}</loc></url>`).join('')}</urlset>` },
+      [`${site}/docs/llms.txt`]: notFound,
+      [`${site}/llms.txt`]: notFound,
+      [`${site}/llms-full.txt`]: notFound,
+    }
+    for (const path of ['/.well-known/mcp.json', '/.well-known/mcp/server-card.json', '/.well-known/agent-card.json']) routes[`${site}${path}`] = notFound
+    for (const path of docsPaths) {
+      routes[`${site}${path}`] = html(docPage({ url: `${site}${path}`, title: `Page ${path.slice(-2)}` }))
+      routes[`${site}${path}.md`] = notFound
+      routes[`${site}${path} ${NEGOTIATE}`] = notFound
+      routes[`${site}${path}?format=json`] = notFound
+    }
+    const { result, requested } = await scanWith(routes, `${site}/docs/`)
+    expect(result.status).toBe('ok')
+    expect(check(result, 'discovery.sitemap')).toMatchObject({ status: 'pass', detail: 'Sitemap lists 12 URLs under the docs root.' })
+    expect(result.sample.source).toBe('sitemap')
+    expect(requested.filter((url) => url.includes('sitemap'))).toEqual([`${site}/docs/sitemap.xml`, `${site}/docs/sitemap-pages.xml`])
+  })
+
+  it('does not spend a sitemap slot on a redirect to an already-fetched sitemap', async () => {
+    const routes = fixtureSite({ robots: `User-agent: *\nAllow: /\nSitemap: ${origin}/maps/a.xml\nSitemap: ${origin}/maps/b.xml\n` })
+    const docsSitemap = routes[`${origin}/sitemap.xml`]
+    const empty = { status: 200, headers: { 'content-type': 'application/xml' }, body: '<urlset></urlset>' }
+    routes[`${origin}/maps/a.xml`] = empty
+    routes[`${origin}/maps/b.xml`] = { status: 301, headers: { location: `${origin}/maps/a.xml` } }
+    routes[`${origin}/sitemap.xml`] = empty
+    routes[`${origin}/sitemap-index.xml`] = docsSitemap
+    const { result, requested } = await scanWith(routes)
+    // a.xml (slot 1), b.xml redirecting to a.xml (no slot), sitemap.xml (slot 2), sitemap-index.xml (slot 3).
+    expect(requested.filter((url) => url.includes('.xml'))).toEqual([
+      `${origin}/maps/a.xml`, `${origin}/maps/b.xml`, `${origin}/maps/a.xml`, `${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`,
+    ])
+    expect(check(result, 'discovery.sitemap').status).toBe('pass')
+  })
+})
+
 describe('robots.txt connection failures', () => {
   it.each(['connection', 'dns', 'tls'] as const)('robots.txt %s -> error with that reason', async (error) => {
     const { result } = await scanWith({ [`${origin}/robots.txt`]: { error } })

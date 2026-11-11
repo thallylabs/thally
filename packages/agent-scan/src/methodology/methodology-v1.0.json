@@ -93,7 +93,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "Sitemap candidates, in order and de-duplicated: robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin, then <root>sitemap.xml; at most 3 are fetched. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
+      "rule": "Sitemap candidates, in order and de-duplicated: robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap fetches are made in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a fetch whose final URL after redirects was already fetched does not use one of the 3. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
       "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {

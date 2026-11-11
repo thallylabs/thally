@@ -178,27 +178,45 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     if (isValidLlmsFull(fullOutcome)) llmsFull.hit = fullOutcome
   }
 
-  // 5. Sitemaps: robots Sitemap lines on this site, else conventional paths.
+  // 5. Sitemaps. Candidates in order: robots Sitemap lines under the docs
+  // root, then <root>sitemap.xml when the docs live on a subpath, then the
+  // other robots Sitemap lines on this site, then the conventional paths at
+  // the origin. Candidates are tried until one yields a URL under the docs
+  // root, within one allocation of sitemap fetches that index children share.
+  // A fetch that lands on an already-fetched sitemap (after redirects) does
+  // not use an allocation slot.
   const sitemapFacts: SiteFacts['sitemap'] = { attempts: [], parsed: [], locsUnderRoot: 0, skippedForBudget: false }
   const maxChildren = methodology.probes.sitemapMaxIndexChildren
   const maxSitemapFetches = 1 + maxChildren
-  // robots Sitemap lines first, then the conventional paths; stop at the
-  // first that parses, within the sitemap request allocation.
   const fromRobots = robots.sitemaps.filter((url) => isSameSite(docsRoot, url))
+  const robotsUnderRoot = fromRobots.filter((url) => {
+    const normalized = normalizeUrl(url)
+    return normalized !== null && isUnderRoot(normalized, docsRoot)
+  })
   const topCandidates = [...new Set([
+    ...robotsUnderRoot,
+    ...(rootPath !== '/' ? [`${docsRoot}sitemap.xml`] : []),
     ...fromRobots,
     ...methodology.probes.sitemapPaths.map((path) => `${origin}${path}`),
-    ...(rootPath !== '/' ? [`${docsRoot}sitemap.xml`] : []),
   ])]
   const pageLocs: string[] = []
+  const fetchedSitemaps = new Set<string>()
+  const sitemapKey = (url: string) => normalizeUrl(url) ?? url
+  let sitemapSlots = 0
   const fetchSitemap = async (url: string) => {
-    if (sitemapFacts.attempts.length >= maxSitemapFetches) return null
+    if (fetchedSitemaps.has(sitemapKey(url))) return null
+    if (sitemapSlots >= maxSitemapFetches) return null
     const outcome = await fetcher.get(url, { purpose: 'sitemap' })
     if (isBudgetSkip(outcome)) {
       sitemapFacts.skippedForBudget = true
       return null
     }
     sitemapFacts.attempts.push(outcome)
+    const finalKey = sitemapKey(outcome.finalUrl || url)
+    fetchedSitemaps.add(sitemapKey(url))
+    if (fetchedSitemaps.has(finalKey) && finalKey !== sitemapKey(url)) return null
+    fetchedSitemaps.add(finalKey)
+    sitemapSlots++
     const text = sitemapText(outcome)
     if (text === null) return null
     const parsed = parseSitemap(text)
@@ -210,7 +228,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     return url !== null && isUnderRoot(url, docsRoot)
   }).length
   for (const candidate of topCandidates) {
-    if (sitemapFacts.skippedForBudget) break
+    if (sitemapFacts.skippedForBudget || sitemapSlots >= maxSitemapFetches) break
     const parsed = await fetchSitemap(candidate)
     if (!parsed || !parsed.kind) continue
     if (parsed.kind === 'urlset') {
@@ -227,13 +245,14 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
       })
       const rest = children.filter((loc) => !preferred.includes(loc))
       for (const child of [...preferred, ...rest].slice(0, maxChildren)) {
+        if (sitemapFacts.skippedForBudget) break
         const childParsed = await fetchSitemap(child)
         if (!childParsed || childParsed.kind !== 'urlset') continue
         pageLocs.push(...childParsed.locs)
         if (underRootCount(childParsed.locs) >= methodology.sampling.pages) break
       }
     }
-    break
+    if (underRootCount(pageLocs) > 0) break
   }
   sitemapFacts.locsUnderRoot = underRootCount(pageLocs)
   const eligible = eligibleUrls(pageLocs, docsRoot, robots)
