@@ -5,6 +5,7 @@
  * The graph (from each package's tsup config and dependencies):
  * - core and migrate have no @thallylabs/* build-time dependencies and build
  *   concurrently.
+ * - agent-scan has no @thallylabs/* dependencies and builds in the first group.
  * - create-thally-docs imports @thallylabs/migrate and its declaration build
  *   needs migrate's generated types, so it builds next.
  * - mcp consumes the canonical create-thally-docs scaffold and release
@@ -49,7 +50,7 @@ if (hasCurrentWorkspaceBuild(context)) {
   process.stdout.write('Workspace package inputs and outputs match this CI job; reusing compilation.\n')
 } else {
   await Promise.all(
-    ['packages/core', 'packages/migrate'].map(buildWorkspace),
+    ['packages/core', 'packages/migrate', 'packages/agent-scan'].map(buildWorkspace),
   )
   await buildWorkspace('packages/create-thally-docs')
   await buildWorkspace('packages/mcp')
