@@ -46,7 +46,9 @@ export function parseRobots(body: string): RobotsRules {
   let current: Group | null = null
   let lastWasAgent = false
   for (const rawLine of body.split(/\r\n|\r|\n/)) {
-    const line = rawLine.replace(/#.*$/, '').trim()
+    // Linear comment stripping: robots.txt is untrusted input.
+    const hash = rawLine.indexOf('#')
+    const line = (hash === -1 ? rawLine : rawLine.slice(0, hash)).trim()
     const colon = line.indexOf(':')
     if (colon <= 0) continue
     const key = line.slice(0, colon).trim().toLowerCase()

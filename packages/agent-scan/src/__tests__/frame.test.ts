@@ -98,7 +98,8 @@ describe('frame builder (AC6)', () => {
     expect(captured).toContain('exchanges.jsonl')
     for (const file of ['exchanges.jsonl', 'meta.json']) expect(readFileSync(join(dir, 'captures', 'frame', file), 'utf8')).not.toContain('secret-token')
     // Never probes a bare public suffix.
-    expect(transport.requests.map((r) => r.url).some((url) => url.includes('docs.co.uk') || url.includes('docs.github.io'))).toBe(false)
+    const bareSuffixHosts = new Set(['docs.co.uk', 'docs.github.io'])
+    expect(transport.requests.some((r) => bareSuffixHosts.has(new URL(r.url).hostname))).toBe(false)
 
     const csv = parseCsvRecords(readFileSync(join(dir, 'sample.csv'), 'utf8'))
     expect(Object.keys(csv[0])).toEqual(['rank', 'repo', 'repo_id', 'stars', 'archived', 'homepage', 'docs_root', 'decision', 'reason', 'duplicate_of', 'frozen_on'])

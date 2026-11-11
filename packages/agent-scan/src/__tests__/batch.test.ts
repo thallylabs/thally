@@ -70,7 +70,7 @@ describe('batch outputs (AC6, AC8)', () => {
     expect(report).toMatchObject({ alreadyDone: 1, scanned: 1 })
     const resumed = readJsonl(jsonl)
     expect(resumed.map((r) => r.input).sort()).toEqual(['https://a.example.com/', 'https://b.example.com/'])
-    expect(second.requests.every((r) => r.url.startsWith('https://b.example.com'))).toBe(true)
+    expect(second.requests.every((r) => new URL(r.url).hostname === 'b.example.com')).toBe(true)
     // A third run does nothing.
     const third = createFakeTransport({})
     expect(await runBatch({ input, outDir: out, transport: third, ...quiet })).toMatchObject({ alreadyDone: 2, scanned: 0 })

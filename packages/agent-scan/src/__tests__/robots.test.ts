@@ -53,3 +53,14 @@ describe('robots.txt parsing (RFC 9309)', () => {
     expect(disallowAllRobots().isAllowed('x', '/robots.txt')).toBe(true)
   })
 })
+
+describe('robots.txt comment handling', () => {
+  it('parses about 100 KB of # characters in linear time', () => {
+    const body = `${'#'.repeat(100_000)}\nUser-agent: *\nDisallow: /private # trailing comment\n${'#'.repeat(100_000)}x`
+    const started = performance.now()
+    const rules = parseRobots(body)
+    expect(performance.now() - started).toBeLessThan(50)
+    expect(rules.isAllowed('ThallyAgentScan', '/private/a')).toBe(false)
+    expect(rules.isAllowed('ThallyAgentScan', '/public')).toBe(true)
+  })
+})
