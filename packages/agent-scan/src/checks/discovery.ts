@@ -1,0 +1,109 @@
+/** Discovery checks: llms.txt, llms-full.txt, sitemap, AI-agent robots rules and agent manifests. */
+
+import { methodology } from '../methodology/methodology.js'
+import type { SiteFacts } from '../facts.js'
+import type { FetchOutcome } from '../types.js'
+import { robotsPath } from '../url.js'
+import { binary, notApplicable, type CheckOutcome } from './shared.js'
+
+/** A `text/*` media type that is not HTML. */
+export function isPlainTextType(contentType: string | null): boolean {
+  return !!contentType && contentType.startsWith('text/') && contentType !== 'text/html'
+}
+
+/** llms.txt validity: 200, non-HTML text, body starts with `# `. */
+export function isValidLlmsTxt(outcome: FetchOutcome): boolean {
+  if (outcome.error || outcome.status !== 200 || !isPlainTextType(outcome.contentType)) return false
+  return (outcome.text ?? '').replace(/^﻿/, '').trimStart().startsWith('# ')
+}
+
+/** llms-full.txt validity: 200, non-HTML text, more than the minimum bytes. */
+export function isValidLlmsFull(outcome: FetchOutcome): boolean {
+  if (outcome.error || outcome.status !== 200 || !isPlainTextType(outcome.contentType)) return false
+  return outcome.bytes > methodology.probes.llmsFullMinBytes
+}
+
+/** A JSON media type: `application/json` or any `+json` suffix. */
+export function isJsonType(contentType: string | null): boolean {
+  return !!contentType && (contentType === 'application/json' || contentType.endsWith('+json'))
+}
+
+/** Parse a body as a JSON object; null when it is not one. */
+export function parseJsonObject(text: string | null): Record<string, unknown> | null {
+  if (!text) return null
+  try {
+    const value = JSON.parse(text)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/** Well-known manifest validity: 200, JSON media type, JSON object body. */
+export function isValidManifest(outcome: FetchOutcome): boolean {
+  return !outcome.error && outcome.status === 200 && isJsonType(outcome.contentType) && parseJsonObject(outcome.text) !== null
+}
+
+function urls(outcomes: FetchOutcome[]): string[] {
+  return outcomes.map((outcome) => outcome.requestedUrl)
+}
+
+/** `discovery.llms_txt` */
+export function llmsTxt(facts: SiteFacts): CheckOutcome {
+  const { hit, attempts, skippedForBudget } = facts.llms
+  if (hit) return binary(true, [hit.requestedUrl], 'llms.txt found.')
+  if (skippedForBudget) return notApplicable('budget', 'llms.txt probe skipped: request budget exhausted.', urls(attempts))
+  return binary(false, urls(attempts), 'No valid llms.txt found.')
+}
+
+/** `discovery.llms_full_txt` */
+export function llmsFullTxt(facts: SiteFacts): CheckOutcome {
+  const { hit, attempts, skippedForBudget } = facts.llmsFull
+  if (hit) return binary(true, [hit.requestedUrl], 'llms-full.txt found.')
+  if (skippedForBudget) return notApplicable('budget', 'llms-full.txt probe skipped: request budget exhausted.', urls(attempts))
+  return binary(false, urls(attempts), 'No valid llms-full.txt found.')
+}
+
+/** `discovery.sitemap` */
+export function sitemap(facts: SiteFacts): CheckOutcome {
+  const { attempts, parsed, locsUnderRoot, skippedForBudget } = facts.sitemap
+  if (locsUnderRoot > 0) return binary(true, parsed, `Sitemap lists ${locsUnderRoot} URLs under the docs root.`)
+  if (skippedForBudget) return notApplicable('budget', 'Sitemap probe skipped: request budget exhausted.', urls(attempts))
+  return binary(false, urls(attempts), parsed.length > 0 ? 'Sitemap lists no URLs under the docs root.' : 'No valid sitemap found.')
+}
+
+/** `discovery.robots_ai_agents` (reported, not scored) */
+export function robotsAiAgents(facts: SiteFacts): CheckOutcome {
+  const path = robotsPath(facts.docsRoot)
+  const blocked = methodology.probes.aiBotTokens.filter((token) => !facts.robots.rules.isAllowed(token, path))
+  const evidence = facts.robots.found ? [new URL('/robots.txt', facts.docsRoot).href] : []
+  if (blocked.length === 0) return binary(true, evidence, 'robots.txt allows the listed AI agents on the docs root.')
+  return binary(false, evidence, `robots.txt blocks ${blocked.join(', ')} on the docs root.`)
+}
+
+function mcpUrlIn(text: string): string | null {
+  for (const match of text.matchAll(/https?:\/\/[^\s<>()"'`\]]+/g)) {
+    try {
+      const url = new URL(match[0])
+      if (url.hostname.toLowerCase().startsWith('mcp.')) return url.href
+      if (url.pathname.split('/').some((segment) => segment.toLowerCase() === 'mcp')) return url.href
+    } catch {
+      // Not a URL.
+    }
+  }
+  return null
+}
+
+/** `discovery.agent_manifest` */
+export function agentManifest(facts: SiteFacts): CheckOutcome {
+  if (facts.wellKnown.hit) return binary(true, [facts.wellKnown.hit.requestedUrl], 'Agent or MCP manifest found at a well-known path.')
+  const llms = facts.llms.hit
+  const mcpUrl = llms?.text ? mcpUrlIn(llms.text) : null
+  if (llms && mcpUrl) return binary(true, [llms.requestedUrl, mcpUrl], 'llms.txt links an MCP endpoint.')
+  const root = facts.pages[0]
+  if (root?.html?.linkRelMcp || facts.rootLinkHeaderMcp) return binary(true, [root.outcome.finalUrl], 'Docs root declares an MCP link.')
+  if (facts.wellKnown.skippedForBudget) {
+    return notApplicable('budget', 'Manifest probes skipped: request budget exhausted.', urls(facts.wellKnown.attempts))
+  }
+  return binary(false, urls(facts.wellKnown.attempts), 'No agent or MCP manifest found.')
+}
