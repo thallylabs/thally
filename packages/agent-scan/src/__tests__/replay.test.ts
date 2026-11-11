@@ -1,10 +1,11 @@
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { runCli } from '../cli.js'
 import { createReplayTransport, siteKeyFor } from '../net/capture.js'
 import { noopRateLimiter } from '../net/rate-limiter.js'
 import { stableStringify } from '../output/stable-json.js'
@@ -86,6 +87,21 @@ describe('real transport against a local server', () => {
     const replayed = await replaySite(siteDir)
     expect(replayed.status).toBe('ok')
     expect(stableStringify(replayed)).toBe(stableStringify(original))
+  })
+
+  it('honours --allow-private-network on replay of a capture that does not record the setting', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-scan-private-flag-'))
+    const original = await scanSite(`${server.origin}/`, { allowPrivateNetwork: true, captureDir: dir, captureBodies: true, ...quiet })
+    const siteDir = join(dir, siteKeyFor(`${server.origin}/`))
+    const metaPath = join(siteDir, 'meta.json')
+    const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Record<string, unknown>
+    delete meta.allowPrivateNetwork
+    writeFileSync(metaPath, JSON.stringify(meta))
+    expect(await replaySite(siteDir)).toMatchObject({ status: 'skipped', reason: 'private_address' })
+    const out: string[] = []
+    const code = await runCli(['scan', '--replay', siteDir, '--json', '--allow-private-network'], { stdout: (t) => out.push(t), stderr: () => {} })
+    expect(code).toBe(0)
+    expect(out.join('')).toBe(`${stableStringify(original)}\n`)
   })
 
   it('refuses a loopback site without --allow-private-network', async () => {

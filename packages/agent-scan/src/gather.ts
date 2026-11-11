@@ -240,8 +240,9 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
 
   // 6. Agent and MCP discovery, within one allocation of probe URLs (the
   // number of well-known paths). An MCP URL from llms.txt is verified first
-  // (it must look like an endpoint, not a page) and takes one slot; the
-  // remaining slots go to well-known manifests, stopping at the first hit.
+  // (it must look like an endpoint, not a page) and takes one slot, or two
+  // when it is on another origin (that origin's robots.txt is fetched too);
+  // the remaining slots go to well-known manifests, stopping at the first hit.
   let slots = methodology.probes.wellKnown.length
   const mcpEndpoint: SiteFacts['mcpEndpoint'] = {
     url: llms.hit?.text ? mcpUrlIn(llms.hit.text) : null,
@@ -250,7 +251,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     skippedForBudget: false,
   }
   if (mcpEndpoint.url) {
-    slots--
+    slots -= new URL(mcpEndpoint.url).origin === origin ? 1 : 2
     const outcome = await fetcher.get(mcpEndpoint.url, { purpose: 'mcp' })
     if (isBudgetSkip(outcome)) mcpEndpoint.skippedForBudget = true
     else {

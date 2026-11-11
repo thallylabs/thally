@@ -126,8 +126,11 @@ export function agentManifest(facts: SiteFacts): CheckOutcome {
     return notApplicable('budget', 'Manifest or MCP endpoint probes skipped: request budget exhausted.', urls(facts.wellKnown.attempts))
   }
   const evidence = [...urls(facts.wellKnown.attempts), ...(mcp.url ? [mcp.url] : [])]
-  const detail = mcp.url
-    ? 'No agent or MCP manifest found; the MCP URL in llms.txt is not an endpoint.'
-    : 'No agent or MCP manifest found.'
+  const mcpError = mcp.outcome?.error
+  const detail = !mcp.url
+    ? 'No agent or MCP manifest found.'
+    : mcpError
+      ? `No agent or MCP manifest found; the MCP URL in llms.txt could not be fetched (${mcpError}).`
+      : 'No agent or MCP manifest found; the MCP URL in llms.txt is not an endpoint.'
   return binary(false, evidence, detail)
 }

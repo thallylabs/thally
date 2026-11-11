@@ -186,6 +186,33 @@ describe('discovery.agent_manifest and MCP URLs from llms.txt', () => {
     expect(check(result, 'discovery.agent_manifest')).toMatchObject({ status: 'pass', detail: 'llms.txt links an MCP endpoint.' })
   })
 
+  it('verifies an MCP URL on another host, fetching its robots.txt within the probe allocation', async () => {
+    const routes = fixtureSite({ manifest: false })
+    routes[`${origin}/llms.txt`] = text('# Docs\n\n- [MCP](https://mcp.other.test/sse)\n')
+    routes['https://mcp.other.test/robots.txt'] = notFound
+    routes['https://mcp.other.test/sse'] = { status: 405, headers: { 'content-type': 'application/json' }, body: '{}' }
+    const { result, requested } = await scanWith(routes)
+    expect(check(result, 'discovery.agent_manifest')).toMatchObject({ status: 'pass', evidence: [`${origin}/llms.txt`, 'https://mcp.other.test/sse'] })
+    expect(requested.filter((url) => url.startsWith('https://mcp.other.test/'))).toEqual(['https://mcp.other.test/robots.txt', 'https://mcp.other.test/sse'])
+    // A verified endpoint ends discovery; no well-known probes are needed.
+    expect(requested.filter((url) => url.includes('/.well-known/'))).toEqual([])
+  })
+
+  it('keeps the site ok when the MCP host cannot be resolved, and says why the check failed', async () => {
+    const routes = fixtureSite({ manifest: false })
+    routes[`${origin}/llms.txt`] = text('# Docs\n\n- [MCP](https://mcp.other.test/sse)\n')
+    routes['https://mcp.other.test/robots.txt'] = { error: 'dns' }
+    const { result, requested } = await scanWith(routes)
+    expect(result.status).toBe('ok')
+    expect(check(result, 'discovery.agent_manifest')).toMatchObject({
+      status: 'fail',
+      detail: 'No agent or MCP manifest found; the MCP URL in llms.txt could not be fetched (dns).',
+    })
+    expect(requested).not.toContain('https://mcp.other.test/sse')
+    // The other host's robots.txt and MCP URL took two of the three slots: one well-known probe is left.
+    expect(requested.filter((url) => url.includes('/.well-known/'))).toEqual([`${origin}/.well-known/mcp.json`])
+  })
+
   it('judges endpoint plausibility from status, media type and path', () => {
     const at = (url: string, status: number, contentType: string | null): FetchOutcome => ({
       requestedUrl: url, finalUrl: url, status, error: null, redirects: 0, contentType, headers: [],
