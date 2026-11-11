@@ -80,17 +80,24 @@ function stripWww(host: string): string {
 }
 
 /**
- * Same site for redirect purposes: the same hostname (any scheme change), or
- * the same hostname with `www.` added or removed.
+ * Same site, from `from` to `to`: the same hostname apart from an added or
+ * removed `www.`, the same scheme or an http-to-https upgrade (never a
+ * downgrade), and the same port (default ports are equal to each other on an
+ * upgrade).
  */
-export function isSameSite(a: string, b: string): boolean {
+export function isSameSite(from: string, to: string): boolean {
+  let x: URL
+  let y: URL
   try {
-    const x = new URL(a)
-    const y = new URL(b)
-    return stripWww(x.hostname) === stripWww(y.hostname)
+    x = new URL(from)
+    y = new URL(to)
   } catch {
     return false
   }
+  if (stripWww(x.hostname) !== stripWww(y.hostname)) return false
+  if (x.protocol === y.protocol) return x.port === y.port
+  if (x.protocol === 'http:' && y.protocol === 'https:') return x.port === y.port
+  return false
 }
 
 /** Path plus query, the form robots rules match against. */

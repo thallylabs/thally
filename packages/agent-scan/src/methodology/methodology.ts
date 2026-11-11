@@ -49,10 +49,12 @@ export interface Methodology {
     llmsTxt: string
     wellKnown: string[]
     aiBotTokens: string[]
-    alternateVariants: Array<'link_alternate' | 'dot_md' | 'accept_markdown' | 'format_json'>
+    alternateVariants: Array<'link_alternate' | 'dot_md' | 'accept_negotiation' | 'format_json'>
     llmsFullMinBytes: number
     llmsFullPrefixBytes: number
     sitemapMaxIndexChildren: number
+    sitemapPaths: string[]
+    jsonLdPageTypes: string[]
     serverRenderedMinChars: number
     maxStatusRedirects: number
   }

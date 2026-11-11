@@ -13,11 +13,15 @@ export type CheckStatus = 'pass' | 'fail' | 'not_applicable'
 /** Letter grade derived from the 0–100 score. */
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F'
 
-/** Closed set; never free text, so results stay byte-stable across OSes. */
+/**
+ * Closed set; never free text, so results stay byte-stable across OSes.
+ * `decode` means the body could not be decompressed as its Content-Encoding
+ * declared.
+ */
 export type ErrorCode =
   | 'invalid_url' | 'private_address' | 'dns' | 'timeout' | 'connection' | 'tls'
   | 'http_status' | 'not_html' | 'body_too_large' | 'redirect_limit' | 'redirect_offsite'
-  | 'robots_disallowed' | 'robots_unreachable' | 'budget_exhausted' | 'capture_miss'
+  | 'robots_disallowed' | 'robots_unreachable' | 'budget_exhausted' | 'capture_miss' | 'decode'
 
 /**
  * Why a check did not apply. `site_not_scanned` marks every check on a site

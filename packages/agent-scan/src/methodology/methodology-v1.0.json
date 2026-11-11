@@ -29,10 +29,20 @@
       "/.well-known/agent-card.json"
     ],
     "aiBotTokens": ["GPTBot", "ClaudeBot", "PerplexityBot"],
-    "alternateVariants": ["link_alternate", "dot_md", "accept_markdown", "format_json"],
+    "alternateVariants": ["link_alternate", "dot_md", "accept_negotiation", "format_json"],
     "llmsFullMinBytes": 1024,
     "llmsFullPrefixBytes": 2048,
     "sitemapMaxIndexChildren": 2,
+    "sitemapPaths": ["/sitemap.xml", "/sitemap-index.xml"],
+    "jsonLdPageTypes": [
+      "TechArticle",
+      "Article",
+      "BlogPosting",
+      "WebPage",
+      "APIReference",
+      "HowTo",
+      "FAQPage"
+    ],
     "serverRenderedMinChars": 200,
     "maxStatusRedirects": 2
   },
@@ -83,7 +93,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
+      "rule": "Sitemap candidates, in order and de-duplicated: robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin, then <root>sitemap.xml; at most 3 are fetched. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
       "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
     },
     {
@@ -101,7 +111,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "Any of: (a) a well-known probe returns 200, a JSON media type and a JSON object; (b) llms.txt contains an absolute http(s) URL whose host starts with 'mcp.' or whose path has a segment 'mcp'; (c) the docs root HTML has <link rel=\"mcp\"> or the response has a Link header with rel=\"mcp\".",
+      "rule": "Probe URLs share one allocation of 3 (the number of well-known paths). If llms.txt contains an absolute http(s) URL whose host starts with 'mcp.' or whose path has a segment 'mcp', that URL is fetched first with Accept: application/json, text/event-stream and takes one slot; the remaining slots go to the well-known paths in order. Passes on any of: (a) a well-known probe returns 200, a JSON media type and a JSON object; (b) the llms.txt MCP URL is plausibly an endpoint: status 400, 405 or 406, or a 2xx response with a JSON or text/event-stream media type, or any 2xx non-HTML response at a path whose last segment is 'mcp' (a 200 HTML page is not an endpoint); (c) the docs root HTML has <link rel=\"mcp\"> or the response has a Link header with rel=\"mcp\".",
       "notApplicableWhen": "a probe was skipped for budget and nothing else passed (reason: budget)"
     },
     {
@@ -137,7 +147,7 @@
       "weight": 1,
       "scored": true,
       "scope": "page",
-      "rule": "Any of: dateModified on any JSON-LD node at any depth, including @graph; a non-empty <meta property=\"article:modified_time\">; or a <time> element whose own, parent's or grandparent's text matches /\\b(last\\s+)?(updated|modified|edited)\\b/i.",
+      "rule": "Any of: dateModified on the page's JSON-LD node (see parity.description for node selection) at any depth, or on any JSON-LD node when the page has no node of a page type in probes.jsonLdPageTypes; a non-empty <meta property=\"article:modified_time\">; or a <time> element whose own, parent's or grandparent's text matches /\\b(last\\s+)?(updated|modified|edited)\\b/i.",
       "notApplicableWhen": "no HTML pages"
     },
     {
@@ -182,7 +192,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "On the probe page, any variant in order returns valid content. Markdown: 200, media type text/markdown, text/x-markdown or text/plain, body not starting with '<'. JSON: 200, application/json or *+json, body parses to an object. Variants: (1) an HTML <link rel=alternate> or HTTP Link alternate of type text/markdown or application/json whose target is not llms.txt or llms-full.txt; (2) <url>.md, or <url>index.md when the path ends with '/'; (3) the same URL with Accept: text/markdown; (4) <url>?format=json with Accept: application/json.",
+      "rule": "On the probe page, the variants are tried in order and the first valid one passes. Markdown: 200, media type text/markdown, text/x-markdown or text/plain (text/plain only for variants (1) and (2)), body not starting with '<'. JSON: 200, application/json or *+json, body parses to an object. Feeds never count: media types application/rss+xml, application/atom+xml and application/feed+json, and URLs whose path ends in 'feed.json' or 'feed'. Variants: (1) the first HTML <link rel=alternate> or HTTP Link alternate of type text/markdown or application/json whose target is not llms.txt, llms-full.txt or a feed and is on the same site (a declared alternate on another host is recorded and not fetched, and the check fails if nothing else passes); (2) <url>.md, or <url>index.md when the path ends with '/'; (3) the same URL with Accept: text/markdown, application/json;q=0.9 (plain content negotiation; a text/markdown, text/x-markdown or JSON response counts); (4) <url>?format=json with Accept: application/json.",
       "notApplicableWhen": "every variant was skipped for budget (reason: budget)"
     },
     {
@@ -218,7 +228,7 @@
       "weight": 1,
       "scored": true,
       "scope": "site",
-      "rule": "The alternate title (Markdown: frontmatter title, else the first '# ' heading; JSON: top-level title, then headline, then name), normalized by NFKC, lower-case, collapsed whitespace and stripped punctuation, equals the normalized first <h1>, or the normalized <title> starts with it.",
+      "rule": "The alternate title (Markdown: frontmatter title, else the first '# ' heading; JSON: top-level title, then headline, then name, where a JSON-LD shaped object with @graph or @type uses the page node selected as in parity.description), normalized by NFKC, lower-case, collapsed whitespace and stripped punctuation, equals the normalized first <h1>, or the normalized <title> starts with it.",
       "notApplicableWhen": "no alternate obtained (reason: no_alternate)"
     },
     {
@@ -227,7 +237,7 @@
       "weight": 1,
       "scored": true,
       "scope": "page",
-      "rule": "On pages that have both a meta description and a JSON-LD description (the first node, in document order, with a string description), the normalized values are equal.",
+      "rule": "On pages that have both a meta description and a JSON-LD description, the normalized values are equal. The JSON-LD description is taken from the page node: among top-level nodes (including @graph members) of a type in probes.jsonLdPageTypes, the node whose url or @id (ignoring the fragment) equals the page URL, else the first node of the earliest type in that list (in document order); a site-level node (for example WebSite or Organization) is used only when the page has no node of a page type.",
       "notApplicableWhen": "no page has both (reason: no_comparable_pages)"
     }
   ]

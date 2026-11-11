@@ -81,7 +81,8 @@ export function robotsAiAgents(facts: SiteFacts): CheckOutcome {
   return binary(false, evidence, `robots.txt blocks ${blocked.join(', ')} on the docs root.`)
 }
 
-function mcpUrlIn(text: string): string | null {
+/** The first absolute URL in a text whose host starts with `mcp.` or whose path has an `mcp` segment. */
+export function mcpUrlIn(text: string): string | null {
   for (const match of text.matchAll(/https?:\/\/[^\s<>()"'`\]]+/g)) {
     try {
       const url = new URL(match[0])
@@ -94,16 +95,39 @@ function mcpUrlIn(text: string): string | null {
   return null
 }
 
+/**
+ * Whether a response to an MCP URL from llms.txt looks like an endpoint
+ * rather than a documentation page: 400, 405 or 406 (a protocol endpoint
+ * refusing a plain GET), or a 2xx JSON or event-stream response, or any 2xx
+ * non-HTML response at a path whose last segment is `mcp`. A 200 HTML page
+ * is not.
+ */
+export function isPlausibleMcpEndpoint(outcome: FetchOutcome): boolean {
+  if (outcome.error || outcome.status === null) return false
+  if ([400, 405, 406].includes(outcome.status)) return true
+  if (outcome.status < 200 || outcome.status > 299) return false
+  const type = outcome.contentType
+  if (isJsonType(type) || type === 'text/event-stream') return true
+  const isHtml = type === 'text/html' || type === 'application/xhtml+xml'
+  const lastSegment = new URL(outcome.finalUrl).pathname.split('/').filter(Boolean).pop()?.toLowerCase()
+  return !isHtml && lastSegment === 'mcp'
+}
+
 /** `discovery.agent_manifest` */
 export function agentManifest(facts: SiteFacts): CheckOutcome {
   if (facts.wellKnown.hit) return binary(true, [facts.wellKnown.hit.requestedUrl], 'Agent or MCP manifest found at a well-known path.')
-  const llms = facts.llms.hit
-  const mcpUrl = llms?.text ? mcpUrlIn(llms.text) : null
-  if (llms && mcpUrl) return binary(true, [llms.requestedUrl, mcpUrl], 'llms.txt links an MCP endpoint.')
+  const mcp = facts.mcpEndpoint
+  if (mcp.url && mcp.isEndpoint && facts.llms.hit) {
+    return binary(true, [facts.llms.hit.requestedUrl, mcp.url], 'llms.txt links an MCP endpoint.')
+  }
   const root = facts.pages[0]
   if (root?.html?.linkRelMcp || facts.rootLinkHeaderMcp) return binary(true, [root.outcome.finalUrl], 'Docs root declares an MCP link.')
-  if (facts.wellKnown.skippedForBudget) {
-    return notApplicable('budget', 'Manifest probes skipped: request budget exhausted.', urls(facts.wellKnown.attempts))
+  if (facts.wellKnown.skippedForBudget || mcp.skippedForBudget) {
+    return notApplicable('budget', 'Manifest or MCP endpoint probes skipped: request budget exhausted.', urls(facts.wellKnown.attempts))
   }
-  return binary(false, urls(facts.wellKnown.attempts), 'No agent or MCP manifest found.')
+  const evidence = [...urls(facts.wellKnown.attempts), ...(mcp.url ? [mcp.url] : [])]
+  const detail = mcp.url
+    ? 'No agent or MCP manifest found; the MCP URL in llms.txt is not an endpoint.'
+    : 'No agent or MCP manifest found.'
+  return binary(false, evidence, detail)
 }

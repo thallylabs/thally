@@ -165,8 +165,10 @@ export function createNodeTransport(options: NodeTransportOptions = {}): Transpo
             total += chunk.length
           })
           stream.on('end', done)
-          stream.on('error', (error) => {
-            if (!truncated) finish({ error: mapNetworkError(error) })
+          // A decompressor error is a malformed body, not a network failure,
+          // and is never retried.
+          inflater?.on('error', () => {
+            if (!truncated) finish({ error: 'decode' })
           })
           response.on('error', (error) => {
             if (!truncated) finish({ error: mapNetworkError(error) })

@@ -6,7 +6,7 @@ import { methodology } from '../methodology/methodology.js'
 import { noopRateLimiter } from '../net/rate-limiter.js'
 import { scanSite } from '../scan.js'
 import type { SiteResult } from '../types.js'
-import { createFakeTransport, docPage, html, notFound, text, type FakeRoutes } from './helpers.js'
+import { createFakeTransport, docPage, html, notFound, text, type FakeRoutes, NEGOTIATE } from './helpers.js'
 import { fixtureSite } from './fixture-site.js'
 
 const quiet = { rateLimiter: noopRateLimiter(), sleep: async () => {}, now: () => new Date('2026-11-12T00:00:00Z') }
@@ -156,7 +156,7 @@ describe('request plan behaviour', () => {
     routes[`${origin}/.well-known/mcp/server-card.json`] = { status: 503, body: '' }
     routes[`${origin}/.well-known/agent-card.json`] = { status: 503, body: '' }
     routes[`${origin}/r5.md`] = { status: 503, body: '' }
-    routes[`${origin}/r5 text/markdown`] = { status: 503, body: '' }
+    routes[`${origin}/r5 ${NEGOTIATE}`] = { status: 503, body: '' }
     routes[`${origin}/r5?format=json`] = { status: 503, body: '' }
     const result = await scan(`${origin}/r0`, routes)
     expect(result.status).toBe('ok')
@@ -180,7 +180,7 @@ describe('request plan behaviour', () => {
     routes[`${origin}/`] = html(docPage({ url: `${origin}/`, title: 'Home', links: ['https://elsewhere.test/a', '/file.pdf'] }))
     routes[`${origin}/.md`] = notFound
     routes[`${origin}/index.md`] = notFound
-    routes[`${origin}/ text/markdown`] = html('<html></html>')
+    routes[`${origin}/ ${NEGOTIATE}`] = html('<html></html>')
     routes[`${origin}/?format=json`] = notFound
     const result = await scan(`${origin}/`, routes)
     expect(result.sample).toMatchObject({ source: 'root_only', pages: [`${origin}/`] })
@@ -210,11 +210,11 @@ describe('request plan behaviour', () => {
     expect(check(result, 'parity.title')).toMatchObject({ status: 'not_applicable', notApplicableReason: 'no_alternate' })
   })
 
-  it('accepts an HTML link alternate and an Accept: text/markdown response', async () => {
+  it('accepts a content-negotiated Markdown response on the page URL', async () => {
     const routes = fixtureSite({ markdown: false })
-    routes[`${origin}/guide/page-00 text/markdown`] = text('# Page 00\n\nBody', 'text/markdown')
+    routes[`${origin}/guide/page-00 ${NEGOTIATE}`] = text('# Page 00\n\nBody', 'text/markdown')
     const accepted = await scan(`${origin}/`, routes)
-    expect(check(accepted, 'retrieval.alternate')).toMatchObject({ status: 'pass', detail: 'Alternate markdown representation found (accept_markdown).' })
+    expect(check(accepted, 'retrieval.alternate')).toMatchObject({ status: 'pass', detail: 'Alternate markdown representation found (accept_negotiation).' })
     expect(check(accepted, 'parity.title').status).toBe('pass')
   })
 

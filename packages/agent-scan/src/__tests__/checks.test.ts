@@ -34,6 +34,7 @@ function facts(pages: PageRecord[], overrides: Partial<SiteFacts> = {}): SiteFac
     sitemap: { attempts: [], parsed: [], locsUnderRoot: 0, skippedForBudget: false },
     wellKnown: emptyProbe,
     rootLinkHeaderMcp: false,
+    mcpEndpoint: { url: null, outcome: null, isEndpoint: false, skippedForBudget: false },
     alternate: { probePage: pages[0]?.url ?? ROOT, attempts: [], hit: null, title: null },
     ...overrides,
   }
@@ -173,7 +174,11 @@ describe('discovery checks', () => {
     const manifest = outcome('https://x.test/m.json', { contentType: 'application/json', text: '{"a":1}' })
     expect(run('discovery.agent_manifest', facts([good(ROOT)], { wellKnown: { attempts: [manifest], hit: manifest, skippedForBudget: false } })).status).toBe('pass')
     const withMcp = llms('# Docs\n- [Server](https://example.test/api/mcp)')
-    expect(run('discovery.agent_manifest', facts([good(ROOT)], { llms: { attempts: [withMcp], hit: withMcp, skippedForBudget: false } })).status).toBe('pass')
+    const endpoint = outcome('https://example.test/api/mcp', { status: 405, contentType: 'application/json', text: '{}' })
+    expect(run('discovery.agent_manifest', facts([good(ROOT)], {
+      llms: { attempts: [withMcp], hit: withMcp, skippedForBudget: false },
+      mcpEndpoint: { url: 'https://example.test/api/mcp', outcome: endpoint, isEndpoint: true, skippedForBudget: false },
+    })).status).toBe('pass')
     const relMcp = page(ROOT, '<html><head><link rel="mcp" href="https://x.test/mcp"></head></html>')
     expect(run('discovery.agent_manifest', facts([relMcp])).status).toBe('pass')
     expect(run('discovery.agent_manifest', facts([good(ROOT)], { rootLinkHeaderMcp: true })).status).toBe('pass')
@@ -194,7 +199,7 @@ describe('retrieval.alternate and parity', () => {
     const hit = attempt({})
     expect(run('retrieval.alternate', facts(pages, { alternate: { probePage: probe, attempts: [hit], hit, title: 'Install' } })).status).toBe('pass')
     expect(run('retrieval.alternate', facts(pages, { alternate: { probePage: probe, attempts: [attempt({ valid: false })], hit: null, title: null } })).status).toBe('fail')
-    const skipped = attempt({ outcome: null, valid: false })
+    const skipped = attempt({ outcome: null, valid: false, skipped: 'budget' })
     expect(run('retrieval.alternate', facts(pages, { alternate: { probePage: probe, attempts: [skipped, skipped], hit: null, title: null } })).notApplicableReason).toBe('budget')
   })
 

@@ -39,6 +39,8 @@ export interface CaptureMeta {
   methodology: { id: string; version: string }
   scannerVersion: string
   bodies: boolean
+  /** The scan ran with `allowPrivateNetwork`; replay applies the same URL guard. */
+  allowPrivateNetwork?: boolean
 }
 
 /** Records exchanges made through the wrapped transport. */

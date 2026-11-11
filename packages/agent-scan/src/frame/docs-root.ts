@@ -117,7 +117,7 @@ export async function resolveDocsRoot(rawHomepage: string | null, fetcher: Fetch
       const label = $(element).text().replace(/\s+/g, ' ').trim().toLowerCase()
       if (!DOCS_LINK_TEXT.has(label)) return
       const target = normalizeUrl($(element).attr('href') ?? '', homepageOutcome!.finalUrl)
-      if (target && isSameSite(target, homepageOutcome!.finalUrl)) linkTarget = target
+      if (target && isSameSite(homepageOutcome!.finalUrl, target)) linkTarget = target
     })
     if (linkTarget) {
       const linkHit = await tryCandidate(linkTarget)

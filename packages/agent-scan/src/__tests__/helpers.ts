@@ -4,6 +4,7 @@
  * request fails the test instead of reaching the network.
  */
 
+import { ACCEPT } from '../net/fetcher.js'
 import type { Transport, TransportRequest, TransportResponse, TransportError } from '../types.js'
 
 /** A canned response. */
@@ -65,6 +66,9 @@ export function html(body: string, extra: Partial<FakeRoute> = {}): FakeRoute {
 export function text(body: string, type = 'text/plain'): FakeRoute {
   return { status: 200, headers: { 'content-type': type }, body }
 }
+
+/** Accept header of the plain content-negotiation request, for route keys. */
+export const NEGOTIATE = ACCEPT['alt-negotiate']
 
 /** 404 helper. */
 export const notFound: FakeRoute = { status: 404, headers: { 'content-type': 'text/html' }, body: 'not found' }

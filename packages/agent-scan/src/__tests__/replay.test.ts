@@ -78,6 +78,16 @@ describe('real transport against a local server', () => {
     expect(stableStringify(await replaySite(copy, { allowPrivateNetwork: true }))).toBe(stableStringify(original))
   })
 
+  it('replays a private-network capture without the flag, because the capture records it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-scan-private-'))
+    const original = await scanSite(`${server.origin}/`, { allowPrivateNetwork: true, captureDir: dir, captureBodies: true, ...quiet })
+    const siteDir = join(dir, siteKeyFor(`${server.origin}/`))
+    expect(JSON.parse(readFileSync(join(siteDir, 'meta.json'), 'utf8'))).toMatchObject({ allowPrivateNetwork: true })
+    const replayed = await replaySite(siteDir)
+    expect(replayed.status).toBe('ok')
+    expect(stableStringify(replayed)).toBe(stableStringify(original))
+  })
+
   it('refuses a loopback site without --allow-private-network', async () => {
     const result = await scanSite(`${server.origin}/`, quiet)
     expect(result).toMatchObject({ status: 'skipped', reason: 'private_address' })

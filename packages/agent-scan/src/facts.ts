@@ -25,12 +25,24 @@ export interface ProbeSet {
 
 /** One alternate-representation variant tried on the probe page. */
 export interface AlternateAttempt {
-  variant: 'link_alternate' | 'dot_md' | 'accept_markdown' | 'format_json'
+  variant: 'link_alternate' | 'dot_md' | 'accept_negotiation' | 'format_json'
   url: string
   kind: 'markdown' | 'json'
-  /** Null when the variant was skipped for budget. */
+  /** Null when the variant was not fetched (see `skipped`). */
   outcome: FetchOutcome | null
+  /** Why the variant was not fetched: no budget left, or the target is on another host. */
+  skipped?: 'budget' | 'offsite'
   valid: boolean
+}
+
+/** Verification of an MCP URL found in llms.txt. */
+export interface McpEndpointProbe {
+  /** The first MCP-looking URL in llms.txt, or null. */
+  url: string | null
+  outcome: FetchOutcome | null
+  /** The response looked like an endpoint rather than a page. */
+  isEndpoint: boolean
+  skippedForBudget: boolean
 }
 
 /** Everything the checks evaluate. */
@@ -50,6 +62,7 @@ export interface SiteFacts {
     skippedForBudget: boolean
   }
   wellKnown: ProbeSet
+  mcpEndpoint: McpEndpointProbe
   /** The docs root response carried a `Link` header with `rel="mcp"`. */
   rootLinkHeaderMcp: boolean
   alternate: {

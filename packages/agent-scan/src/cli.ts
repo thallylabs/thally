@@ -3,8 +3,7 @@
  * `thally-scan` command line. Help text is generated from the same option
  * tables the parser uses, so the two cannot drift.
  *
- * Exit codes: 0 success; 2 usage error; 3 the scanned site's status is
- * `error` or `skipped`; 1 unexpected failure.
+ * Exit codes differ per command; see `exitCodes` on each command spec.
  */
 
 import { realpathSync } from 'node:fs'
@@ -15,6 +14,7 @@ import { runBatch, type CaptureBodiesSetting } from './batch.js'
 import { buildFrame } from './frame/frame.js'
 import { methodology } from './methodology/methodology.js'
 import { defaultCaptureBodies, siteKeyFor } from './net/capture.js'
+import { CsvError } from './output/csv.js'
 import { stableStringify } from './output/stable-json.js'
 import { replaySite, scanSite } from './scan.js'
 import type { RateLimiter, SiteResult, Transport } from './types.js'
@@ -43,6 +43,8 @@ interface CommandSpec {
   usage: string
   summary: string
   options: OptionSpec[]
+  /** One line per exit code, shown in help. */
+  exitCodes: string[]
 }
 
 const CAPTURE_OPTIONS: OptionSpec[] = [
@@ -64,6 +66,12 @@ const COMMANDS: CommandSpec[] = [
       { name: 'replay', type: 'string', value: '<dir>', description: 'Replay a capture directory recorded with bodies instead of fetching.' },
       PRIVATE_OPTION,
     ],
+    exitCodes: [
+      '0  the site was scanned (status ok)',
+      '3  the site could not be scored (status error or skipped)',
+      '2  usage error',
+      '1  unexpected failure',
+    ],
   },
   {
     name: 'batch',
@@ -77,6 +85,11 @@ const COMMANDS: CommandSpec[] = [
       ...CAPTURE_OPTIONS,
       PRIVATE_OPTION,
     ],
+    exitCodes: [
+      '0  the batch finished, even if some sites have status error or skipped',
+      '1  at least one site failed unexpectedly (it is retried on the next run), or another unexpected failure',
+      '2  usage error, including a malformed input CSV',
+    ],
   },
   {
     name: 'frame',
@@ -88,6 +101,11 @@ const COMMANDS: CommandSpec[] = [
       { name: 'captures', type: 'string', value: '<dir>', description: 'Record every request under <dir>/frame.' },
       PRIVATE_OPTION,
     ],
+    exitCodes: [
+      '0  the frame was written',
+      '2  usage error',
+      '1  unexpected failure',
+    ],
   },
 ]
 
@@ -97,6 +115,10 @@ const GLOBAL_OPTIONS: OptionSpec[] = [
 ]
 
 class UsageError extends Error {}
+
+function exitCodeLines(spec: CommandSpec): string[] {
+  return spec.exitCodes.map((line) => `  ${line}`)
+}
 
 function optionLines(options: OptionSpec[]): string[] {
   const labels = options.map((option) => `--${option.name}${option.value ? ` ${option.value}` : ''}`)
@@ -108,7 +130,11 @@ function optionLines(options: OptionSpec[]): string[] {
 export function helpText(command?: string): string {
   const spec = COMMANDS.find((entry) => entry.name === command)
   if (spec) {
-    return [`Usage: ${spec.usage}`, '', spec.summary, '', 'Options:', ...optionLines([...spec.options, GLOBAL_OPTIONS[0]]), ''].join('\n')
+    return [
+      `Usage: ${spec.usage}`, '', spec.summary, '',
+      'Options:', ...optionLines([...spec.options, ...GLOBAL_OPTIONS]), '',
+      'Exit codes:', ...exitCodeLines(spec), '',
+    ].join('\n')
   }
   const width = Math.max(...COMMANDS.map((entry) => entry.name.length))
   return [
@@ -122,10 +148,23 @@ export function helpText(command?: string): string {
     'Global options:',
     ...optionLines(GLOBAL_OPTIONS),
     '',
-    ...COMMANDS.flatMap((entry) => [`${entry.usage}`, ...optionLines(entry.options), '']),
-    'Exit codes: 0 ok, 2 usage error, 3 site status error or skipped, 1 unexpected failure.',
-    '',
+    ...COMMANDS.flatMap((entry) => [
+      `${entry.usage}`, ...optionLines(entry.options), '',
+      `  Exit codes (${entry.name}):`, ...exitCodeLines(entry).map((line) => `  ${line}`), '',
+    ]),
   ].join('\n')
+}
+
+function printVersion(io: CliIo): number {
+  io.stdout(`${scannerVersion} (${methodology.id} v${methodology.version})\n`)
+  return 0
+}
+
+/** `--capture-bodies` only means something when captures are being written. */
+function requireCapturesFor(values: Record<string, unknown>): void {
+  if (values['capture-bodies'] !== undefined && typeof values.captures !== 'string') {
+    throw new UsageError('--capture-bodies needs --captures <dir>')
+  }
 }
 
 function parseCommand(spec: CommandSpec, argv: string[]) {
@@ -188,6 +227,8 @@ async function runScan(argv: string[], io: CliIo): Promise<number> {
     io.stdout(helpText('scan'))
     return 0
   }
+  if (values.version) return printVersion(io)
+  requireCapturesFor(values)
   const allowPrivateNetwork = values['allow-private-network'] === true
   let result: SiteResult
   if (typeof values.replay === 'string') {
@@ -223,9 +264,13 @@ async function runBatchCommand(argv: string[], io: CliIo): Promise<number> {
     io.stdout(helpText('batch'))
     return 0
   }
+  if (values.version) return printVersion(io)
+  requireCapturesFor(values)
   if (positionals.length > 0) throw new UsageError('batch takes no positional arguments')
   if (typeof values.input !== 'string' || typeof values.out !== 'string') throw new UsageError('batch needs --input and --out')
-  const report = await runBatch({
+  let report: Awaited<ReturnType<typeof runBatch>>
+  try {
+    report = await runBatch({
     input: values.input,
     outDir: values.out,
     concurrency: positiveInt(values.concurrency as string | undefined, 'concurrency', 4),
@@ -239,7 +284,11 @@ async function runBatchCommand(argv: string[], io: CliIo): Promise<number> {
     ...(io.now ? { now: io.now } : {}),
     onResult: (result) => io.stderr(`${result.status === 'ok' ? `${String(result.score).padStart(3)} ${result.grade}` : result.status.toUpperCase()}  ${result.input}\n`),
     onFailure: (input) => io.stderr(`FAILED  ${input} (will be retried on the next run)\n`),
-  })
+    })
+  } catch (error) {
+    if (error instanceof CsvError) throw new UsageError(`${values.input}: line ${error.line}: ${error.message}`)
+    throw error
+  }
   io.stdout(`Sites: ${report.total}  already done: ${report.alreadyDone}  scanned: ${report.scanned}  failed: ${report.failed.length}\nWrote ${values.out}/results.jsonl, results.csv, summary.json\n`)
   return report.failed.length > 0 ? 1 : 0
 }
@@ -250,6 +299,7 @@ async function runFrame(argv: string[], io: CliIo): Promise<number> {
     io.stdout(helpText('frame'))
     return 0
   }
+  if (values.version) return printVersion(io)
   if (positionals.length > 0) throw new UsageError('frame takes no positional arguments')
   if (typeof values.out !== 'string') throw new UsageError('frame needs --out')
   const limit = positiveInt(values.limit as string | undefined, 'limit', 1000)
@@ -282,10 +332,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       io.stdout(helpText(rest[0]))
       return command === undefined ? 2 : 0
     }
-    if (command === '--version' || command === '-v') {
-      io.stdout(`${scannerVersion} (${methodology.id} v${methodology.version})\n`)
-      return 0
-    }
+    if (command === '--version' || command === '-v') return printVersion(io)
     if (command === 'scan') return await runScan(rest, io)
     if (command === 'batch') return await runBatchCommand(rest, io)
     if (command === 'frame') return await runFrame(rest, io)

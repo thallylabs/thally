@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { helpText, runCli, type CliIo } from '../cli.js'
+import { methodology } from '../methodology/methodology.js'
 import { noopRateLimiter } from '../net/rate-limiter.js'
 import type { SiteResult } from '../types.js'
+import { scannerVersion } from '../version.js'
 import { createFakeTransport, notFound, type FakeRoutes } from './helpers.js'
 import { fixtureSite } from './fixture-site.js'
 
@@ -94,6 +96,52 @@ describe('thally-scan CLI (AC6)', () => {
     expect(await runCli(['scan', '--replay', siteDir, '--json'], replay.io)).toBe(0)
     expect(replay.out()).toBe(run.out())
     expect(readFileSync(join(siteDir, 'meta.json'), 'utf8')).toContain('"bodies":true')
+  })
+
+  it('every command prints the version with --version', async () => {
+    for (const command of ['scan', 'batch', 'frame']) {
+      const run = io()
+      expect(await runCli([command, '--version'], run.io), command).toBe(0)
+      expect(run.out()).toBe(`${scannerVersion} (${methodology.id} v${methodology.version})\n`)
+    }
+  })
+
+  it('help states exit codes per command, with batch separate from scan', async () => {
+    const batchHelp = io()
+    expect(await runCli(['batch', '--help'], batchHelp.io)).toBe(0)
+    expect(batchHelp.out()).toContain('0  the batch finished, even if some sites have status error or skipped')
+    expect(batchHelp.out()).toContain('1  at least one site failed unexpectedly')
+    expect(batchHelp.out()).toContain('2  usage error')
+    expect(batchHelp.out()).not.toContain('3  ')
+    const scanHelp = io()
+    await runCli(['scan', '--help'], scanHelp.io)
+    expect(scanHelp.out()).toContain('3  the site could not be scored (status error or skipped)')
+    const all = io()
+    await runCli(['--help'], all.io)
+    expect(all.out()).toContain('Exit codes (scan):')
+    expect(all.out()).toContain('Exit codes (batch):')
+  })
+
+  it('rejects --capture-bodies without --captures', async () => {
+    const scan = io(fixtureSite())
+    expect(await runCli(['scan', 'https://docs.example.com/', '--capture-bodies', 'all'], scan.io)).toBe(2)
+    expect(scan.err()).toContain('--capture-bodies needs --captures')
+    const dir = mkdtempSync(join(tmpdir(), 'agent-scan-cli-cb-'))
+    const input = join(dir, 'sites.csv')
+    writeFileSync(input, 'url\nhttps://docs.example.com/\n')
+    const batch = io(fixtureSite())
+    expect(await runCli(['batch', '--input', input, '--out', join(dir, 'out'), '--capture-bodies', '50'], batch.io)).toBe(2)
+    expect(existsSync(join(dir, 'out'))).toBe(false)
+  })
+
+  it('batch exits 2 on an unterminated quote and names the line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-scan-cli-csv-'))
+    const input = join(dir, 'sites.csv')
+    writeFileSync(input, 'url\nhttps://docs.example.com/\n"https://broken.example.com/\nhttps://other.example.com/\n')
+    const run = io(fixtureSite())
+    expect(await runCli(['batch', '--input', input, '--out', join(dir, 'out')], run.io)).toBe(2)
+    expect(run.err()).toContain('line 3')
+    expect(run.err()).toContain('unterminated')
   })
 
   it('the built binary prints help', () => {

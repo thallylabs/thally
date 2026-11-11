@@ -16,6 +16,12 @@ export type Evaluator = (facts: SiteFacts) => CheckOutcome
 
 const MAX_EVIDENCE = 10
 
+const EMPTY_DETAIL: Partial<Record<NotApplicableReason, string>> = {
+  no_html_pages: 'No HTML pages to evaluate.',
+  budget: 'No sampled page was attempted.',
+  no_comparable_pages: 'No sampled page has both a meta description and a JSON-LD description.',
+}
+
 /** A binary pass/fail outcome. */
 export function binary(passed: boolean, evidence: string[], detail: string): CheckOutcome {
   return { status: passed ? 'pass' : 'fail', value: passed ? 1 : 0, evidence: evidence.slice(0, MAX_EVIDENCE), detail }
@@ -41,7 +47,7 @@ export function pageRate(
   noun: string,
   emptyReason: NotApplicableReason = 'no_html_pages',
 ): CheckOutcome {
-  if (pages.length === 0) return notApplicable(emptyReason, `No ${emptyReason === 'no_html_pages' ? 'HTML pages' : 'pages'} to evaluate.`)
+  if (pages.length === 0) return notApplicable(emptyReason, EMPTY_DETAIL[emptyReason] ?? 'No pages to evaluate.')
   const failing: string[] = []
   const passing: string[] = []
   for (const page of pages) (passes(page) ? passing : failing).push(page.outcome.finalUrl || page.url)

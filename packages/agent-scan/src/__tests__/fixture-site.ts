@@ -3,7 +3,7 @@
  * check passes on the default site; options switch individual signals off.
  */
 
-import { docPage, html, notFound, text, type FakeRoute, type FakeRoutes } from './helpers.js'
+import { docPage, html, notFound, text, type FakeRoute, type FakeRoutes, NEGOTIATE } from './helpers.js'
 
 /** Switches for the synthetic site. */
 export interface FixtureSiteOptions {
@@ -40,14 +40,16 @@ export function fixtureSite(options: FixtureSiteOptions = {}): FakeRoutes {
   }))
   routes[`${origin}/llms.txt`] = options.llms === false
     ? notFound
-    : text(`# Example Docs\n\n> Example.\n\n- [MCP](https://mcp.example.com/sse)\n`)
+    : text(`# Example Docs\n\n> Example.\n\n- [MCP server](${origin}/mcp)\n`)
   routes[`${origin}/llms-full.txt`] = options.llmsFull === false ? notFound : text(`# Example Docs\n\n${'Full text. '.repeat(400)}`)
+  routes[`${origin}/sitemap-index.xml`] = notFound
   routes[`${origin}/sitemap.xml`] = options.sitemap === false
     ? notFound
     : { status: 200, headers: { 'content-type': 'application/xml' }, body: `<?xml version="1.0"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${[...paths, '/'].map((path) => `<url><loc>${origin}${path}</loc></url>`).join('')}</urlset>` }
   routes[`${origin}/.well-known/mcp.json`] = options.manifest === false
     ? notFound
     : { status: 200, headers: { 'content-type': 'application/json' }, body: '{"name":"example","url":"https://mcp.example.com/sse"}' }
+  routes[`${origin}/mcp`] = { status: 405, headers: { 'content-type': 'application/json' }, body: '{"error":"method not allowed"}' }
   routes[`${origin}/.well-known/mcp/server-card.json`] = notFound
   routes[`${origin}/.well-known/agent-card.json`] = notFound
   for (const path of paths) {
@@ -56,7 +58,7 @@ export function fixtureSite(options: FixtureSiteOptions = {}): FakeRoutes {
     routes[`${origin}${path}.md`] = options.markdown === false
       ? notFound
       : text(`---\ntitle: ${title}\n---\n\n# ${title}\n\nBody.\n`, 'text/markdown')
-    routes[`${origin}${path} text/markdown`] = html(docPage({ url: `${origin}${path}`, title }))
+    routes[`${origin}${path} ${NEGOTIATE}`] = html(docPage({ url: `${origin}${path}`, title }))
     routes[`${origin}${path}?format=json`] = notFound
   }
   return routes

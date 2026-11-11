@@ -15,7 +15,7 @@ import { decodeBody, mediaTypeOf, sha256Hex } from './decode.js'
 import { checkFetchableUrl } from './guard.js'
 
 /** Why a resource is being fetched; selects the Accept header. */
-export type Purpose = 'html' | 'robots' | 'llms' | 'sitemap' | 'well-known' | 'alt-md' | 'alt-json' | 'api'
+export type Purpose = 'html' | 'robots' | 'llms' | 'sitemap' | 'well-known' | 'mcp' | 'alt-md' | 'alt-json' | 'alt-negotiate' | 'api'
 
 /** Accept header per purpose. */
 export const ACCEPT: Readonly<Record<Purpose, string>> = {
@@ -26,6 +26,8 @@ export const ACCEPT: Readonly<Record<Purpose, string>> = {
   'well-known': 'application/json, */*;q=0.1',
   'alt-md': 'text/markdown, text/plain;q=0.5',
   'alt-json': 'application/json',
+  'alt-negotiate': 'text/markdown, application/json;q=0.9',
+  mcp: 'application/json, text/event-stream',
   api: 'application/vnd.github+json',
 }
 
@@ -230,12 +232,11 @@ export function createFetcher(options: FetcherOptions): Fetcher {
     const outcome = await get(url, { purpose: 'robots', allowOffsite: true, skipRobots: true })
     // RFC 9309: more than five redirects means robots.txt is unavailable (allow all).
     if (outcome.error === 'redirect_limit') return { kind: 'missing', rules: allowAllRobots(), url }
-    // Timeouts, connection failures, and failures after a redirect away from
-    // the origin mean robots.txt is unreachable: assume complete disallow.
-    if (
-      outcome.error === 'timeout' || outcome.error === 'connection' || outcome.error === 'budget_exhausted' ||
-      (outcome.error && outcome.redirects > 0)
-    ) {
+    // A timeout, a failure after a redirect away from the origin, or no budget
+    // left means robots.txt is unreachable: assume complete disallow. A host
+    // that cannot be connected to at all (DNS, refused, TLS) is reported as
+    // that error instead.
+    if (outcome.error === 'timeout' || outcome.error === 'budget_exhausted' || (outcome.error && outcome.redirects > 0)) {
       return { kind: 'unreachable', rules: disallowAllRobots(), url }
     }
     if (outcome.error) return { kind: 'error', error: outcome.error, rules: disallowAllRobots(), url }

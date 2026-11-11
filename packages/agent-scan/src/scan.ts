@@ -105,6 +105,7 @@ export async function scanSite(url: string, options: ScanOptions = {}): Promise<
       methodology: { id: methodology.id, version: methodology.version },
       scannerVersion,
       bodies: options.captureBodies ?? defaultCaptureBodies(siteKey),
+      ...(allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
     }, recorder)
   }
   return result
@@ -112,16 +113,21 @@ export async function scanSite(url: string, options: ScanOptions = {}): Promise<
 
 /** Options for `replaySite`. */
 export interface ReplayOptions {
-  /** Needed when the capture was recorded against a private or loopback host. */
+  /**
+   * Allow loopback and private addresses during replay. Replay also applies
+   * the setting recorded in the capture, so this is only needed for captures
+   * written before the setting was recorded.
+   */
   allowPrivateNetwork?: boolean
 }
 
 /**
  * Re-run a scan from a capture directory recorded with bodies. Uses the
- * captured `scannedAt`, no rate limiting and no retry sleeps, so with the
- * same scanner version the result is byte-identical to the original scan
- * under `stableStringify`. `scannerVersion` in the result is always the
- * running scanner's version.
+ * captured `scannedAt`, no rate limiting and no retry sleeps, and the same
+ * URL-guard setting the capture was recorded with (or `--allow-private-network`), so with the same scanner
+ * version the result is byte-identical to the original scan under
+ * `stableStringify`. `scannerVersion` in the result is always the running
+ * scanner's version.
  */
 export async function replaySite(captureSiteDir: string, options: ReplayOptions = {}): Promise<SiteResult> {
   const meta = readCaptureMeta(captureSiteDir)
@@ -130,6 +136,6 @@ export async function replaySite(captureSiteDir: string, options: ReplayOptions 
     rateLimiter: noopRateLimiter(),
     sleep: async () => {},
     now: () => new Date(meta.scannedAt),
-    allowPrivateNetwork: options.allowPrivateNetwork ?? false,
+    allowPrivateNetwork: meta.allowPrivateNetwork === true || options.allowPrivateNetwork === true,
   })
 }

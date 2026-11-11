@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { readBatchInputs, runBatch } from '../batch.js'
 import { methodology } from '../methodology/methodology.js'
-import { parseCsv } from '../output/csv.js'
+import { CsvError, parseCsv } from '../output/csv.js'
 import { noopRateLimiter } from '../net/rate-limiter.js'
 import type { SiteResult } from '../types.js'
 import { createFakeTransport, notFound, type FakeRoutes } from './helpers.js'
@@ -121,5 +121,24 @@ describe('batch inputs', () => {
     const { input } = setup('url\nhttps://a.test/\n')
     appendFileSync(input, '\n\n')
     expect(readBatchInputs(readFileSync(input, 'utf8'))).toEqual(['https://a.test/'])
+  })
+})
+
+describe('parseCsv', () => {
+  it('fails fast on an unterminated quote, naming the line where it opened', () => {
+    let caught: unknown
+    try {
+      parseCsv('url\r\nhttps://a.test/\r\n"https://b.test/\r\nhttps://c.test/\r\n')
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(CsvError)
+    expect((caught as CsvError).line).toBe(3)
+    expect((caught as Error).message).toContain('line 3')
+    expect(() => parseCsv('url\n"a\n')).toThrow(/line 2/)
+  })
+
+  it('still accepts quoted fields that span lines and escaped quotes', () => {
+    expect(parseCsv('a,b\n"x\ny","say ""hi"""\n')).toEqual([['a', 'b'], ['x\ny', 'say "hi"']])
   })
 })

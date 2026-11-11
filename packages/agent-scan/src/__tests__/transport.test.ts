@@ -9,6 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { createCaptureRecorder, writeCapture } from '../net/capture.js'
 import { decodeBody } from '../net/decode.js'
+import { createFetcher } from '../net/fetcher.js'
+import { noopRateLimiter } from '../net/rate-limiter.js'
 import { checkFetchableUrl } from '../net/guard.js'
 import { createNodeTransport } from '../net/transport.js'
 import type { TransportRequest, TransportResponse } from '../types.js'
@@ -25,6 +27,9 @@ beforeAll(async () => {
     } else if (url === '/gzip') {
       res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' })
       res.end(gzipSync('hello gzip'))
+    } else if (url === '/corrupt-gzip') {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' })
+      res.end(Buffer.from('this is not gzip data at all'))
     } else if (url === '/br') {
       res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'br' })
       res.end(brotliCompressSync('hello br'))
@@ -103,6 +108,16 @@ describe('node transport against a local server', () => {
     expect(line).not.toContain('a=1')
     expect(line).toContain('[redacted]')
     expect(line).not.toContain('test-agent')
+  })
+
+  it('reports a corrupt compressed body as decode, and the fetcher does not retry it', async () => {
+    expect(await local.request(req('/corrupt-gzip'))).toEqual({ error: 'decode' })
+    const seen: string[] = []
+    const counting = { request: (request: TransportRequest) => (seen.push(request.url), local.request(request)) }
+    const fetcher = createFetcher({ transport: counting, rateLimiter: noopRateLimiter(), allowPrivateNetwork: true, sleep: async () => {} })
+    const outcome = await fetcher.get(`${base}/corrupt-gzip`, { purpose: 'html' })
+    expect(outcome.error).toBe('decode')
+    expect(seen.filter((url) => url.endsWith('/corrupt-gzip'))).toHaveLength(1)
   })
 
   it('maps a refused connection to connection', async () => {

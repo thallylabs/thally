@@ -3,6 +3,8 @@
  * checks: NFKC, lower-case, whitespace collapsed, Unicode punctuation removed.
  */
 
+import { selectPageNode, topLevelNodes } from './jsonld.js'
+
 /** Normalize text for parity comparison. */
 export function normalizeForParity(text: string): string {
   return text.normalize('NFKC').toLowerCase().replace(/\p{P}/gu, '').replace(/\s+/g, ' ').trim()
@@ -32,10 +34,14 @@ export function markdownTitle(markdown: string): string | null {
   return null
 }
 
-/** Title of a JSON document: top-level `title`, then `headline`, then `name`. */
-export function jsonTitle(value: unknown): string | null {
+/**
+ * Title of a JSON document: top-level `title`, then `headline`, then `name`.
+ * For a JSON-LD document the page node is used (see `selectPageNode`).
+ */
+export function jsonTitle(value: unknown, pageUrl: string | null = null): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
+  const top = value as Record<string, unknown>
+  const record = '@graph' in top || '@type' in top ? selectPageNode(topLevelNodes(top), pageUrl) ?? top : top
   for (const key of ['title', 'headline', 'name']) {
     const candidate = record[key]
     if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()

@@ -14,11 +14,16 @@ export function serverRendered(facts: SiteFacts): CheckOutcome {
 export function alternate(facts: SiteFacts): CheckOutcome {
   const { attempts, hit, probePage } = facts.alternate
   if (hit) return binary(true, [hit.url], `Alternate ${hit.kind} representation found (${hit.variant}).`)
-  if (attempts.length > 0 && attempts.every((attempt) => attempt.outcome === null)) {
+  const offsite = attempts.filter((attempt) => attempt.skipped === 'offsite')
+  const others = attempts.filter((attempt) => attempt.skipped !== 'offsite')
+  if (others.length > 0 && others.every((attempt) => attempt.skipped === 'budget')) {
     return notApplicable('budget', 'Alternate probes skipped: request budget exhausted.', [probePage])
   }
-  const tried = attempts.filter((attempt) => attempt.outcome !== null).map((attempt) => attempt.url)
-  return binary(false, [probePage, ...tried], 'No Markdown or JSON alternate found for the probe page.')
+  const tried = others.filter((attempt) => attempt.outcome !== null).map((attempt) => attempt.url)
+  const detail = offsite.length > 0
+    ? `No Markdown or JSON alternate found for the probe page; a declared alternate on another host (${offsite[0].url}) does not count.`
+    : 'No Markdown or JSON alternate found for the probe page.'
+  return binary(false, [probePage, ...tried, ...offsite.map((attempt) => attempt.url)], detail)
 }
 
 /** `retrieval.status_health` */

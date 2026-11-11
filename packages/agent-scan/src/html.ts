@@ -6,6 +6,7 @@
 
 import { load, type CheerioAPI } from 'cheerio'
 
+import { isPageNode, selectPageNode, topLevelNodes, type JsonLdNode } from './jsonld.js'
 import { normalizeUrl } from './url.js'
 
 /** JSON-LD facts for one page. */
@@ -14,11 +15,11 @@ export interface JsonLdFacts {
   scripts: number
   /** Every script parsed and every top-level object (or `@graph` node) has a non-empty `@type`. */
   allValid: boolean
-  /** Any node at any depth has `dateModified`. */
+  /** The page node (or, without one, any node) has `dateModified` at any depth. */
   hasDateModified: boolean
   /** Any node at any depth has `@type` `Organization`. */
   hasOrganization: boolean
-  /** First string `description` among top-level and `@graph` nodes, document order. */
+  /** `description` of the page node (see `selectPageNode`). */
   description: string | null
 }
 
@@ -98,7 +99,7 @@ function walk(value: unknown, visit: (node: Record<string, unknown>) => void): v
   }
 }
 
-function readJsonLd($: CheerioAPI): JsonLdFacts {
+function readJsonLd($: CheerioAPI, pageUrl: string): JsonLdFacts {
   const facts: JsonLdFacts = {
     scripts: 0,
     allValid: true,
@@ -106,6 +107,7 @@ function readJsonLd($: CheerioAPI): JsonLdFacts {
     hasOrganization: false,
     description: null,
   }
+  const nodes: JsonLdNode[] = []
   $('script').each((_, element) => {
     const type = ($(element).attr('type') ?? '').split(';')[0].trim().toLowerCase()
     if (type !== 'application/ld+json') return
@@ -117,31 +119,35 @@ function readJsonLd($: CheerioAPI): JsonLdFacts {
       facts.allValid = false
       return
     }
-    const topLevel = Array.isArray(parsed) ? parsed : [parsed]
-    for (const item of topLevel) {
+    for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         facts.allValid = false
         continue
       }
-      const node = item as Record<string, unknown>
-      const graph = node['@graph']
-      const nodes = Array.isArray(graph) ? graph : [node]
+      const graph = (item as Record<string, unknown>)['@graph']
       if (Array.isArray(graph) && graph.length === 0) facts.allValid = false
-      for (const member of nodes) {
-        if (!member || typeof member !== 'object' || !hasType(member as Record<string, unknown>)) {
-          facts.allValid = false
-          continue
-        }
-        const description = (member as Record<string, unknown>).description
-        if (facts.description === null && typeof description === 'string') facts.description = description
+      const members = Array.isArray(graph) ? graph : [item]
+      for (const member of members) {
+        if (!member || typeof member !== 'object' || !hasType(member as Record<string, unknown>)) facts.allValid = false
       }
     }
+    nodes.push(...topLevelNodes(parsed))
     walk(parsed, (node) => {
-      if ('dateModified' in node && node.dateModified) facts.hasDateModified = true
       if (typeIncludes(node, 'Organization')) facts.hasOrganization = true
     })
   })
   if (facts.scripts === 0) facts.allValid = false
+  // Page-level facts come from the node that describes this page; site-level
+  // nodes are used only when the page has no page-level node.
+  const pageNode = selectPageNode(nodes, pageUrl)
+  if (pageNode) {
+    const description = pageNode.description
+    facts.description = typeof description === 'string' ? description : null
+  }
+  const dateScope: unknown = pageNode && isPageNode(pageNode) ? pageNode : nodes
+  walk(dateScope, (node) => {
+    if ('dateModified' in node && node.dateModified) facts.hasDateModified = true
+  })
   return facts
 }
 
@@ -190,7 +196,7 @@ export function parsePage(html: string, finalUrl: string): PageFacts {
     return value
   }
 
-  const jsonLd = readJsonLd($)
+  const jsonLd = readJsonLd($, finalUrl)
   const hasThallyShim = $('script#thally-runtime-name-shim').length > 0
   const hasDocusaurusRoot = $('div#__docusaurus').length > 0
   const hasNextraClass = $('[class*="nextra"]').length > 0

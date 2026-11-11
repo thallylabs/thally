@@ -9,16 +9,32 @@ export function toCsv(rows: Array<Array<string | number | boolean | null | undef
   return rows.map((row) => row.map((cell) => quote(cell === null || cell === undefined ? '' : String(cell))).join(',')).join('\r\n') + '\r\n'
 }
 
-/** Parse CSV text into rows. Handles quoted fields, escaped quotes and CRLF or LF line ends. */
+/** Malformed CSV input, with the 1-based line where the problem starts. */
+export class CsvError extends Error {
+  constructor(message: string, readonly line: number) {
+    super(message)
+    this.name = 'CsvError'
+  }
+}
+
+/**
+ * Parse CSV text into rows. Handles quoted fields, escaped quotes and CRLF or
+ * LF line ends. Throws `CsvError` for a quote that is never closed, rather
+ * than silently swallowing the rest of the file.
+ */
 export function parseCsv(textInput: string): string[][] {
   const text = textInput.replace(/^﻿/, '')
   const rows: string[][] = []
   let row: string[] = []
   let cell = ''
   let inQuotes = false
+  let line = 1
+  let quoteLine = 0
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]
     if (inQuotes) {
+      // A line end inside a quoted field: count LF, and a CR not followed by LF.
+      if (ch === '\n' || (ch === '\r' && text[i + 1] !== '\n')) line++
       if (ch === '"') {
         if (text[i + 1] === '"') {
           cell += '"'
@@ -27,18 +43,22 @@ export function parseCsv(textInput: string): string[][] {
       } else cell += ch
       continue
     }
-    if (ch === '"') inQuotes = true
-    else if (ch === ',') {
+    if (ch === '"') {
+      inQuotes = true
+      quoteLine = line
+    } else if (ch === ',') {
       row.push(cell)
       cell = ''
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[i + 1] === '\n') i++
+      line++
       row.push(cell)
       rows.push(row)
       row = []
       cell = ''
     } else cell += ch
   }
+  if (inQuotes) throw new CsvError(`unterminated quoted field starting on line ${quoteLine}`, quoteLine)
   if (cell !== '' || row.length > 0) {
     row.push(cell)
     rows.push(row)

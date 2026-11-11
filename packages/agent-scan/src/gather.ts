@@ -8,7 +8,7 @@
 
 import { gunzipSync } from 'node:zlib'
 
-import { isJsonType, isValidLlmsFull, isValidLlmsTxt, isValidManifest, parseJsonObject } from './checks/discovery.js'
+import { isJsonType, isPlausibleMcpEndpoint, isValidLlmsFull, isValidLlmsTxt, isValidManifest, mcpUrlIn, parseJsonObject } from './checks/discovery.js'
 import type { AlternateAttempt, PageRecord, ProbeSet, SiteFacts } from './facts.js'
 import { parsePage, type PageFacts } from './html.js'
 import { methodology } from './methodology/methodology.js'
@@ -85,17 +85,36 @@ function sitemapText(outcome: FetchOutcome): string | null {
   }
 }
 
-function validAlternate(outcome: FetchOutcome, kind: 'markdown' | 'json'): { valid: boolean; title: string | null } {
-  if (outcome.error || outcome.status !== 200) return { valid: false, title: null }
-  if (kind === 'markdown') {
-    const okType = outcome.contentType === 'text/markdown' || outcome.contentType === 'text/x-markdown' || outcome.contentType === 'text/plain'
+/** A site-wide feed is never a page alternate. */
+export function isFeedUrl(url: string): boolean {
+  const path = new URL(url).pathname.toLowerCase().replace(/\/+$/, '')
+  return path.endsWith('feed.json') || path.endsWith('/feed')
+}
+
+function isFeedType(contentType: string | null): boolean {
+  return contentType === 'application/feed+json' || contentType === 'application/rss+xml' || contentType === 'application/atom+xml'
+}
+
+/**
+ * Validate an alternate response. `kind` null means content negotiation:
+ * the response's media type decides whether it is Markdown or JSON.
+ */
+function validAlternate(outcome: FetchOutcome, kind: 'markdown' | 'json' | null, pageUrl: string): { valid: boolean; kind: 'markdown' | 'json'; title: string | null } {
+  const isJson = isJsonType(outcome.contentType)
+  const actual: 'markdown' | 'json' = kind ?? (isJson ? 'json' : 'markdown')
+  const invalid = { valid: false, kind: actual, title: null }
+  if (outcome.error || outcome.status !== 200) return invalid
+  if (isFeedType(outcome.contentType) || isFeedUrl(outcome.finalUrl)) return invalid
+  if (actual === 'markdown') {
+    const okType = outcome.contentType === 'text/markdown' || outcome.contentType === 'text/x-markdown' ||
+      (kind === 'markdown' && outcome.contentType === 'text/plain')
     const text = (outcome.text ?? '').trim()
-    if (!okType || text.startsWith('<')) return { valid: false, title: null }
-    return { valid: true, title: markdownTitle(outcome.text ?? '') }
+    if (!okType || text.startsWith('<')) return invalid
+    return { valid: true, kind: actual, title: markdownTitle(outcome.text ?? '') }
   }
-  if (!isJsonType(outcome.contentType)) return { valid: false, title: null }
+  if (!isJson) return invalid
   const parsed = parseJsonObject(outcome.text)
-  return parsed ? { valid: true, title: jsonTitle(parsed) } : { valid: false, title: null }
+  return parsed ? { valid: true, kind: actual, title: jsonTitle(parsed, pageUrl) } : invalid
 }
 
 /**
@@ -163,10 +182,14 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   const sitemapFacts: SiteFacts['sitemap'] = { attempts: [], parsed: [], locsUnderRoot: 0, skippedForBudget: false }
   const maxChildren = methodology.probes.sitemapMaxIndexChildren
   const maxSitemapFetches = 1 + maxChildren
-  const fromRobots = robots.sitemaps.filter((url) => isSameSite(url, docsRoot))
-  const topCandidates = fromRobots.length > 0
-    ? fromRobots
-    : [`${origin}/sitemap.xml`, ...(rootPath !== '/' ? [`${docsRoot}sitemap.xml`] : [])]
+  // robots Sitemap lines first, then the conventional paths; stop at the
+  // first that parses, within the sitemap request allocation.
+  const fromRobots = robots.sitemaps.filter((url) => isSameSite(docsRoot, url))
+  const topCandidates = [...new Set([
+    ...fromRobots,
+    ...methodology.probes.sitemapPaths.map((path) => `${origin}${path}`),
+    ...(rootPath !== '/' ? [`${docsRoot}sitemap.xml`] : []),
+  ])]
   const pageLocs: string[] = []
   const fetchSitemap = async (url: string) => {
     if (sitemapFacts.attempts.length >= maxSitemapFetches) return null
@@ -194,7 +217,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
       pageLocs.push(...parsed.locs)
     } else {
       const children = [...new Set(parsed.locs)]
-        .filter((loc) => normalizeUrl(loc) !== null && isSameSite(loc, docsRoot))
+        .filter((loc) => normalizeUrl(loc) !== null && isSameSite(docsRoot, loc))
         .sort(compareCodeUnits)
       // Every path is "under" a root of `/`, so only the `docs` hint can
       // discriminate there.
@@ -215,18 +238,39 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
   sitemapFacts.locsUnderRoot = underRootCount(pageLocs)
   const eligible = eligibleUrls(pageLocs, docsRoot, robots)
 
-  // 6. Well-known agent and MCP manifests; stop at the first hit.
-  const wellKnown: ProbeSet = { attempts: [], hit: null, skippedForBudget: false }
-  for (const path of methodology.probes.wellKnown) {
-    const outcome = await fetcher.get(`${origin}${path}`, { purpose: 'well-known' })
-    if (isBudgetSkip(outcome)) {
-      wellKnown.skippedForBudget = true
-      break
+  // 6. Agent and MCP discovery, within one allocation of probe URLs (the
+  // number of well-known paths). An MCP URL from llms.txt is verified first
+  // (it must look like an endpoint, not a page) and takes one slot; the
+  // remaining slots go to well-known manifests, stopping at the first hit.
+  let slots = methodology.probes.wellKnown.length
+  const mcpEndpoint: SiteFacts['mcpEndpoint'] = {
+    url: llms.hit?.text ? mcpUrlIn(llms.hit.text) : null,
+    outcome: null,
+    isEndpoint: false,
+    skippedForBudget: false,
+  }
+  if (mcpEndpoint.url) {
+    slots--
+    const outcome = await fetcher.get(mcpEndpoint.url, { purpose: 'mcp' })
+    if (isBudgetSkip(outcome)) mcpEndpoint.skippedForBudget = true
+    else {
+      mcpEndpoint.outcome = outcome
+      mcpEndpoint.isEndpoint = isPlausibleMcpEndpoint(outcome)
     }
-    wellKnown.attempts.push(outcome)
-    if (isValidManifest(outcome)) {
-      wellKnown.hit = outcome
-      break
+  }
+  const wellKnown: ProbeSet = { attempts: [], hit: null, skippedForBudget: false }
+  if (!mcpEndpoint.isEndpoint) {
+    for (const path of methodology.probes.wellKnown.slice(0, slots)) {
+      const outcome = await fetcher.get(`${origin}${path}`, { purpose: 'well-known' })
+      if (isBudgetSkip(outcome)) {
+        wellKnown.skippedForBudget = true
+        break
+      }
+      wellKnown.attempts.push(outcome)
+      if (isValidManifest(outcome)) {
+        wellKnown.hit = outcome
+        break
+      }
     }
   }
 
@@ -253,7 +297,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
       return null
     }
     const isHtml = outcome.error === null && outcome.status === 200 && isHtmlType(outcome.contentType) &&
-      !outcome.truncated && isSameSite(outcome.finalUrl, docsRoot)
+      !outcome.truncated && isSameSite(docsRoot, outcome.finalUrl)
     let html: PageFacts | null = null
     if (isHtml) html = parsePage(outcome.text ?? '', outcome.finalUrl)
     const record: PageRecord = { url, isRoot: false, outcome, html }
@@ -276,41 +320,56 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     if (first?.html) probeRecord = first
   }
 
-  // 8. Alternate representations on the probe page; stop at the first valid one.
+  // 8. Alternate representations on the probe page; stop at the first valid
+  // one. A declared alternate must be a Markdown or JSON document on the same
+  // site that is not llms.txt or a feed; one on another host is recorded but
+  // never fetched.
   const probeUrl = probeRecord.outcome.finalUrl
-  const variants: Array<Omit<AlternateAttempt, 'outcome' | 'valid'> & { accept: string; purpose: 'alt-md' | 'alt-json' }> = []
-  const htmlAlternate = probeRecord.html?.alternates.find((entry) => !isLlmsTarget(entry.href))
-  const headerAlternate = linkHeaders(probeRecord.outcome)
-    .filter((entry) => relHas(entry.params, 'alternate'))
-    .map((entry) => ({ href: normalizeUrl(entry.href, probeUrl), type: (entry.params.type ?? '').toLowerCase() }))
-    .find((entry) => entry.href && (entry.type === 'text/markdown' || entry.type === 'application/json') && !isLlmsTarget(entry.href))
-  const linked = htmlAlternate ?? (headerAlternate ? { href: headerAlternate.href!, type: headerAlternate.type } : null)
+  type Variant = { variant: AlternateAttempt['variant']; url: string; kind: 'markdown' | 'json' | null; purpose: 'alt-md' | 'alt-json' | 'alt-negotiate' }
+  const declared = [
+    ...(probeRecord.html?.alternates ?? []),
+    ...linkHeaders(probeRecord.outcome)
+      .filter((entry) => relHas(entry.params, 'alternate'))
+      .map((entry) => ({ href: normalizeUrl(entry.href, probeUrl), type: (entry.params.type ?? '').split(';')[0].trim().toLowerCase() }))
+      .filter((entry): entry is { href: string; type: 'text/markdown' | 'application/json' } =>
+        !!entry.href && (entry.type === 'text/markdown' || entry.type === 'application/json')),
+  ].filter((entry) => !isLlmsTarget(entry.href) && !isFeedUrl(entry.href))
+  const linked = declared.find((entry) => isSameSite(probeUrl, entry.href)) ?? null
+  const offsiteLinked = linked ? null : declared[0] ?? null
+  const alternate: SiteFacts['alternate'] = { probePage: probeUrl, attempts: [], hit: null, title: null }
+  if (offsiteLinked) {
+    alternate.attempts.push({
+      variant: 'link_alternate', url: offsiteLinked.href, kind: offsiteLinked.type === 'application/json' ? 'json' : 'markdown',
+      outcome: null, skipped: 'offsite', valid: false,
+    })
+  }
+  const variants: Variant[] = []
   for (const variant of methodology.probes.alternateVariants) {
     if (variant === 'link_alternate' && linked) {
       const kind = linked.type === 'application/json' ? 'json' : 'markdown'
-      variants.push({ variant, url: linked.href, kind, accept: kind === 'json' ? 'application/json' : 'text/markdown, text/plain;q=0.5', purpose: kind === 'json' ? 'alt-json' : 'alt-md' })
+      variants.push({ variant, url: linked.href, kind, purpose: kind === 'json' ? 'alt-json' : 'alt-md' })
     } else if (variant === 'dot_md') {
       const url = new URL(probeUrl)
       url.search = ''
       url.pathname = url.pathname.endsWith('/') ? `${url.pathname}index.md` : `${url.pathname}.md`
-      variants.push({ variant, url: url.href, kind: 'markdown', accept: 'text/markdown, text/plain;q=0.5', purpose: 'alt-md' })
-    } else if (variant === 'accept_markdown') {
-      variants.push({ variant, url: probeUrl, kind: 'markdown', accept: 'text/markdown', purpose: 'alt-md' })
+      variants.push({ variant, url: url.href, kind: 'markdown', purpose: 'alt-md' })
+    } else if (variant === 'accept_negotiation') {
+      variants.push({ variant, url: probeUrl, kind: null, purpose: 'alt-negotiate' })
     } else if (variant === 'format_json') {
       const url = new URL(probeUrl)
       url.searchParams.set('format', 'json')
-      variants.push({ variant, url: url.href, kind: 'json', accept: 'application/json', purpose: 'alt-json' })
+      variants.push({ variant, url: url.href, kind: 'json', purpose: 'alt-json' })
     }
   }
-  const alternate: SiteFacts['alternate'] = { probePage: probeUrl, attempts: [], hit: null, title: null }
   for (const variant of variants) {
-    const outcome = await fetcher.get(variant.url, { purpose: variant.purpose, accept: variant.accept })
+    const outcome = await fetcher.get(variant.url, { purpose: variant.purpose })
+    const fallbackKind = variant.kind ?? 'markdown'
     if (isBudgetSkip(outcome)) {
-      alternate.attempts.push({ variant: variant.variant, url: variant.url, kind: variant.kind, outcome: null, valid: false })
+      alternate.attempts.push({ variant: variant.variant, url: variant.url, kind: fallbackKind, outcome: null, skipped: 'budget', valid: false })
       continue
     }
-    const { valid, title } = validAlternate(outcome, variant.kind)
-    const attempt: AlternateAttempt = { variant: variant.variant, url: variant.url, kind: variant.kind, outcome, valid }
+    const { valid, kind, title } = validAlternate(outcome, variant.kind, probeUrl)
+    const attempt: AlternateAttempt = { variant: variant.variant, url: variant.url, kind, outcome, valid }
     alternate.attempts.push(attempt)
     if (valid) {
       alternate.hit = attempt
@@ -330,6 +389,7 @@ export async function gatherSite(input: string, fetcher: Fetcher, allowPrivateNe
     llmsFull,
     sitemap: sitemapFacts,
     wellKnown,
+    mcpEndpoint,
     rootLinkHeaderMcp,
     alternate,
   }
