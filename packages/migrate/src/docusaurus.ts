@@ -48,6 +48,8 @@ export interface DocusaurusPageDescriptor {
 export interface DocusaurusSidebars {
   config: Record<string, unknown>
   sourcePath: string
+  /** Relative modules the sidebar imports (generated at build time, so absent from the source) whose items were left out. */
+  unresolvedModules?: Array<string>
 }
 
 export interface DocusaurusNavigationResult {
@@ -514,7 +516,53 @@ export function matchingObjectLiteral(source: string, start: number, allowParent
   return end === undefined ? null : source.slice(index, end + 1)
 }
 
-function parseStaticSidebarModule(source: string): Record<string, unknown> {
+/** The local names an import clause or destructuring pattern binds (`a`, `* as a`, `{ a, b as c }`). */
+function boundNames(clause: string): Array<string> {
+  return clause.replace(/[{}]/g, ',').split(',')
+    .map((part) => part.trim().replace(/^\*\s*as\s+/, '').split(/\s+as\s+/).pop()!.trim())
+    .filter((name) => /^[A-Za-z_$][\w$]*$/.test(name))
+}
+
+/**
+ * A sidebar may import what a build step generates (docusaurus-plugin-openapi-docs writes one sidebar file per API).
+ * Such a module is absent from the source and cannot be run, so every name it binds stands for an empty item list:
+ * `items: name` becomes `items: []` and a spread or bare array entry of it disappears.
+ */
+function withoutGeneratedSidebarImports(source: string): { source: string; modules: Array<string> } {
+  const modules = new Set<string>()
+  const names = new Map<string, string>()
+  const declaration = (_match: string, clause: string, specifier: string): string => {
+    modules.add(specifier)
+    for (const name of boundNames(clause)) names.set(name, specifier)
+    return ''
+  }
+  let stripped = source
+    .replace(/^[ \t]*import\s+(?!type\b)([^;'"\n]+?)\s+from\s+['"](\.{1,2}\/[^'"]+)['"][ \t]*;?[ \t]*$/gm, declaration)
+    .replace(/^[ \t]*(?:const|let|var)\s+(\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)(?:\.\w+)?[ \t]*;?[ \t]*$/gm, declaration)
+  const used = new Set<string>()
+  for (const [name, specifier] of names) {
+    const reference = `${escapeRegExp(name)}(?:\\.\\w+)?(?![\\w$])`
+    const before = stripped
+    stripped = stripped
+      .replace(new RegExp(`\\.\\.\\.\\s*${reference}\\s*,?`, 'g'), '')
+      .replace(new RegExp(`(:\\s*)${reference}`, 'g'), '$1[]')
+      .replace(new RegExp(`([\\[,]\\s*)${reference}\\s*(?=[,\\]])`, 'g'), '$1')
+    if (stripped !== before) used.add(specifier)
+  }
+  return { source: stripped.replace(/,(\s*,)+/g, ',').replace(/\[\s*,/g, '['), modules: [...used] }
+}
+
+function parseStaticSidebarModule(source: string): { config: Record<string, unknown>; unresolvedModules: Array<string> } {
+  try {
+    return { config: parseSidebarObject(source), unresolvedModules: [] }
+  } catch (error) {
+    const { source: stripped, modules } = withoutGeneratedSidebarImports(source)
+    if (modules.length === 0) throw error
+    return { config: parseSidebarObject(stripped), unresolvedModules: modules }
+  }
+}
+
+function parseSidebarObject(source: string): Record<string, unknown> {
   const bindings = new Map<string, Record<string, unknown>>()
   const normalizedSource = replaceExternalFbContent(source)
   const parseFailures: Array<string> = []
@@ -672,11 +720,10 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   if (!sourcePath) return null
   const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
-  const parsed = extname(sourcePath).toLowerCase() === '.json'
-    ? objectValue(JSON5.parse(source))
-    : parseStaticSidebarModule(source)
+  const module = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source)
+  const parsed = module ? module.config : objectValue(JSON5.parse(source))
   if (!parsed) throw new Error('Docusaurus sidebar config must export an object.')
-  return { config: parsed, sourcePath }
+  return { config: parsed, sourcePath, ...(module?.unresolvedModules.length ? { unresolvedModules: module.unresolvedModules } : {}) }
 }
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {

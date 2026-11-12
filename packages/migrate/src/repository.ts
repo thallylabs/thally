@@ -5052,6 +5052,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       docusaurusSidebars = options.docusaurusSkipSidebar || !docusaurusProjectRoot
         ? null
         : readDocusaurusSidebars(docusaurusProjectRoot, options.docusaurusSidebarPath)
+      for (const specifier of docusaurusSidebars?.unresolvedModules ?? []) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The sidebar file ${docusaurusSidebars!.sourcePath} imports "${specifier}", which is generated at build time and missing from the source, so its items were left out of the navigation. Generate the file before migrating, or add those pages to the navigation by hand.`,
+        })
+      }
     } catch (error) {
       warnings.push({
         code: 'unsupported-config',

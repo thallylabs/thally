@@ -4355,6 +4355,16 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  it('keeps the sidebar order and warns once when it imports a generated sidebar', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'sidebars.ts'), "const apiSidebar = require('./docs/api/sidebar.js');\nmodule.exports = { docs: ['guide', { type: 'category', label: 'API', items: apiSidebar }, ...apiSidebar] };")
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const messages = bundle.warnings.map((warning) => warning.message).filter((message) => message.includes('./docs/api/sidebar.js'))
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toContain('sidebars.ts')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('Generated navigation will be used')
+  })
+
   it('warns when the theme config cannot be read as an object literal', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'docusaurus.config.ts'), `export default { title: 'Acme Docs', themeConfig: buildTheme() }`)

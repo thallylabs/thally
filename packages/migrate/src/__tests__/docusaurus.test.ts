@@ -49,6 +49,27 @@ describe('Docusaurus projection', () => {
     expect(readDocusaurusSidebars(root)?.config).toEqual({ docs: ['guide'] })
   })
 
+  describe('sidebars that import generated files', () => {
+    const rest = "  { type: 'category', label: 'Guides', items: ['guide'] },"
+    it.each([
+      ['an ES import', "import apiSidebar from './docs/management-api/sidebar';\nexport default { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };"],
+      ['a require with .js', "const apiSidebar = require('./docs/management-api/sidebar.js');\nmodule.exports = { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };"],
+      ['a typed const with a default export', "import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';\nimport apiSidebar from './docs/management-api/sidebar';\nconst sidebars: SidebarsConfig = { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };\nexport default sidebars;"],
+    ])('reads the rest of the sidebar with %s', (_name, source) => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.ts'), source)
+      const result = readDocusaurusSidebars(root)
+      expect(result?.config).toEqual({ docs: ['intro', { type: 'category', label: 'API', items: [] }, { type: 'category', label: 'Guides', items: ['guide'] }] })
+      expect(result?.unresolvedModules).toEqual([expect.stringMatching(/^\.\/docs\/management-api\/sidebar(?:\.js)?$/)])
+    })
+
+    it('still rejects a sidebar that computes its items', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.ts'), "import apiSidebar from './docs/api/sidebar';\nexport default { docs: [...apiSidebar, makeItems()] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/executable/)
+    })
+  })
+
   it('resolves a category metadata link to a local document id', () => {
     const root = fixture()
     mkdirSync(join(root, 'api/themes'), { recursive: true })
