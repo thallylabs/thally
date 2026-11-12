@@ -5952,10 +5952,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         undefined,
         { extensions: IMAGE_EXTENSIONS, onMissing: (spelled) => { missing.add(spelled) } },
       ))
-      for (const spelled of missing) {
+      if (missing.size > 0) {
+        const named = [...missing].slice(0, 10).map((spelled) => JSON.stringify(spelled)).join(', ')
         warnings.push({
           code: 'unsupported-config',
-          message: `The image "${spelled}" was not found in the source (or lies outside it), so this page still points at it and the image will be broken. Add the file to public/ and update the link.`,
+          message: `Images this page links to were not found in the source (or lie outside it), so the links were left as written and the images will be broken: ${named}${missing.size > 10 ? `, and ${missing.size - 10} more` : ''}. Add the files to public/ and update the links.`,
           source: file.relativePath,
         })
       }

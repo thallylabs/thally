@@ -4464,6 +4464,18 @@ describe('Docusaurus repository migration', () => {
       expect(body).toContain('![code](./pic/code.png)')
     })
 
+    it('reports the missing images of a page in one capped warning', () => {
+      const root = imageSite()
+      const links = Array.from({ length: 12 }, (_, index) => `![m](./pic/missing-${index}.png)`).join('\n\n')
+      writeFileSync(join(root, 'docs', 'many.md'), `---\ntitle: Many\n---\n\n${links}`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const warnings = bundle.warnings.filter((warning) => warning.source === 'many.md')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('missing-0.png')
+      expect(warnings[0].message).not.toContain('missing-11.png')
+      expect(warnings[0].message).toContain('and 2 more')
+    })
+
     it('copies the image a reference-style definition names and points the definition at the copy', () => {
       const root = imageSite()
       writeFileSync(join(root, 'docs', 'ref.md'), '---\ntitle: Ref\n---\n\n![shared][pic]\n\n[pic]: ./pic/shared.png "Shared"\n[page]: ./intro.md')
