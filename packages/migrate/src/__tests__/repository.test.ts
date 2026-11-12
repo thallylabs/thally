@@ -527,6 +527,15 @@ describe('linked source anchors', () => {
     expect(body).not.toContain('<a id="get-started">')
   })
 
+  it('keeps a Mintlify heading\'s escaped id as the literal text the author wrote', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-escaped-id-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['intro'] } }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n## Syntax \\{#custom-id}\n\nText.\n')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'intro')?.body
+    expect(body).toContain('## Syntax \\{#custom-id}')
+    expect(body).not.toContain('custom-id */')
+  })
+
   it('anchors a fragment that names a heading by the text of its inline component, which the renderer leaves out of the id', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-component-'))
     writeFileSync(join(root, 'a.mdx'), '---\ntitle: A\n---\n\n[Pro setup](/b#setup-pro) [Plain](/b#setup)')

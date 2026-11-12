@@ -1176,7 +1176,7 @@ describe('normalizeExplicitHeadingIds', () => {
   })
 
   it.each(['\\{#custom-id}', '\\{#custom-id\\}'])('turns an escaped %s into the runtime heading id comment', (suffix) => {
-    const result = normalizeExplicitHeadingIds(`## Undefined validator ${suffix}\n\nProse.`)
+    const result = normalizeExplicitHeadingIds(`## Undefined validator ${suffix}\n\nProse.`, undefined, { escapedIds: true })
     expect(result).toBe('## Undefined validator {/* #custom-id */}\n\nProse.')
     expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
   })
@@ -1184,14 +1184,23 @@ describe('normalizeExplicitHeadingIds', () => {
   it('keeps an escaped id that is not a usable anchor as text and warns', () => {
     const messages: Array<string> = []
     const body = '## Odd \\{#a b}\n\n## Comment \\{#a*/b}'
-    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message))).toBe(body)
+    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message), { escapedIds: true })).toBe(body)
     expect(messages).toHaveLength(2)
     expect(messages[0]).toContain('Odd')
   })
 
   it.each(['v1.2', 'über', 'a:b'])('keeps the escaped id %s as an anchor, as it does an unescaped one', (id) => {
     const messages: Array<string> = []
-    expect(normalizeExplicitHeadingIds(`## Title \\{#${id}}`, (message) => messages.push(message))).toBe(`## Title {/* #${id} */}`)
+    expect(normalizeExplicitHeadingIds(`## Title \\{#${id}}`, (message) => messages.push(message), { escapedIds: true })).toBe(`## Title {/* #${id} */}`)
+    expect(messages).toEqual([])
+  })
+
+  it('leaves an escaped id as literal text unless the source is Docusaurus', () => {
+    const messages: Array<string> = []
+    const body = '## Title \\{#custom-id}\n\n## Odd \\{#a b}'
+    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message))).toBe(body)
+    expect(normalizeMdx(body, 'mintlify')).not.toContain('{/* #custom-id */}')
+    expect(normalizeMdx(body, 'docusaurus')).toContain('## Title {/* #custom-id */}')
     expect(messages).toEqual([])
   })
 

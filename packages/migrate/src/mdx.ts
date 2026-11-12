@@ -392,7 +392,7 @@ const HTML_ID = /^[^\s"'<>`{}&]+$/u
 export function normalizeExplicitHeadingIds(
   raw: string,
   warn?: (message: string) => void,
-  options: { headingMarkers?: boolean; keepIdComments?: boolean } = {},
+  options: { headingMarkers?: boolean; keepIdComments?: boolean; escapedIds?: boolean } = {},
 ): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
@@ -403,7 +403,8 @@ export function normalizeExplicitHeadingIds(
     // headings with no valid anchor.
     if (trimmed.endsWith('}')) {
       // Docusaurus authors escape the brace (`\{#id}`) so the heading id survives MDX; the renderer reads it as a comment.
-      const escapedMarker = trimmed.lastIndexOf(' \\{#')
+      // Only Docusaurus gives the escape that meaning; elsewhere `\{#id}` is the literal text an author wrote.
+      const escapedMarker = options.escapedIds ? trimmed.lastIndexOf(' \\{#') : -1
       if (escapedMarker >= 0) {
         const id = trimmed.slice(escapedMarker + 4, -1).replace(/\\$/, '')
         const heading = trimmed.slice(0, escapedMarker).trimEnd()
@@ -3183,7 +3184,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   let rewritten = normalizeExplicitHeadingIds(
     runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
     undefined,
-    { headingMarkers: runMintlify },
+    { headingMarkers: runMintlify, escapedIds: runDocusaurus },
   )
   // After the `{#id}` pass above, which would turn the marker this writes into an anchor element.
   if (runFern) rewritten = normalizeFernHeadingIds(rewritten)

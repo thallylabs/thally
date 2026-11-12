@@ -5682,7 +5682,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       raw = normalizeExplicitHeadingIds(
         raw,
         (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }),
-        { headingMarkers: platform === 'mintlify' },
+        { headingMarkers: platform === 'mintlify', escapedIds: platform === 'docusaurus' },
       )
     }
     // Relative to `componentRoot`, like the component warnings for this page, so one page has one label.
