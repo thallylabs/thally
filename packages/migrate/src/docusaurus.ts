@@ -734,10 +734,10 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   if (!sourcePath) return null
   const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
-  const module = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source, dirname(absolutePath))
-  const parsed = module ? module.config : objectValue(JSON5.parse(source))
+  const sidebarModule = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source, dirname(absolutePath))
+  const parsed = sidebarModule ? sidebarModule.config : objectValue(JSON5.parse(source))
   if (!parsed) throw new Error('Docusaurus sidebar config must export an object.')
-  return { config: parsed, sourcePath, ...(module?.unresolvedModules.length ? { unresolvedModules: module.unresolvedModules } : {}) }
+  return { config: parsed, sourcePath, ...(sidebarModule?.unresolvedModules.length ? { unresolvedModules: sidebarModule.unresolvedModules } : {}) }
 }
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {
