@@ -5522,6 +5522,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       message: `${droppedGatedFiles.length - MAX_DROPPED_GATED_WARNINGS} more access-restricted page(s) were dropped by the file limit and NOT published; recover them from the source repository.`,
     })
   }
+  // A file a page inlines through `raw-loader` is imported after all; its warning is withdrawn once every page has been read.
+  const notImportedWarnings = new Map<string, MigrationWarning>()
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
     // Unlike Mintlify/Docusaurus, Fern only ever serves pages reachable from
@@ -5553,7 +5555,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) {
       skipped++
-      warnings.push({ code: 'skipped-file', message: 'Only Markdown and MDX are imported without an explicit converter.', source: file.relativePath })
+      const notImported: MigrationWarning = { code: 'skipped-file', message: 'Only Markdown and MDX are imported without an explicit converter.', source: file.relativePath }
+      warnings.push(notImported)
+      notImportedWarnings.set(file.absolutePath, notImported)
       continue
     }
     const size = lstatSync(file.absolutePath).size
@@ -6094,6 +6098,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fontRelativePaths = new Set(mintlifyFonts.flatMap((font) => font.path ? [font.path] : []))
   // A `.js` that pages import as a component was copied under src/mdx/migrated;
   // loading it again as a site-wide script would run a module as a plain script.
+  for (const path of componentMigrator?.rawTextFiles() ?? []) {
+    const withdrawn = notImportedWarnings.get(path)
+    if (withdrawn) warnings.splice(warnings.indexOf(withdrawn), 1)
+  }
   const importedComponentSources = new Set((componentMigrator?.files() ?? []).flatMap((file) => {
     const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
     return source ? [resolvePath(repositoryDir, source)] : []

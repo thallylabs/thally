@@ -536,6 +536,18 @@ describe('linked source anchors', () => {
     expect(body).not.toContain('custom-id */')
   })
 
+  it('does not warn that a file inlined through raw-loader was not imported, but still does for one nothing imports', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'guide', 'sample.txt'), 'inlined text\n')
+    writeFileSync(join(root, 'docs', 'guide', 'unused.txt'), 'nobody imports this\n')
+    writeFileSync(join(root, 'docs', 'guide', 'raw.mdx'), '---\ntitle: Raw\n---\n\nimport CodeBlock from "@theme/CodeBlock"\nimport Sample from "!!raw-loader!./sample.txt"\n\n<CodeBlock language="text">{Sample}</CodeBlock>\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.pages.find((candidate) => candidate.title === 'Raw')!.body).toContain('inlined text')
+    const notImported = bundle.warnings.filter((warning) => warning.message.startsWith('Only Markdown and MDX')).map((warning) => warning.source)
+    expect(notImported).toContain('guide/unused.txt')
+    expect(notImported).not.toContain('guide/sample.txt')
+  })
+
   it('anchors a fragment that names a heading by the text of its inline component, which the renderer leaves out of the id', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-component-'))
     writeFileSync(join(root, 'a.mdx'), '---\ntitle: A\n---\n\n[Pro setup](/b#setup-pro) [Plain](/b#setup)')

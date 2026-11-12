@@ -959,6 +959,8 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
+  /** Absolute paths of the files a `raw-loader` import has inlined into a page. */
+  rawTextFiles: () => ReadonlySet<string>
   /** Merge the component files of another migrated bundle (a sourceRef sub-site) into this one. */
   adopt: (incoming: ReadonlyArray<RenderedMigrationFile>) => void
 } {
@@ -969,6 +971,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
   // registry names to a temporary checkout path or changing repeat imports.
   const destinationRoot = `src/mdx/migrated/${hash(sourceIdentity)}`
   const copied = new Map<string, RenderedMigrationFile>()
+  const rawTextFiles = new Set<string>()
   const registrations = new Map<string, { path: string; imported: string }>()
   let copiedBytes = 0
 
@@ -997,6 +1000,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     if (lstatSync(path).size > MAX_RAW_TEXT_BYTES) throw new Error(`the file is larger than ${MAX_RAW_TEXT_BYTES / 1000} KB`)
     const bytes = readFileSync(path)
     if (bytes.includes(0)) throw new Error('the file is binary')
+    rawTextFiles.add(path)
     return bytes.toString('utf8')
   }
 
@@ -2259,7 +2263,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       }
     }
   }
-  return { transform, files, adopt }
+  return { transform, files, adopt, rawTextFiles: () => rawTextFiles }
 }
 
 /** Preserve an authored component registry while adding an isolated import map. */
