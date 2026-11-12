@@ -1181,12 +1181,18 @@ describe('normalizeExplicitHeadingIds', () => {
     expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
   })
 
-  it('keeps an escaped id with characters outside [A-Za-z0-9_-] as text and warns', () => {
+  it('keeps an escaped id that is not a usable anchor as text and warns', () => {
     const messages: Array<string> = []
-    const body = '## Odd \\{#a b}\n\n## Dotted \\{#v1.2}'
+    const body = '## Odd \\{#a b}\n\n## Comment \\{#a*/b}'
     expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message))).toBe(body)
     expect(messages).toHaveLength(2)
     expect(messages[0]).toContain('Odd')
+  })
+
+  it.each(['v1.2', 'über', 'a:b'])('keeps the escaped id %s as an anchor, as it does an unescaped one', (id) => {
+    const messages: Array<string> = []
+    expect(normalizeExplicitHeadingIds(`## Title \\{#${id}}`, (message) => messages.push(message))).toBe(`## Title {/* #${id} */}`)
+    expect(messages).toEqual([])
   })
 
   it('leaves an escaped id inside a code fence alone', () => {

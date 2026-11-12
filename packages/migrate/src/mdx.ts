@@ -407,8 +407,8 @@ export function normalizeExplicitHeadingIds(
       if (escapedMarker >= 0) {
         const id = trimmed.slice(escapedMarker + 4, -1).replace(/\\$/, '')
         const heading = trimmed.slice(0, escapedMarker).trimEnd()
-        if (/^[\w-]+$/.test(id) && !id.includes('\\')) return `${heading} ${headingIdMarker(id)}`
-        warn?.(`Heading anchor \\{#${id}} has characters other than letters, digits, "_" and "-", so it was kept as text on "${heading.replace(/^\s*#+\s*/, '')}".`)
+        if (HTML_ID.test(id) && !id.includes('\\') && !id.includes('*/')) return `${heading} ${headingIdMarker(id)}`
+        warn?.(`Heading anchor \\{#${id}} is not a usable anchor (it is empty or holds whitespace, quotes, braces, "<", ">", "&" or "*/"), so it was kept as text on "${heading.replace(/^\s*#+\s*/, '')}".`)
         return line
       }
       const marker = trimmed.lastIndexOf(' {#')
