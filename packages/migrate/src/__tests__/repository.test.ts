@@ -4364,6 +4364,28 @@ describe('Docusaurus repository migration', () => {
     expect(body).not.toContain('\\{#')
   })
 
+  describe('import lines inside code fences', () => {
+    const migrateBody = (body: string) => {
+      const root = docusaurusFixture()
+      writeFileSync(join(root, 'docs', 'fences.mdx'), `---\ntitle: Fences\n---\n\n${body}\n`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+      return bundle.pages.find((candidate) => candidate.title === 'Fences')!.body
+    }
+    it.each([
+      ['a list item, backticks', '1. Step:\n\n   ```ts\n   import { x } from "y";\n   export const z = x;\n   ```\n'],
+      ['a nested list item', '- Outer\n\n  1. Step:\n\n     ```ts\n     import { x } from "y";\n     ```\n'],
+      ['a list item, tildes', '1. Step:\n\n   ~~~ts\n   import { x } from "y";\n   ~~~\n'],
+      ['a blockquote', '> ```ts\n> import { x } from "y";\n> ```\n'],
+      ['a long fence', '1. Step:\n\n   ````ts\n   import { x } from "y";\n   ````\n'],
+    ])('keeps them in %s', (_name, body) => {
+      expect(migrateBody(body)).toContain('import { x } from "y";')
+    })
+    it('still hoists a real top-level import', () => {
+      const body = migrateBody('import Tabs from "@theme/Tabs";\n\nText.')
+      expect(body).not.toContain('@theme/Tabs')
+    })
+  })
+
   it('keeps the sidebar order and warns once when it imports a generated sidebar', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'sidebars.ts'), "const apiSidebar = require('./docs/api/sidebar.js');\nmodule.exports = { docs: ['guide', { type: 'category', label: 'API', items: apiSidebar }, ...apiSidebar] };")

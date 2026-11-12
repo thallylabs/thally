@@ -1758,7 +1758,8 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
   // 4-space-indented text is never code here and is intentionally left
   // unmasked, matching @mdx-js/mdx's own parsing.
   for (const line of source.split('\n')) {
-    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+    // MDX has no indented code, so a fence may sit at any indentation (a list item's content is indented by its marker).
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
     if (codeFence) {
       fenceBuffer.push(line)
       // A closing fence has no info string. ` ```python` inside an open
