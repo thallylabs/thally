@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, normalizeIndentedFences, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -2326,5 +2326,12 @@ describe('the names a client adapter binds never take one the page declared', ()
   it('leaves every name as it was when the page declares none of them', () => {
     const { content } = adapterFor('render')
     expect(content).toContain('export function CallbackWrapper({ children, ...props }) { return <Original {...props} f={render} g={callback0}>{children}</Original>; }')
+  })
+})
+
+describe('normalizeIndentedFences with self-closing tags in a list', () => {
+  it('keeps the indentation of a self-closing tag that has trailing spaces', () => {
+    const page = '- item\n\n  <details>\n\n    <Partial/> \n\n  </details>\n'
+    expect(normalizeIndentedFences(page)).toBe(page)
   })
 })

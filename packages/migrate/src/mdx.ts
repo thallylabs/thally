@@ -1803,8 +1803,10 @@ export function closeOpenFence(body: string): string {
  * or list item that held the tag (its first line already sits there). Lines
  * inside a JS expression, an ESM block or a JSX attribute are left alone:
  * indenting them would change the text of a multi-line template literal. So is
- * every line of a fenced code block, fences included: the code stays exactly as
- * written. A snippet that does not parse as MDX on its own is returned unchanged.
+ * every line of a fenced code block that starts at the left edge of the snippet:
+ * the code stays exactly as written. A fence the snippet itself indents (inside
+ * one of its list items) moves with its container, all of its lines by the same
+ * amount, so the code is unchanged once the container's indentation is removed. A snippet that does not parse as MDX on its own is returned unchanged.
  */
 export function indentSnippetLines(snippet: string, indent: string): string {
   if (!indent || !snippet.includes('\n')) return snippet
@@ -1819,7 +1821,11 @@ export function indentSnippetLines(snippet: string, indent: string): string {
   }
   const visit = (node: MdxOffsetNode & { attributes?: Array<{ position?: MdxOffsetNode['position'] }> }): void => {
     if (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression' || node.type === 'mdxjsEsm') keep(node)
-    if (node.type === 'code') keep(node, fenced)
+    if (node.type === 'code') {
+      const start = node.position?.start.offset
+      // Only a fence that sits at the left edge stays put; a nested one must keep its place in its list item.
+      if (start !== undefined && !/^[ \t]/.test(snippet.slice(snippet.lastIndexOf('\n', start - 1) + 1, start + 1))) keep(node, fenced)
+    }
     node.attributes?.forEach((attribute) => keep(attribute))
     node.children?.forEach(visit)
   }

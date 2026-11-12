@@ -67,7 +67,7 @@ export function normalizeIndentedFences(content: string): string {
       if (listItem) listIndent = listItem[1].length
       else if (trimmed && listIndent !== undefined && indentation <= listIndent) listIndent = undefined
       const jsx = line.match(/^([ \t]{2,})<([A-Z][\w.]*)\b[^>]*>\s*$/)
-      if (jsx && listIndent !== undefined && jsx[1].length > listIndent && !trimmed.endsWith('/>')) {
+      if (jsx && listIndent !== undefined && jsx[1].length > listIndent && !trimmed.trimEnd().endsWith('/>')) {
         indentedJsx = { tag: jsx[2], indent: jsx[1] }
         return line.slice(jsx[1].length)
       }
