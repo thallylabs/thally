@@ -232,7 +232,7 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // Matches a default import (`import Name from '...'`), a default-as-named
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
-const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
+const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]((?![^'"]*!)[^'"]+\.mdx?)['"]\s*;?/g
 /** Empty stand-ins for the exports Docusaurus adds to every MDX document (its own TOC feeds are not used). */
 const DOCUSAURUS_GENERATED_EXPORTS: Record<string, string | undefined> = Object.assign(Object.create(null) as Record<string, string>, {
   toc: '[]', frontMatter: '{}', metadata: '{}', assets: '{}', contentTitle: 'undefined',
