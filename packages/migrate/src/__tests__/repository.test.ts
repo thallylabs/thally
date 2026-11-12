@@ -4524,6 +4524,22 @@ describe('Docusaurus repository migration', () => {
         message: expect.stringContaining('./pic/none.png'),
       }))
     })
+
+    it('says a symbolic-link image was not copied because links are not followed', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'pic', 'real.png'), 'real')
+      symlinkSync(join(root, 'docs', 'pic', 'real.png'), join(root, 'docs', 'pic', 'inroot.png'))
+      writeFileSync(join(root, 'docs', 'linked.md'), '---\ntitle: Linked\n---\n\n![l](./pic/inroot.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      expect(bundle.pages.find((candidate) => candidate.title === 'Linked')!.body).toContain('![l](./pic/inroot.png)')
+      expect(bundle.assets.map((asset) => asset.path)).not.toContain('migrated/docs/pic/inroot.png')
+      const warnings = bundle.warnings.filter((warning) => warning.source === 'linked.md')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('symbolic link')
+      expect(warnings[0].message).toContain('not followed')
+      expect(warnings[0].message).toContain('./pic/inroot.png')
+      expect(warnings[0].message).not.toContain('were not found')
+    })
   })
 
   describe('relative images inside an inlined partial', () => {

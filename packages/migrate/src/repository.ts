@@ -4217,7 +4217,7 @@ function repositoryAssetHref(
     const siteRelative = relative(siteRoot, candidate).replace(/\\/g, '/')
     resolveWithin(siteRoot, siteRelative)
     if (!existsSync(candidate) || !lstatSync(candidate).isFile()) {
-      scope?.onMissing(decodedPath)
+      scope?.onMissing(decodedPath, existsSync(candidate) && lstatSync(candidate).isSymbolicLink())
       return null
     }
     const normalized = normalizeAssetPath(siteRelative)
@@ -4264,7 +4264,7 @@ function rewriteFernIdRenameLinks(body: string, renames: Map<string, string>): s
  * Narrower rules for a page's own relative references: only the listed file types, only forms resolved
  * beside the page (never the site root), URL-encoded results, and a callback for what cannot be used.
  */
-interface RelativeImageScope { extensions: ReadonlySet<string>; onMissing: (spelled: string) => void }
+interface RelativeImageScope { extensions: ReadonlySet<string>; onMissing: (spelled: string, isSymbolicLink?: boolean) => void }
 
 function rewriteRepositoryAssetLinks(
   body: string,
@@ -5972,6 +5972,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'docusaurus') {
       // Images kept beside the docs are written relative to the page. Only a page that is kept gets its images copied.
       const missing = new Set<string>()
+      const linked = new Set<string>()
       page.body = replaceOutsideCode(page.body, (text) => rewriteRepositoryAssetLinks(
         text, file.absolutePath, contentRoot,
         (assetPath) => {
@@ -5979,8 +5980,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           addAssetReference(`${DOCUSAURUS_DOCS_ASSET_PREFIX}${assetPath}`, file.relativePath)
         },
         undefined,
-        { extensions: IMAGE_EXTENSIONS, onMissing: (spelled) => { missing.add(spelled) } },
+        { extensions: IMAGE_EXTENSIONS, onMissing: (spelled, isSymbolicLink) => { (isSymbolicLink ? linked : missing).add(spelled) } },
       ))
+      if (linked.size > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Images this page links to are symbolic links, which are not followed, so they were not copied and the links were left as written: ${[...linked].slice(0, 10).map((spelled) => JSON.stringify(spelled)).join(', ')}${linked.size > 10 ? `, and ${linked.size - 10} more` : ''}. Replace each link with the file itself.`,
+          source: file.relativePath,
+        })
+      }
       if (missing.size > 0) {
         const named = [...missing].slice(0, 10).map((spelled) => JSON.stringify(spelled)).join(', ')
         warnings.push({
