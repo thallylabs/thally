@@ -4226,9 +4226,11 @@ function repositoryAssetHref(
     // file; report the spelling it really has so it matches the scanned asset.
     const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
-    onReferenced?.(normalized, onDisk ?? undefined)
+    // A page's own images are served under the spelling on disk, so a hosting with case-sensitive paths finds them.
+    const served = scope ? onDisk ?? normalized : normalized
+    onReferenced?.(scope ? served : normalized, onDisk ?? undefined)
     if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
-    const rewritten = `/${scope ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${normalized}`.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
+    const rewritten = `/${scope ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${served}`.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
     return isBracketed ? `<${rewritten}>` : rewritten
@@ -4281,6 +4283,11 @@ function rewriteRepositoryAssetLinks(
     ) => {
       const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
       return rewritten ? `${opening}${rewritten}${closing}` : original
+    })
+    .replace(/^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)/gm, (original: string, opening: string, destination: string) => {
+      if (!scope) return original
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
+      return rewritten ? `${opening}${rewritten}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
       original,

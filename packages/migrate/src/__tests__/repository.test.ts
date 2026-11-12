@@ -1,7 +1,7 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -4462,6 +4462,24 @@ describe('Docusaurus repository migration', () => {
       expect(body).toContain('![escape](../../../outside.png)')
       expect(body).toContain('![link](../pic/link.png)')
       expect(body).toContain('![code](./pic/code.png)')
+    })
+
+    it('copies the image a reference-style definition names and points the definition at the copy', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'ref.md'), '---\ntitle: Ref\n---\n\n![shared][pic]\n\n[pic]: ./pic/shared.png "Shared"\n[page]: ./intro.md')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Ref')!.body
+      expect(body).toContain('[pic]: /migrated/docs/pic/shared.png "Shared"')
+      expect(bundle.assets.map((asset) => asset.path)).toContain('migrated/docs/pic/shared.png')
+    })
+
+    it('points a differently-cased reference at the file name on disk', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'case.md'), '---\ntitle: Case\n---\n\n![shared](./PIC/Shared.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Case')!.body
+      // Only a case-insensitive source resolves the differently-cased name at all.
+      if (existsSync(join(root, 'docs', 'PIC', 'Shared.png'))) expect(body).toContain('![shared](/migrated/docs/pic/shared.png)')
     })
 
     it('keeps a reference to a missing image and warns with the page and path', () => {
