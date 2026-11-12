@@ -4355,6 +4355,15 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  it('gives a Docusaurus heading with an escaped id the anchor it names', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'ids.mdx'), '---\ntitle: Ids\n---\n\n## Undefined validator \\{#undefined-validator}\n\nText.\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const body = bundle.pages.find((candidate) => candidate.title === 'Ids')!.body
+    expect(body).toContain('<a id="undefined-validator"></a>\n## Undefined validator')
+    expect(body).not.toContain('\\{#')
+  })
+
   it('keeps the sidebar order and warns once when it imports a generated sidebar', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'sidebars.ts'), "const apiSidebar = require('./docs/api/sidebar.js');\nmodule.exports = { docs: ['guide', { type: 'category', label: 'API', items: apiSidebar }, ...apiSidebar] };")

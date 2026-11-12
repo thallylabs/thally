@@ -402,6 +402,15 @@ export function normalizeExplicitHeadingIds(
     // against unbounded heading text; that combination backtracks on long
     // headings with no valid anchor.
     if (trimmed.endsWith('}')) {
+      // Docusaurus authors escape the brace (`\{#id}`) so the heading id survives MDX; the renderer reads it as a comment.
+      const escapedMarker = trimmed.lastIndexOf(' \\{#')
+      if (escapedMarker >= 0) {
+        const id = trimmed.slice(escapedMarker + 4, -1).replace(/\\$/, '')
+        const heading = trimmed.slice(0, escapedMarker).trimEnd()
+        if (/^[\w-]+$/.test(id) && !id.includes('\\')) return `${heading} ${headingIdMarker(id)}`
+        warn?.(`Heading anchor \\{#${id}} has characters other than letters, digits, "_" and "-", so it was kept as text on "${heading.replace(/^\s*#+\s*/, '')}".`)
+        return line
+      }
       const marker = trimmed.lastIndexOf(' {#')
       if (marker >= 0) {
         const id = trimmed.slice(marker + 3, -1)

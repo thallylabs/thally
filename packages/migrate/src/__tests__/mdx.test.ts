@@ -1170,6 +1170,25 @@ describe('normalizeExplicitHeadingIds', () => {
     expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
   })
 
+  it.each(['\\{#custom-id}', '\\{#custom-id\\}'])('turns an escaped %s into the runtime heading id comment', (suffix) => {
+    const result = normalizeExplicitHeadingIds(`## Undefined validator ${suffix}\n\nProse.`)
+    expect(result).toBe('## Undefined validator {/* #custom-id */}\n\nProse.')
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('keeps an escaped id with characters outside [A-Za-z0-9_-] as text and warns', () => {
+    const messages: Array<string> = []
+    const body = '## Odd \\{#a b}\n\n## Dotted \\{#v1.2}'
+    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message))).toBe(body)
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toContain('Odd')
+  })
+
+  it('leaves an escaped id inside a code fence alone', () => {
+    const body = ['```md', '## Not a heading \\{#fake-id}', '```'].join('\n')
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
   it('leaves a real fenced code block containing heading-shaped text untouched', () => {
     const body = ['```md', '### Not a real heading {#fake-id}', '```'].join('\n')
     expect(normalizeExplicitHeadingIds(body)).toBe(body)
