@@ -482,6 +482,14 @@ computes redirects dynamically and can't be evaluated statically, so its
 presence is reported with a warning instead of being silently ignored. A
 static `--ifm-color-primary` accent color in the classic theme's `customCss`
 file is imported the same way Mintlify's and Fern's theme colors are.
+A sidebar that imports a relative module missing from the source (a file a build step
+generates, such as one sidebar file per API) is still read: the items that module supplies are
+left out and the migration warns. Images referenced from a page by a relative path
+(`![x](./img/a.png)`, `<img src>` or a reference-style definition) are copied under
+`public/migrated/docs/` and the page is pointed at the copy, only for pages that are kept;
+one that cannot be found is reported and left as written. A file imported with `raw-loader!`
+(`@site/` or relative, at most 256 KB, text only) is inlined as a code block; one that cannot
+be read becomes an empty string and is reported with the page and import.
 Versioned docs under `versioned_docs/` and translated docs under
 `i18n/<locale>/docusaurus-plugin-content-docs/` are imported with their
 navigation, including locale-prefixed routes such as `/fr/...`. Each version
