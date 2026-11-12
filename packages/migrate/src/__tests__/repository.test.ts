@@ -4389,18 +4389,34 @@ describe('Docusaurus repository migration', () => {
     it('copies the images a migrated page references and points the page at the copies', () => {
       const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
       const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
-      expect(body).toContain('![one](/2_Online%20Payment/pic/1.png)')
-      expect(body).toContain('![shared](/pic/shared.png)')
-      expect(body).toContain('<img src="/2_Online%20Payment/pic/1.png" alt="again" />')
+      expect(body).toContain('![one](/migrated/docs/2_Online%20Payment/pic/1.png)')
+      expect(body).toContain('![shared](/migrated/docs/pic/shared.png)')
+      expect(body).toContain('<img src="/migrated/docs/2_Online%20Payment/pic/1.png" alt="again" />')
       const copied = bundle.assets.map((asset) => asset.path)
-      expect(copied).toContain('2_Online Payment/pic/1.png')
-      expect(copied).toContain('pic/shared.png')
+      expect(copied).toContain('migrated/docs/2_Online Payment/pic/1.png')
+      expect(copied).toContain('migrated/docs/pic/shared.png')
+    })
+
+    it('keeps a docs image and a static image of the same name apart', () => {
+      const root = imageSite()
+      mkdirSync(join(root, 'docs', 'img'), { recursive: true })
+      mkdirSync(join(root, 'static', 'img'), { recursive: true })
+      writeFileSync(join(root, 'docs', 'img', 'logo.png'), 'from-docs')
+      writeFileSync(join(root, 'static', 'img', 'logo.png'), 'from-static')
+      writeFileSync(join(root, 'docs', 'near.md'), '---\ntitle: Near\n---\n\n![l](./img/logo.png)')
+      writeFileSync(join(root, 'docs', 'far.md'), '---\ntitle: Far\n---\n\n![l](/img/logo.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      expect(bundle.pages.find((candidate) => candidate.title === 'Near')!.body).toContain('![l](/migrated/docs/img/logo.png)')
+      expect(bundle.pages.find((candidate) => candidate.title === 'Far')!.body).toContain('![l](/img/logo.png)')
+      const bytes = (path: string) => bundle.assets.find((asset) => asset.path === path)?.content.toString()
+      expect(bytes('migrated/docs/img/logo.png')).toBe('from-docs')
+      expect(bytes('img/logo.png')).toBe('from-static')
     })
 
     it('copies nothing for a draft page, outside the source root, behind a symlink or that is not an image', () => {
       const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
       const copied = bundle.assets.map((asset) => asset.path)
-      for (const unwanted of ['pic/draft.png', 'pic/link.png', 'pic/notes.txt', 'outside.png']) expect(copied).not.toContain(unwanted)
+      for (const unwanted of ['pic/draft.png', 'pic/link.png', 'pic/notes.txt', 'outside.png', 'migrated/docs/pic/draft.png', 'migrated/docs/pic/link.png', 'migrated/docs/pic/notes.txt']) expect(copied).not.toContain(unwanted)
       const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
       expect(body).toContain('![escape](../../../outside.png)')
       expect(body).toContain('![link](../pic/link.png)')

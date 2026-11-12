@@ -199,6 +199,8 @@ const IGNORED_DIRECTORIES = new Set([
 function isIgnoredContentDirectory(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules'
 }
+/** Where images kept beside Docusaurus docs are copied, apart from the URL space of `static/`. */
+const DOCUSAURUS_DOCS_ASSET_PREFIX = 'migrated/docs/'
 /** Project-root directory for withheld restricted pages and assets; never read by the runtime. */
 const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
@@ -4216,7 +4218,7 @@ function repositoryAssetHref(
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
     onReferenced?.(normalized, onDisk ?? undefined)
     if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
-    const rewritten = `/${scope ? normalized.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
+    const rewritten = `/${scope ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${normalized}`.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
     return isBracketed ? `<${rewritten}>` : rewritten
@@ -5920,7 +5922,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const missing = new Set<string>()
       page.body = replaceOutsideCode(page.body, (text) => rewriteRepositoryAssetLinks(
         text, file.absolutePath, contentRoot,
-        (assetPath) => { addAssetReference(assetPath, file.relativePath) },
+        (assetPath) => {
+          addAssetReference(assetPath, file.relativePath)
+          addAssetReference(`${DOCUSAURUS_DOCS_ASSET_PREFIX}${assetPath}`, file.relativePath)
+        },
         undefined,
         { extensions: IMAGE_EXTENSIONS, onMissing: (spelled) => { missing.add(spelled) } },
       ))
@@ -6126,7 +6131,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !((platform === 'fern' || platform === 'docusaurus') && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
-    const assetPath = normalizeAssetPath(firstSegment === 'public'
+    // A file beside the docs that a page references by a relative path is served under its own prefix.
+    const isReferencedDocsImage = platform === 'docusaurus' && !repositoryAssets.includes(file)
+      && referencedAssetPaths.has(file.relativePath) && IMAGE_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+    const assetPath = normalizeAssetPath(isReferencedDocsImage
+      ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${file.relativePath}`
+      : firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)
       : isDocusaurusStatic
         ? file.relativePath.slice('static/'.length)
