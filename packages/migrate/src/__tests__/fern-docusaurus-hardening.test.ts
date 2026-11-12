@@ -1424,7 +1424,7 @@ describe('public Docusaurus pages keep their static assets when a draft exists',
     ['@site/static', '![s](@site/static/img/site.png)', 'img/site.png'],
     ['relative to static', '![x](../../static/img/x.png)', 'img/x.png'],
     ['root absolute', '![r](/img/r.png)', 'img/r.png'],
-    ['inside the docs folder', '![y](../img/y.png)', 'img/y.png'],
+    ['inside the docs folder', '![y](../img/y.png)', 'migrated/docs/img/y.png'],
   ])('keeps an image written as %s public', (_name, markdown, asset) => {
     const root = docusaurusSite({
       'docs/sub/a.md': `# A\n\n${markdown}\n`,
