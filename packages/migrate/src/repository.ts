@@ -42,7 +42,9 @@ import {
   projectDocusaurusNavigation,
   readDocusaurusRedirects,
   readDocusaurusSiteOrigin,
+  matchingObjectLiteral,
   readDocusaurusSiteSettings,
+  staticStringField,
   readDocusaurusSidebars,
   readDocusaurusThemeColor,
   readDocusaurusPresentation,
@@ -678,10 +680,21 @@ function additionalDocusaurusPluginRoots(
   const plugins: Array<DocusaurusPluginRoot> = []
   // Docusaurus resolves the bare shorthand ('content-docs') to the same
   // official plugin as the full package name, so both forms are matched.
-  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
+  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"]\s*,\s*/g
   for (const match of source.matchAll(matcher)) {
-    const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
-    const routePrefix = trimEdgeSlashes(match[4])
+    const options = matchingObjectLiteral(source, match.index + match[0].length)
+    if (!options) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'A content-docs plugin instance\'s options could not be read without running the config and the instance was skipped. Write its options as an object literal to import it.',
+      })
+      continue
+    }
+    const configuredPath = staticStringField(options, 'path')
+    const configuredRoute = staticStringField(options, 'routeBasePath')
+    if (!configuredPath || !configuredRoute) continue
+    const localPath = trimTrailingSlashes(configuredPath.replace(/^\.\//, ''))
+    const routePrefix = trimEdgeSlashes(configuredRoute)
     if (!localPath || !routePrefix) continue
     // Docusaurus resolves a content-docs instance's `path` relative to the
     // site directory (where `docusaurus.config` lives, `projectRoot` here).
@@ -709,7 +722,7 @@ function additionalDocusaurusPluginRoots(
     } else {
       warnings.push({
         code: 'unsupported-config',
-        message: `The "${routePrefix}" docs plugin instance's path (${JSON.stringify(match[2])}) could not be found in the repository and was skipped.`,
+        message: `The "${routePrefix}" docs plugin instance's path (${JSON.stringify(configuredPath)}) could not be found in the repository and was skipped.`,
       })
     }
   }

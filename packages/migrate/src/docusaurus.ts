@@ -494,7 +494,7 @@ let lastBraceSource: string | undefined
 let lastBraceTable = new Map<number, number>()
 
 /** The object literal starting at `start` (after whitespace, comments and, when asked, opening parentheses), or null when none starts there or it never closes. */
-function matchingObjectLiteral(source: string, start: number, allowParentheses = false): string | null {
+export function matchingObjectLiteral(source: string, start: number, allowParentheses = false): string | null {
   let index = start
   while (index < source.length) {
     if (/\s/.test(source[index]) || (allowParentheses && source[index] === '(')) index++
@@ -1179,7 +1179,7 @@ function staticObjectEntries(array: string | null): Array<string> {
   return entries
 }
 
-function staticStringField(source: string, name: string, bindings?: Map<string, string>): string | undefined {
+export function staticStringField(source: string, name: string, bindings?: Map<string, string>): string | undefined {
   const start = propertyStart(source, name)
   if (start < 0) return undefined
   const quoted = source.slice(start).match(/^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/)

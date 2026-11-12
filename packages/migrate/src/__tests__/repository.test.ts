@@ -4978,6 +4978,44 @@ describe('Docusaurus repository migration', () => {
     }))
   })
 
+  it.each([
+    ['routeBasePath before path', "{ routeBasePath: 'wiki', path: 'wiki', id: 'wiki' }"],
+    ['id last, other options between', "{ routeBasePath: 'wiki', sidebarPath: './sidebars.js', path: 'wiki', id: 'wiki' }"],
+    ['id first', "{ id: 'wiki', routeBasePath: 'wiki', path: 'wiki' }"],
+  ])('imports a content-docs plugin instance with %s', (_name, options) => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-order-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', ${options}]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.map((page) => page.id)).toContain('wiki')
+  })
+
+  it('warns when the options of a content-docs plugin instance cannot be read', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-unreadable-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      const wiki = { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' }
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', wiki]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('content-docs plugin instance'),
+    }))
+  })
+
   it('imports @docusaurus/plugin-client-redirects rules declared inline in docusaurus.config, including a from: [] array', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-inline-redirects-'))
     mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
