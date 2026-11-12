@@ -337,6 +337,11 @@ describe('normalizeMdx', () => {
     expect(output).toContain('<Note>\nReal tip.\n</Note>')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
+  it('renders :::important like :::info, which Docusaurus aliases it to', () => {
+    const output = normalizeMdx(':::important Read this\nBody.\n:::', 'docusaurus')
+    expect(output).toBe('<Info>\n**Read this**\nBody.\n</Info>')
+    expect(output).not.toContain(':::')
+  })
   it('closes an archived Docusaurus admonition before the next heading', () => {
     const body = [
       ':::warning For pnpm users',

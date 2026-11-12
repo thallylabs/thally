@@ -178,7 +178,7 @@ function escapeLeadingBlockMarker(line: string): string {
 
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
   if (kind === 'danger') return 'Error'
-  if (kind === 'info') return 'Info'
+  if (kind === 'info' || kind === 'important') return 'Info'
   if (kind === 'caution' || kind === 'warning') return 'Warning'
   return 'Note'
 }
@@ -306,7 +306,7 @@ function normalizeDocusaurusAdmonitions(body: string): string {
     if (codeFence) return line
     if (/^#{1,6}\s/.test(line)) headingLines.push(index)
 
-    const opening = line.match(/^\s*(:{3,})(note|tip|info|warning|caution|danger)(?:\[([^\]]+)\]|\s+(.+))?\s*$/i)
+    const opening = line.match(/^\s*(:{3,})(note|tip|info|important|warning|caution|danger)(?:\[([^\]]+)\]|\s+(.+))?\s*$/i)
     if (opening) {
       const tag = docusaurusAdmonitionTag(opening[2].toLowerCase())
       openAdmonitions.push({ delimiter: opening[1], tag, openedAt: index })
