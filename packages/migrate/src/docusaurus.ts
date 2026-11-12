@@ -5,7 +5,7 @@
  */
 
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
-import { extname, posix } from 'node:path'
+import { dirname, extname, posix } from 'node:path'
 
 import postcss from 'postcss'
 import { cssColorToHex } from './css-colors.js'
@@ -555,14 +555,25 @@ function withoutGeneratedSidebarImports(source: string): { source: string; modul
   return { source: stripped.replace(/,(\s*,)+/g, ',').replace(/\[\s*,/g, '['), modules: [...used] }
 }
 
-function parseStaticSidebarModule(source: string): { config: Record<string, unknown>; unresolvedModules: Array<string> } {
+function parseStaticSidebarModule(source: string, directory: string): { config: Record<string, unknown>; unresolvedModules: Array<string> } {
   try {
     return { config: parseSidebarObject(source), unresolvedModules: [] }
   } catch (error) {
     const { source: stripped, modules } = withoutGeneratedSidebarImports(source)
-    if (modules.length === 0) throw error
-    return { config: parseSidebarObject(stripped), unresolvedModules: modules }
+    // A module that exists in the source is real data or code, not a build output: keep the original failure.
+    if (modules.length === 0 || modules.some((specifier) => sidebarModuleExists(directory, specifier))) throw error
+    try {
+      return { config: parseSidebarObject(stripped), unresolvedModules: modules }
+    } catch {
+      // The failure of the rewritten text would quote text the author never wrote.
+      throw error
+    }
   }
+}
+
+function sidebarModuleExists(directory: string, specifier: string): boolean {
+  const base = posix.join(directory.replace(/\\/g, '/'), specifier)
+  return ['', '.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '/index.js', '/index.ts'].some((suffix) => existsSync(base + suffix))
 }
 
 function parseSidebarObject(source: string): Record<string, unknown> {
@@ -723,7 +734,7 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   if (!sourcePath) return null
   const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
-  const module = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source)
+  const module = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source, dirname(absolutePath))
   const parsed = module ? module.config : objectValue(JSON5.parse(source))
   if (!parsed) throw new Error('Docusaurus sidebar config must export an object.')
   return { config: parsed, sourcePath, ...(module?.unresolvedModules.length ? { unresolvedModules: module.unresolvedModules } : {}) }

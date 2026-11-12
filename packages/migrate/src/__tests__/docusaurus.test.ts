@@ -75,6 +75,19 @@ describe('Docusaurus projection', () => {
       expect(result?.unresolvedModules).toEqual(['./docs/api/sidebar'])
     })
 
+    it('does not call an existing module generated: a sidebar that imports data from the source is rejected as before', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'items.json'), '["guide"]')
+      writeFileSync(join(root, 'sidebars.js'), "const data = require('./items.json');\nmodule.exports = { docs: ['intro', { type: 'category', label: 'More', items: data }] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/executable/)
+    })
+
+    it('reports the failure of the author\'s text, not of the rewritten text', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.js'), "import gen from './gen';\nexport default { docs: ['intro', ...gen.filter(Boolean)] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/gen\.filter/)
+    })
+
     it('still rejects a sidebar that computes its items', () => {
       const root = fixture()
       writeFileSync(join(root, 'sidebars.ts'), "import apiSidebar from './docs/api/sidebar';\nexport default { docs: [...apiSidebar, makeItems()] };")
