@@ -7283,8 +7283,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     if (presentation) {
-      assets.push({ path: '_thally/source-theme.css', content: Buffer.from(presentation.css) })
-      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/_thally/source-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
+      assets.push({ path: 'migrated/docusaurus-theme.css', content: Buffer.from(presentation.css) })
+      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/migrated/docusaurus-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
       if (presentation.unresolved) warnings.push({ code: 'unsupported-config', message: 'Docusaurus Sass/Tailwind theme values could not be resolved statically; provide compiled build/assets/css/styles.*.css to retain those colors.' })
     }
     if (docusaurusSettings.banner) docsConfig = { ...docsConfig, banner: docusaurusSettings.banner }
