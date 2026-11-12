@@ -4368,7 +4368,7 @@ describe('Docusaurus repository migration', () => {
       const root = join(parent, 'site')
       mkdirSync(join(root, 'docs', '2_Online Payment', 'pic'), { recursive: true })
       mkdirSync(join(root, 'docs', 'pic'), { recursive: true })
-      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { presets: [['classic', { docs: {} }]] }")
+      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { url: 'https://docs.acme.test', presets: [['classic', { docs: {} }]] }")
       writeFileSync(join(root, 'docs', '2_Online Payment', 'pic', '1.png'), 'one')
       writeFileSync(join(root, 'docs', 'pic', 'shared.png'), 'shared')
       writeFileSync(join(root, 'docs', 'pic', 'draft.png'), 'draft')

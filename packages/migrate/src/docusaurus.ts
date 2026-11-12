@@ -376,10 +376,13 @@ export function rewriteDocusaurusLinks(
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
-    if (path.startsWith('/docs/') && options.assetPaths?.has(path.slice('/docs/'.length))) {
+    // A copied file is keyed by its real name, while a link spells spaces and the like as %XX.
+    let decoded = path
+    try { decoded = decodeURIComponent(path) } catch { /* keep the raw path */ }
+    if (decoded.startsWith('/docs/') && options.assetPaths?.has(decoded.slice('/docs/'.length))) {
       return `/${path.slice('/docs/'.length)}${suffix}`
     }
-    return options.assetPaths?.has(path.slice(1)) ? target : null
+    return options.assetPaths?.has(decoded.slice(1)) ? target : null
   }
 
   function rewriteTarget(target: string): string {
