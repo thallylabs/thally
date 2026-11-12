@@ -202,6 +202,7 @@ function isIgnoredContentDirectory(name: string): boolean {
 /** Project-root directory for withheld restricted pages and assets; never read by the runtime. */
 const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.png', '.svg', '.webp'])
 const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
   '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
@@ -4161,10 +4162,12 @@ function repositoryAssetHref(
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
   /** Called when a page-relative path missed beside the page and the site-root file of that name was used. */
   onRootFallback?: (spelled: string, used: string) => void,
+  scope?: RelativeImageScope,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
   if (!raw || raw.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) return null
+  if (scope && /^[/@~]/.test(raw)) return null
   const suffixIndex = raw.search(/[?#]/)
   const pathname = suffixIndex >= 0 ? raw.slice(0, suffixIndex) : raw
   const suffix = suffixIndex >= 0 ? raw.slice(suffixIndex) : ''
@@ -4174,7 +4177,7 @@ function repositoryAssetHref(
   } catch {
     return null
   }
-  if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
+  if (!(scope?.extensions ?? ASSET_EXTENSIONS).has(extname(decodedPath).toLowerCase())) return null
   try {
     let usedRootFallback = false
     let candidate = decodedPath.startsWith('/')
@@ -4183,7 +4186,7 @@ function repositoryAssetHref(
     // Authors of nested pages (e.g. v1/introduction) often write `./images/x.png`
     // for a file that lives in the shared root images folder; use it when
     // nothing exists beside the page.
-    if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
+    if (!scope && !decodedPath.startsWith('/') && !existsSync(candidate)) {
       const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
       if (existsSync(fromRoot)) { candidate = fromRoot; usedRootFallback = true }
     }
@@ -4193,12 +4196,18 @@ function repositoryAssetHref(
     const realRoot = realpathSync(siteRoot)
     const realCandidate = realpathSync(candidate)
     const realRelative = relative(realRoot, realCandidate)
-    if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) return null
+    if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) {
+      scope?.onMissing(decodedPath)
+      return null
+    }
     // Mintlify's deploy root is the directory containing docs.json. Do not
     // copy or expose a relative reference that escapes that project boundary.
     const siteRelative = relative(siteRoot, candidate).replace(/\\/g, '/')
     resolveWithin(siteRoot, siteRelative)
-    if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
+    if (!existsSync(candidate) || !lstatSync(candidate).isFile()) {
+      scope?.onMissing(decodedPath)
+      return null
+    }
     const normalized = normalizeAssetPath(siteRelative)
     if (!normalized) return null
     // On a case-insensitive filesystem a differently-cased reference opens the
@@ -4207,11 +4216,12 @@ function repositoryAssetHref(
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
     onReferenced?.(normalized, onDisk ?? undefined)
     if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
-    const rewritten = `/${normalized}${suffix}`
+    const rewritten = `/${scope ? normalized.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
     return isBracketed ? `<${rewritten}>` : rewritten
   } catch {
+    scope?.onMissing(decodedPath)
     return null
   }
 }
@@ -4236,12 +4246,19 @@ function rewriteFernIdRenameLinks(body: string, renames: Map<string, string>): s
   })
 }
 
+/**
+ * Narrower rules for a page's own relative references: only the listed file types, only forms resolved
+ * beside the page (never the site root), URL-encoded results, and a callback for what cannot be used.
+ */
+interface RelativeImageScope { extensions: ReadonlySet<string>; onMissing: (spelled: string) => void }
+
 function rewriteRepositoryAssetLinks(
   body: string,
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
   onRootFallback?: (spelled: string, used: string) => void,
+  scope?: RelativeImageScope,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -4250,7 +4267,7 @@ function rewriteRepositoryAssetLinks(
       destination: string,
       closing: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
       return rewritten ? `${opening}${rewritten}${closing}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
@@ -4259,7 +4276,7 @@ function rewriteRepositoryAssetLinks(
       quote: string,
       destination: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
       return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
     })
 }
@@ -5898,6 +5915,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     seenPageIds.add(page.id)
+    if (platform === 'docusaurus') {
+      // Images kept beside the docs are written relative to the page. Only a page that is kept gets its images copied.
+      const missing = new Set<string>()
+      page.body = replaceOutsideCode(page.body, (text) => rewriteRepositoryAssetLinks(
+        text, file.absolutePath, contentRoot,
+        (assetPath) => { addAssetReference(assetPath, file.relativePath) },
+        undefined,
+        { extensions: IMAGE_EXTENSIONS, onMissing: (spelled) => { missing.add(spelled) } },
+      ))
+      for (const spelled of missing) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The image "${spelled}" was not found in the source (or lies outside it), so this page still points at it and the image will be broken. Add the file to public/ and update the link.`,
+          source: file.relativePath,
+        })
+      }
+    }
     if (pageGate?.access?.groups) page.groups = pageGate.access.groups
     if (pageGate?.access?.isPublic !== undefined) page.public = pageGate.access.isPublic
     pages.push(page)
@@ -6090,7 +6124,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       && STYLESHEET_URL_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
     if (!siteKind && !loadedByStylesheet && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
-      && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
+      && !((platform === 'fern' || platform === 'docusaurus') && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
     const assetPath = normalizeAssetPath(firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)

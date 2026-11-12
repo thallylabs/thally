@@ -4362,6 +4362,62 @@ describe('Docusaurus repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message)).toContain('The Docusaurus themeConfig could not be read without running the config, so the navbar, logo and footer were left out of the migration. Write themeConfig as an object literal to import them.')
   })
 
+  describe('images stored beside the docs', () => {
+    function imageSite() {
+      const parent = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-images-'))
+      const root = join(parent, 'site')
+      mkdirSync(join(root, 'docs', '2_Online Payment', 'pic'), { recursive: true })
+      mkdirSync(join(root, 'docs', 'pic'), { recursive: true })
+      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { presets: [['classic', { docs: {} }]] }")
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'pic', '1.png'), 'one')
+      writeFileSync(join(root, 'docs', 'pic', 'shared.png'), 'shared')
+      writeFileSync(join(root, 'docs', 'pic', 'draft.png'), 'draft')
+      writeFileSync(join(root, 'docs', 'pic', 'notes.txt'), 'notes')
+      writeFileSync(join(parent, 'outside.png'), 'outside')
+      symlinkSync(join(parent, 'outside.png'), join(root, 'docs', 'pic', 'link.png'))
+      writeFileSync(join(root, 'docs', 'intro.md'), '---\ntitle: Intro\n---\n\nIntro.')
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'guide.md'), [
+        '---', 'title: Guide', '---', '',
+        '![one](./pic/1.png)', '', '![shared](../pic/shared.png)', '', '<img src="./pic/1.png" alt="again" />', '',
+        '![none](./pic/none.png)', '', '![escape](../../../outside.png)', '', '![link](../pic/link.png)', '', '![text](../pic/notes.txt)', '',
+        '```md', '![code](./pic/code.png)', '```', '',
+      ].join('\n'))
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'draft.md'), '---\ntitle: Draft\ndraft: true\n---\n\n![d](../pic/draft.png)')
+      return root
+    }
+
+    it('copies the images a migrated page references and points the page at the copies', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![one](/2_Online%20Payment/pic/1.png)')
+      expect(body).toContain('![shared](/pic/shared.png)')
+      expect(body).toContain('<img src="/2_Online%20Payment/pic/1.png" alt="again" />')
+      const copied = bundle.assets.map((asset) => asset.path)
+      expect(copied).toContain('2_Online Payment/pic/1.png')
+      expect(copied).toContain('pic/shared.png')
+    })
+
+    it('copies nothing for a draft page, outside the source root, behind a symlink or that is not an image', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const copied = bundle.assets.map((asset) => asset.path)
+      for (const unwanted of ['pic/draft.png', 'pic/link.png', 'pic/notes.txt', 'outside.png']) expect(copied).not.toContain(unwanted)
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![escape](../../../outside.png)')
+      expect(body).toContain('![link](../pic/link.png)')
+      expect(body).toContain('![code](./pic/code.png)')
+    })
+
+    it('keeps a reference to a missing image and warns with the page and path', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![none](./pic/none.png)')
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        source: '2_Online Payment/guide.md',
+        message: expect.stringContaining('./pic/none.png'),
+      }))
+    })
+  })
+
   it('reads site identity through an imported JSON module', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'site.json'), JSON.stringify({
