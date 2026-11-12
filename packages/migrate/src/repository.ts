@@ -7223,6 +7223,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: `The Docusaurus ${DOCUSAURUS_IDENTITY_LABELS[field]} could not be read without running the config and was left out of the migration.${fallback} Use a string literal, or plain data in an imported module, to import it.`,
       })
     }
+    if (docusaurusSettings.unresolvedThemeConfig) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'The Docusaurus themeConfig could not be read without running the config, so the navbar, logo and footer were left out of the migration. Write themeConfig as an object literal to import them.',
+      })
+    }
     for (const token of docusaurusSettings.unresolvedCopyright ?? []) {
       warnings.push({
         code: 'unsupported-config',

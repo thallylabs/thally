@@ -493,11 +493,11 @@ function braceTable(source: string): Map<number, number> {
 let lastBraceSource: string | undefined
 let lastBraceTable = new Map<number, number>()
 
-/** The object literal starting at `start` (after whitespace and comments), or null when none starts there or it never closes. */
-function matchingObjectLiteral(source: string, start: number): string | null {
+/** The object literal starting at `start` (after whitespace, comments and, when asked, opening parentheses), or null when none starts there or it never closes. */
+function matchingObjectLiteral(source: string, start: number, allowParentheses = false): string | null {
   let index = start
   while (index < source.length) {
-    if (/\s/.test(source[index])) index++
+    if (/\s/.test(source[index]) || (allowParentheses && source[index] === '(')) index++
     else if (source.startsWith('//', index)) { const end = source.indexOf('\n', index); index = end < 0 ? source.length : end + 1 }
     else if (source.startsWith('/*', index)) { const end = source.indexOf('*/', index + 2); index = end < 0 ? source.length : end + 2 }
     else break
@@ -942,6 +942,8 @@ export interface DocusaurusSiteSettings {
   unresolvedIdentity?: Array<'title' | 'tagline' | 'navbarTitle'>
   /** Copyright tokens that only exist at build time and were removed. */
   unresolvedCopyright?: string[]
+  /** The config has a `themeConfig` but no object literal could be read from it. */
+  unresolvedThemeConfig?: boolean
 }
 
 function propertyStart(source: string, name: string): number {
@@ -1246,7 +1248,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
     .find((object): object is string => Boolean(object))
   const docsRouteBasePath = classicDocs && staticStringField(classicDocs, 'routeBasePath', bindings) || 'docs'
   const themeStart = propertyStart(source, 'themeConfig')
-  const theme = themeStart < 0 ? null : matchingObjectLiteral(source, themeStart)
+  const theme = themeStart < 0 ? null : matchingObjectLiteral(source, themeStart, true)
   const colorModeStart = theme ? propertyStart(theme, 'colorMode') : -1
   const colorMode = colorModeStart < 0 ? null : matchingObjectLiteral(theme!, colorModeStart)
   const configuredColorMode = colorMode ? staticStringField(colorMode, 'defaultMode') : undefined
@@ -1315,6 +1317,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
     ...(navbarTitle ? { navbarTitle } : {}),
     ...(unresolvedIdentity.length > 0 ? { unresolvedIdentity } : {}),
     ...(unresolvedCopyright.length > 0 ? { unresolvedCopyright } : {}),
+    ...(themeStart >= 0 && !theme ? { unresolvedThemeConfig: true } : {}),
     defaultColorMode,
     docsRouteBasePath,
     ...(logo && staticStringField(logo, 'src', bindings) ? {

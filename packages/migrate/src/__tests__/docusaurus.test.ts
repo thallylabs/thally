@@ -90,6 +90,41 @@ describe('Docusaurus projection', () => {
     expect(readDocusaurusSiteSettings(root).logo).toBeUndefined()
   })
 
+  it('reads a theme config written as a parenthesised, type-annotated object', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `const config = {
+      title: 'Docs',
+      themeConfig:
+        /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
+        ({
+          navbar: {
+            title: 'Acme',
+            logo: { alt: 'Acme', src: 'img/logo.svg' },
+            items: [
+              { type: 'doc', docId: 'intro', position: 'left', label: 'Tutorial' },
+              { href: 'https://example.test/repo', label: 'Repo', position: 'right' },
+            ],
+          },
+          footer: { copyright: \`Copyright © \${new Date().getFullYear()} Acme.\` },
+        }),
+    }
+    export default config`)
+    const settings = readDocusaurusSiteSettings(root)
+    expect(settings).toMatchObject({ navbarTitle: 'Acme', logo: { light: 'img/logo.svg' }, copyright: 'Copyright © {year} Acme.' })
+    expect(settings.navbarLinks).toEqual([
+      { label: 'Tutorial', docId: 'intro' },
+      { label: 'Repo', href: 'https://example.test/repo' },
+    ])
+    expect(settings.unresolvedThemeConfig).toBeUndefined()
+  })
+
+  it('reports a theme config that is not an object literal', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `import theme from './theme'
+    export default { title: 'Docs', themeConfig: buildTheme() }`)
+    expect(readDocusaurusSiteSettings(root).unresolvedThemeConfig).toBe(true)
+  })
+
   it('reads a static default color mode from the theme config', () => {
     const root = fixture()
     writeFileSync(join(root, 'docusaurus.config.ts'), `export default {

@@ -4355,6 +4355,13 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  it('warns when the theme config cannot be read as an object literal', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `export default { title: 'Acme Docs', themeConfig: buildTheme() }`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.warnings.map((warning) => warning.message)).toContain('The Docusaurus themeConfig could not be read without running the config, so the navbar, logo and footer were left out of the migration. Write themeConfig as an object literal to import them.')
+  })
+
   it('reads site identity through an imported JSON module', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'site.json'), JSON.stringify({
