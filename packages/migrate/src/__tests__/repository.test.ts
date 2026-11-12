@@ -5129,6 +5129,29 @@ describe('Docusaurus repository migration', () => {
     }))
   })
 
+  it.each([
+    ['path', "{ id: 'wiki', path: wikiPath, routeBasePath: 'wiki' }", 'path'],
+    ['a template literal path', "{ id: 'wiki', path: `wiki`, routeBasePath: 'wiki' }", 'path'],
+    ['routeBasePath', "{ id: 'wiki', path: 'wiki', routeBasePath: base }", 'routeBasePath'],
+  ])('warns when a content-docs plugin instance has an unreadable %s', (_name, options, option) => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-nonliteral-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', ${options}]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining(`its ${option} could not be read`),
+    }))
+  })
+
   it('imports @docusaurus/plugin-client-redirects rules declared inline in docusaurus.config, including a from: [] array', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-inline-redirects-'))
     mkdirSync(join(repositoryDir, 'docs'), { recursive: true })

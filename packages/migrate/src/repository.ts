@@ -695,7 +695,17 @@ function additionalDocusaurusPluginRoots(
     }
     const configuredPath = staticStringField(options, 'path')
     const configuredRoute = staticStringField(options, 'routeBasePath')
-    if (!configuredPath || !configuredRoute) continue
+    if (!configuredPath || !configuredRoute) {
+      // An option that is present but not a plain string (a variable, a template) cannot be read without running the config.
+      const unreadable = [['path', configuredPath], ['routeBasePath', configuredRoute]].filter(([name, value]) => !value && new RegExp(`(?:^|[\\s,{])${name}\\s*:`).test(options)).map(([name]) => name)
+      if (unreadable.length > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `A content-docs plugin instance was skipped because its ${unreadable.join(' and ')} could not be read as a plain string without running the config. Write ${unreadable.length > 1 ? 'them' : 'it'} as a string literal to import that instance.`,
+        })
+      }
+      continue
+    }
     const localPath = trimTrailingSlashes(configuredPath.replace(/^\.\//, ''))
     const routePrefix = trimEdgeSlashes(configuredRoute)
     if (!localPath || !routePrefix) continue
