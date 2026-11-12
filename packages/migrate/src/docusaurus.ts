@@ -544,6 +544,9 @@ function withoutGeneratedSidebarImports(source: string): { source: string; modul
     const reference = `${escapeRegExp(name)}(?:\\.\\w+)?(?![\\w$])`
     const before = stripped
     stripped = stripped
+      // A helper declared in the sidebar file that only reshapes the list (`apiSidebarItems(apiSidebar)`) has nothing to reshape.
+      .replace(new RegExp(`\\b([A-Za-z_$][\\w$]*)\\(\\s*${escapeRegExp(name)}\\s*\\)`, 'g'), (call: string, callee: string) =>
+        new RegExp(`(?:\\bfunction\\s+|\\b(?:const|let|var)\\s+)${escapeRegExp(callee)}(?![\\w$])`).test(source) ? '[]' : call)
       .replace(new RegExp(`\\.\\.\\.\\s*${reference}\\s*,?`, 'g'), '')
       .replace(new RegExp(`(:\\s*)${reference}`, 'g'), '$1[]')
       .replace(new RegExp(`([\\[,]\\s*)${reference}\\s*(?=[,\\]])`, 'g'), '$1')

@@ -63,6 +63,18 @@ describe('Docusaurus projection', () => {
       expect(result?.unresolvedModules).toEqual([expect.stringMatching(/^\.\/docs\/management-api\/sidebar(?:\.js)?$/)])
     })
 
+    it('treats a call of a helper declared in the sidebar file on a generated sidebar as an empty list', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.js'), [
+        "import { default as apiSidebar } from './docs/api/sidebar';",
+        'function apiItems(sidebar) { return sidebar.slice(1) }',
+        "module.exports = { docs: ['intro', { type: 'category', label: 'API', items: apiItems(apiSidebar) }] };",
+      ].join('\n'))
+      const result = readDocusaurusSidebars(root)
+      expect(result?.config).toEqual({ docs: ['intro', { type: 'category', label: 'API', items: [] }] })
+      expect(result?.unresolvedModules).toEqual(['./docs/api/sidebar'])
+    })
+
     it('still rejects a sidebar that computes its items', () => {
       const root = fixture()
       writeFileSync(join(root, 'sidebars.ts'), "import apiSidebar from './docs/api/sidebar';\nexport default { docs: [...apiSidebar, makeItems()] };")
