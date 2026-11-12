@@ -1757,7 +1757,8 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
   // Note: MDX (mdx-js) disables CommonMark indented code blocks, so
   // 4-space-indented text is never code here and is intentionally left
   // unmasked, matching @mdx-js/mdx's own parsing.
-  for (const line of source.split('\n')) {
+  const sourceLines = source.split('\n')
+  for (const [lineIndex, line] of sourceLines.entries()) {
     // MDX has no indented code, so a fence may sit at any indentation (a list item's content is indented by its marker).
     const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
     if (codeFence) {
@@ -1777,7 +1778,16 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
     // A backtick fence's info string cannot hold a backtick (CommonMark):
     // "```bash npm install x ```" is inline code, and opening a fence on it
     // would hide the rest of the page from every rename.
-    if (fenceMatch && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
+    // A run indented four or more spaces that nothing closes is more likely stray text than a fence swallowing the rest of the page.
+    let unclosedDeepRun = false
+    if (fenceMatch && /^ {4}|^\t/.test(line)) {
+      unclosedDeepRun = true
+      for (let later = lineIndex + 1; later < sourceLines.length && unclosedDeepRun; later++) {
+        const closing = sourceLines[later].match(/^\s*(`{3,}|~{3,})\s*$/)
+        if (closing && closing[1][0] === fenceMatch[1][0] && closing[1].length >= fenceMatch[1].length) unclosedDeepRun = false
+      }
+    }
+    if (fenceMatch && !unclosedDeepRun && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
       codeFence = fenceMatch[1]
       fenceBuffer = [line]
       continue

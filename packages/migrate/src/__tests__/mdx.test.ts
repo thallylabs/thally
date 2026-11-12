@@ -7,7 +7,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -2247,6 +2247,18 @@ describe('Mintlify code-fence compatibility', () => {
   })
 })
 
+
+describe('indented backtick runs', () => {
+  const rename = (body: string) => replaceOutsideCode(body, (text) => text.replace(/TAIL|INSIDE/g, 'done'))
+
+  it('does not let a deeply indented run that nothing closes hide the rest of the page', () => {
+    expect(rename('Paragraph\n    ```js\n\nTAIL')).toBe('Paragraph\n    ```js\n\ndone')
+  })
+
+  it('still masks a deeply indented fence that is closed, as inside a list item', () => {
+    expect(rename('- item\n\n    ```html\n    INSIDE\n    ```\n\nTAIL')).toBe('- item\n\n    ```html\n    INSIDE\n    ```\n\ndone')
+  })
+})
 
 describe('Mintlify unsupported fence options', () => {
   it('reports renderer-only attributes and leaves source code unchanged', () => {
