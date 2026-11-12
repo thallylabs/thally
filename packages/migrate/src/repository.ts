@@ -4300,6 +4300,29 @@ function rewriteRepositoryAssetLinks(
     })
 }
 
+/**
+ * Re-point the relative image references of a partial's text, written against the partial's directory, at the importing page's
+ * directory, so the page's image pass finds the partial's own files. Covers the forms `rewriteRepositoryAssetLinks` reads;
+ * code, URLs, absolute, `@site` and `~` references are left alone.
+ */
+function rebaseRelativeImages(body: string, fromDirectory: string, toDirectory: string): string {
+  const prefix = relative(toDirectory, fromDirectory).split(sep).join('/')
+  if (!prefix) return body
+  const rebase = (destination: string): string => {
+    const isBracketed = destination.startsWith('<') && destination.endsWith('>')
+    const raw = isBracketed ? destination.slice(1, -1) : destination
+    if (!raw || /^(?:[a-z][a-z0-9+.-]*:|\/\/|[/#@~?])/i.test(raw)) return destination
+    const path = raw.search(/[?#]/) >= 0 ? raw.slice(0, raw.search(/[?#]/)) : raw
+    if (!IMAGE_EXTENSIONS.has(extname(path).toLowerCase())) return destination
+    const rebased = posix.normalize(`${prefix}/${raw}`)
+    return isBracketed ? `<${rebased}>` : rebased
+  }
+  return replaceOutsideCode(body, (text) => text
+    .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (_original, opening: string, destination: string, closing: string) => `${opening}${rebase(destination)}${closing}`)
+    .replace(/^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)/gm, (_original, opening: string, destination: string) => `${opening}${rebase(destination)}`)
+    .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (_original, property: string, quote: string, destination: string) => `${property}=${quote}${rebase(destination)}${quote}`))
+}
+
 const LOCAL_EXPORT_DECLARATION = /^\s*export\s+(?:const|let|var|function|class|async\s+function)\s+([A-Za-z_$][\w$]*)/
 
 /** Mintlify leaves JSX comments in MDX. Snippet tags inside them are examples or disabled content. */
@@ -4380,6 +4403,8 @@ function inlineMdxSnippets(
   // inlined, whatever its directory. One warning per occurrence; the returned
   // comment replaces the content.
   const source = relative(repositoryRoot, currentFile).replace(/\\/g, '/')
+  /** Docusaurus partial text keeps its images beside the partial; the page's image pass resolves beside the page. */
+  const fromPartial = (candidate: string, text: string): string => platform === 'docusaurus' ? rebaseRelativeImages(text, dirname(candidate), dirname(currentFile)) : text
   const blockInline = (candidate: string, shownPath: string, label = shownPath): string | undefined => {
     const verdict = gate?.(candidate)
     if (!verdict) return undefined
@@ -4475,7 +4500,7 @@ function inlineMdxSnippets(
         // An upper-case primitive export (`API_KEY_REF`) matches the component
         // pattern; leave it for the value-import pass that declares it.
         if (namedComponent && staticNamedSnippetValues(readFileSync(candidate, 'utf8')).has(namedComponent)) return _statement
-        const nested = inlineMdxSnippets(
+        const nested = fromPartial(candidate, inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -4485,7 +4510,7 @@ function inlineMdxSnippets(
           globalAliases,
           gate,
           platform,
-        )
+        ))
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
         else {
@@ -4583,7 +4608,7 @@ function inlineMdxSnippets(
             declarations.push(`export const ${binding!.local} = undefined;`)
             continue
           }
-          components.push([binding!.local, body])
+          components.push([binding!.local, fromPartial(candidate, body)])
           if (/^[A-Z]/.test(binding!.exported)) snippetProps.set(binding!.local, snippetParameters(snippetSource, binding!.exported))
         }
         for (const [name, body] of components) snippets.set(name, body)
@@ -4618,7 +4643,7 @@ function inlineMdxSnippets(
       snippets.set(componentName, blocked)
       continue
     }
-    const nested = inlineMdxSnippets(
+    const nested = fromPartial(candidate, inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
       repositoryRoot,
@@ -4628,7 +4653,7 @@ function inlineMdxSnippets(
       globalAliases,
       gate,
       platform,
-    )
+    ))
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
     else {
@@ -4669,7 +4694,7 @@ function inlineMdxSnippets(
         if (!candidate) throw new Error('file not found')
         const blocked = blockInline(candidate, filePath, tagLabel(filePath))
         if (blocked) return blocked
-        return isolateFences(alignToTag(closeOpenCodeFence(inlineMdxSnippets(
+        return isolateFences(alignToTag(closeOpenCodeFence(fromPartial(candidate, inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -4679,7 +4704,7 @@ function inlineMdxSnippets(
           globalAliases,
           gate,
           platform,
-        )), source, offset), source, offset, offset + tag.length)
+        ))), source, offset), source, offset, offset + tag.length)
       } catch {
         warnings.push({
           code: 'missing-page',

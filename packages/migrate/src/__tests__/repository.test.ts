@@ -4505,6 +4505,54 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  describe('relative images inside an inlined partial', () => {
+    function partialSite() {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-partial-images-'))
+      for (const directory of ['_shared/img', '_shared/deep', 'guide/img']) mkdirSync(join(root, 'docs', directory), { recursive: true })
+      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { url: 'https://docs.acme.test', presets: [['classic', { docs: {} }]] }")
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'a.png'), 'partial-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'b.png'), 'second-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'c.png'), 'third-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'd.png'), 'fourth-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'deep', 'e.png'), 'nested-bytes')
+      return root
+    }
+    const migrate = (root: string) => migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+
+    it('binds a partial image to the partial\'s own file, not a same-named file beside the page', () => {
+      const root = partialSite()
+      writeFileSync(join(root, 'docs', 'guide', 'img', 'a.png'), 'page-bytes')
+      writeFileSync(join(root, 'docs', '_shared', '_x.mdx'), [
+        '![a](./img/a.png)', '', '<img src="./img/b.png" alt="b" />', '', '![c][ref]', '', '[ref]: ./img/c.png', '',
+        '![abs](/img/keep.png) ![url](https://example.com/u.png)', '',
+        '```md', '![code](./img/d.png)', '```', '', "import Deep from './deep/_y.mdx'", '', '<Deep />', '',
+      ].join('\n'))
+      writeFileSync(join(root, 'docs', '_shared', 'deep', '_y.mdx'), '![e](./e.png)\n')
+      writeFileSync(join(root, 'docs', 'guide', 'page.mdx'), "---\ntitle: Page\n---\n\nimport X from '../_shared/_x.mdx'\n\n<X />\n")
+      const bundle = migrate(root)
+      const body = bundle.pages.find((candidate) => candidate.title === 'Page')!.body
+      const bytes = (path: string) => bundle.assets.find((asset) => asset.path === path)?.content.toString()
+      expect(body).toContain('![a](/migrated/docs/_shared/img/a.png)')
+      expect(body).toContain('<img src="/migrated/docs/_shared/img/b.png" alt="b" />')
+      expect(body).toContain('[ref]: /migrated/docs/_shared/img/c.png')
+      expect(body).toContain('![e](/migrated/docs/_shared/deep/e.png)')
+      expect(body).toContain('![abs](https://docs.acme.test/img/keep.png)')
+      expect(body).toContain('![url](https://example.com/u.png)')
+      expect(body).toContain('![code](./img/d.png)')
+      expect(bytes('migrated/docs/_shared/img/a.png')).toBe('partial-bytes')
+      expect(bytes('migrated/docs/_shared/deep/e.png')).toBe('nested-bytes')
+      expect(bytes('migrated/docs/guide/img/a.png')).toBeUndefined()
+    })
+
+    it('reports the image of a partial that exists nowhere instead of finding none', () => {
+      const root = partialSite()
+      writeFileSync(join(root, 'docs', '_shared', '_x.mdx'), '![gone](./img/gone.png)\n')
+      writeFileSync(join(root, 'docs', 'guide', 'page.mdx'), "---\ntitle: Page\n---\n\nimport X from '../_shared/_x.mdx'\n\n<X />\n")
+      const bundle = migrate(root)
+      expect(bundle.warnings.filter((warning) => warning.source === 'guide/page.mdx' && warning.message.includes('gone.png'))).toHaveLength(1)
+    })
+  })
+
   it('reads site identity through an imported JSON module', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'site.json'), JSON.stringify({
