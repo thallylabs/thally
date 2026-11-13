@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, normalizeIndentedFences, hasAnyFunctionValuedProp, hasClientDirective, mergeComponentRegistry, pageHasComponentWork, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -2326,5 +2326,103 @@ describe('the names a client adapter binds never take one the page declared', ()
   it('leaves every name as it was when the page declares none of them', () => {
     const { content } = adapterFor('render')
     expect(content).toContain('export function CallbackWrapper({ children, ...props }) { return <Original {...props} f={render} g={callback0}>{children}</Original>; }')
+  })
+})
+
+describe('normalizeIndentedFences with self-closing tags in a list', () => {
+  it('keeps the indentation of a self-closing tag that has trailing spaces', () => {
+    const page = '- item\n\n  <details>\n\n    <Partial/> \n\n  </details>\n'
+    expect(normalizeIndentedFences(page)).toBe(page)
+  })
+})
+
+describe('raw-loader imports', () => {
+  const page = (body: string) => `---\ntitle: Demo\n---\n\n${body}\n`
+  const migrate = (files: Record<string, string>) => {
+    const root = fixture({ 'site/docusaurus.config.js': 'module.exports = {}', ...files })
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+  }
+  const bodyOf = (bundle: ReturnType<typeof migrate>) => bundle.pages.find((candidate) => candidate.title === 'Demo')!.body
+
+  it('keeps the page and turns a CodeBlock fed by an @site file outside the site directory into a fenced block', () => {
+    const bundle = migrate({
+      'demos/hello.ts': 'import { x } from "y"\nexport const hello = `a`\n',
+      'site/docs/demo.mdx': page('import CodeBlock from "@theme/CodeBlock"\nimport Hello from "!!raw-loader!@site/../demos/hello.ts"\n\n<CodeBlock language="ts" title="hello.ts">{Hello}</CodeBlock>'),
+    })
+    const body = bodyOf(bundle)
+    expect(body).toContain('```ts title="hello.ts"\nimport { x } from "y"\nexport const hello = `a`\n```')
+    expect(body).not.toContain('raw-loader')
+    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file')).toEqual([])
+  })
+
+  it('resolves a relative specifier with the plain raw-loader prefix', () => {
+    const bundle = migrate({
+      'site/docs/code.py': 'print(1)\n',
+      'site/docs/demo.mdx': page('import CodeBlock from "@theme/CodeBlock"\nimport Code from "raw-loader!./code.py"\n\n<CodeBlock language="python">{Code}</CodeBlock>'),
+    })
+    expect(bodyOf(bundle)).toContain('```python\nprint(1)\n```')
+  })
+
+  it('writes a fenced block of the file for a site component that cannot be copied and warns', () => {
+    const bundle = migrate({
+      'demos/hello.ts': 'const a = 1\n',
+      'site/docs/demo.mdx': page('import Snippet from "@site/src/missing/Snippet"\nimport Hello from "!!raw-loader!@site/../demos/hello.ts"\n\n<Snippet source={Hello} title="hello.ts" />'),
+    })
+    const body = bodyOf(bundle)
+    expect(body).toContain('```ts title="hello.ts"\nconst a = 1\n```')
+    expect(body).not.toContain('<div')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toMatch(/Snippet.*formatting was not reproduced/)
+  })
+
+  it('keeps the fence inside a list item and uses a longer marker when the file holds backticks', () => {
+    const bundle = migrate({
+      'site/docs/code.txt': '```js\nx\n```\n',
+      'site/docs/demo.mdx': page('import CodeBlock from "@theme/CodeBlock"\nimport Code from "!!raw-loader!./code.txt"\n\n1. Step\n\n   <CodeBlock language="txt">{Code}</CodeBlock>'),
+    })
+    expect(bodyOf(bundle)).toContain('   ````txt\n   ```js\n   x\n   ```\n   ````')
+  })
+
+  it('reads a markdown file as text instead of inlining it as a partial', () => {
+    const bundle = migrate({
+      'site/docs/sample.md': '# Sample\n',
+      'site/docs/demo.mdx': page('import CodeBlock from "@theme/CodeBlock"\nimport Sample from "!!raw-loader!./sample.md"\n\n<CodeBlock language="md">{Sample}</CodeBlock>'),
+    })
+    expect(bodyOf(bundle)).toContain('```md\n# Sample\n```')
+  })
+
+  it('keeps a copyable site component and passes it the file text', () => {
+    const bundle = migrate({
+      'site/src/Snippet.tsx': 'export default function Snippet({ source }: { source: string }) { return <pre>{source}</pre> }',
+      'site/docs/code.ts': 'const a = 1\n',
+      'site/docs/demo.mdx': page('import Snippet from "@site/src/Snippet"\nimport Code from "!!raw-loader!./code.ts"\n\n<Snippet source={Code} />'),
+    })
+    const body = bodyOf(bundle)
+    expect(body).toContain('export const Code = "const a = 1\\n";')
+    expect(body).toContain('source={Code}')
+    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file')).toEqual([])
+  })
+
+  it.each([
+    ['missing', { 'site/docs/demo.mdx': 'MD' }, '"!!raw-loader!./nope.ts"'],
+    ['outside the source root', { 'site/docs/demo.mdx': 'MD' }, '"!!raw-loader!@site/../../../outside.ts"'],
+    ['binary', { 'site/docs/demo.mdx': 'MD', 'site/docs/nope.ts': 'a\0b' }, '"!!raw-loader!./nope.ts"'],
+  ])('keeps the page and warns when the file is %s', (_name, files, specifier) => {
+    const body = `import CodeBlock from "@theme/CodeBlock"\nimport X from ${specifier}\n\n<CodeBlock language="ts">{X}</CodeBlock>\n\nStill here.`
+    const bundle = migrate({ ...files, 'site/docs/demo.mdx': page(body) })
+    expect(bodyOf(bundle)).toContain('Still here.')
+    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file')).toEqual([])
+    expect(bundle.warnings.some((warning) => warning.source === 'docs/demo.mdx' && warning.message.includes('raw-loader') && warning.message.includes(specifier.slice(1, -1)))).toBe(true)
+  })
+
+  it('rejects a file reached through a symlink out of the source root', () => {
+    const outside = fixture({ 'secret.ts': 'secret' })
+    const root = fixture({
+      'site/docusaurus.config.js': 'module.exports = {}',
+      'site/docs/demo.mdx': page('import CodeBlock from "@theme/CodeBlock"\nimport X from "!!raw-loader!./link.ts"\n\n<CodeBlock language="ts">{X}</CodeBlock>'),
+    })
+    symlinkSync(join(outside, 'secret.ts'), join(root, 'site/docs/link.ts'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bodyOf(bundle)).not.toContain('secret')
+    expect(bundle.pages.some((candidate) => candidate.title === 'Demo')).toBe(true)
   })
 })

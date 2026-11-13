@@ -42,7 +42,9 @@ import {
   projectDocusaurusNavigation,
   readDocusaurusRedirects,
   readDocusaurusSiteOrigin,
+  matchingObjectLiteral,
   readDocusaurusSiteSettings,
+  staticStringField,
   readDocusaurusSidebars,
   readDocusaurusThemeColor,
   readDocusaurusPresentation,
@@ -197,9 +199,12 @@ const IGNORED_DIRECTORIES = new Set([
 function isIgnoredContentDirectory(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules'
 }
+/** Where images kept beside Docusaurus docs are copied, apart from the URL space of `static/`. */
+const DOCUSAURUS_DOCS_ASSET_PREFIX = 'migrated/docs/'
 /** Project-root directory for withheld restricted pages and assets; never read by the runtime. */
 const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.png', '.svg', '.webp'])
 const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
   '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
@@ -227,7 +232,7 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // Matches a default import (`import Name from '...'`), a default-as-named
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
-const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
+const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]((?![^'"]*!)[^'"]+\.mdx?)['"]\s*;?/g
 /** Empty stand-ins for the exports Docusaurus adds to every MDX document (its own TOC feeds are not used). */
 const DOCUSAURUS_GENERATED_EXPORTS: Record<string, string | undefined> = Object.assign(Object.create(null) as Record<string, string>, {
   toc: '[]', frontMatter: '{}', metadata: '{}', assets: '{}', contentTitle: 'undefined',
@@ -678,10 +683,31 @@ function additionalDocusaurusPluginRoots(
   const plugins: Array<DocusaurusPluginRoot> = []
   // Docusaurus resolves the bare shorthand ('content-docs') to the same
   // official plugin as the full package name, so both forms are matched.
-  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
+  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"]\s*,\s*/g
   for (const match of source.matchAll(matcher)) {
-    const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
-    const routePrefix = trimEdgeSlashes(match[4])
+    const options = matchingObjectLiteral(source, match.index + match[0].length)
+    if (!options) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'A content-docs plugin instance\'s options could not be read without running the config and the instance was skipped. Write its options as an object literal to import it.',
+      })
+      continue
+    }
+    const configuredPath = staticStringField(options, 'path')
+    const configuredRoute = staticStringField(options, 'routeBasePath')
+    if (!configuredPath || !configuredRoute) {
+      // An option that is present but not a plain string (a variable, a template) cannot be read without running the config.
+      const unreadable = [['path', configuredPath], ['routeBasePath', configuredRoute]].filter(([name, value]) => !value && new RegExp(`(?:^|[\\s,{])${name}\\s*:`).test(options)).map(([name]) => name)
+      if (unreadable.length > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `A content-docs plugin instance was skipped because its ${unreadable.join(' and ')} could not be read as a plain string without running the config. Write ${unreadable.length > 1 ? 'them' : 'it'} as a string literal to import that instance.`,
+        })
+      }
+      continue
+    }
+    const localPath = trimTrailingSlashes(configuredPath.replace(/^\.\//, ''))
+    const routePrefix = trimEdgeSlashes(configuredRoute)
     if (!localPath || !routePrefix) continue
     // Docusaurus resolves a content-docs instance's `path` relative to the
     // site directory (where `docusaurus.config` lives, `projectRoot` here).
@@ -709,7 +735,7 @@ function additionalDocusaurusPluginRoots(
     } else {
       warnings.push({
         code: 'unsupported-config',
-        message: `The "${routePrefix}" docs plugin instance's path (${JSON.stringify(match[2])}) could not be found in the repository and was skipped.`,
+        message: `The "${routePrefix}" docs plugin instance's path (${JSON.stringify(configuredPath)}) could not be found in the repository and was skipped.`,
       })
     }
   }
@@ -4148,10 +4174,12 @@ function repositoryAssetHref(
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
   /** Called when a page-relative path missed beside the page and the site-root file of that name was used. */
   onRootFallback?: (spelled: string, used: string) => void,
+  scope?: RelativeImageScope,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
   if (!raw || raw.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) return null
+  if (scope && /^[/@~]/.test(raw)) return null
   const suffixIndex = raw.search(/[?#]/)
   const pathname = suffixIndex >= 0 ? raw.slice(0, suffixIndex) : raw
   const suffix = suffixIndex >= 0 ? raw.slice(suffixIndex) : ''
@@ -4161,7 +4189,7 @@ function repositoryAssetHref(
   } catch {
     return null
   }
-  if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
+  if (!(scope?.extensions ?? ASSET_EXTENSIONS).has(extname(decodedPath).toLowerCase())) return null
   try {
     let usedRootFallback = false
     let candidate = decodedPath.startsWith('/')
@@ -4170,7 +4198,7 @@ function repositoryAssetHref(
     // Authors of nested pages (e.g. v1/introduction) often write `./images/x.png`
     // for a file that lives in the shared root images folder; use it when
     // nothing exists beside the page.
-    if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
+    if (!scope && !decodedPath.startsWith('/') && !existsSync(candidate)) {
       const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
       if (existsSync(fromRoot)) { candidate = fromRoot; usedRootFallback = true }
     }
@@ -4180,25 +4208,34 @@ function repositoryAssetHref(
     const realRoot = realpathSync(siteRoot)
     const realCandidate = realpathSync(candidate)
     const realRelative = relative(realRoot, realCandidate)
-    if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) return null
+    if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) {
+      scope?.onMissing(decodedPath)
+      return null
+    }
     // Mintlify's deploy root is the directory containing docs.json. Do not
     // copy or expose a relative reference that escapes that project boundary.
     const siteRelative = relative(siteRoot, candidate).replace(/\\/g, '/')
     resolveWithin(siteRoot, siteRelative)
-    if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
+    if (!existsSync(candidate) || !lstatSync(candidate).isFile()) {
+      scope?.onMissing(decodedPath, existsSync(candidate) && lstatSync(candidate).isSymbolicLink())
+      return null
+    }
     const normalized = normalizeAssetPath(siteRelative)
     if (!normalized) return null
     // On a case-insensitive filesystem a differently-cased reference opens the
     // file; report the spelling it really has so it matches the scanned asset.
     const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
-    onReferenced?.(normalized, onDisk ?? undefined)
+    // A page's own images are served under the spelling on disk, so a hosting with case-sensitive paths finds them.
+    const served = scope ? onDisk ?? normalized : normalized
+    onReferenced?.(scope ? served : normalized, onDisk ?? undefined)
     if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
-    const rewritten = `/${normalized}${suffix}`
+    const rewritten = `/${scope ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${served}`.split('/').map(encodeURIComponent).join('/') : normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
     return isBracketed ? `<${rewritten}>` : rewritten
   } catch {
+    scope?.onMissing(decodedPath)
     return null
   }
 }
@@ -4223,12 +4260,19 @@ function rewriteFernIdRenameLinks(body: string, renames: Map<string, string>): s
   })
 }
 
+/**
+ * Narrower rules for a page's own relative references: only the listed file types, only forms resolved
+ * beside the page (never the site root), URL-encoded results, and a callback for what cannot be used.
+ */
+interface RelativeImageScope { extensions: ReadonlySet<string>; onMissing: (spelled: string, isSymbolicLink?: boolean) => void }
+
 function rewriteRepositoryAssetLinks(
   body: string,
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
   onRootFallback?: (spelled: string, used: string) => void,
+  scope?: RelativeImageScope,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -4237,8 +4281,13 @@ function rewriteRepositoryAssetLinks(
       destination: string,
       closing: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
       return rewritten ? `${opening}${rewritten}${closing}` : original
+    })
+    .replace(/^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)/gm, (original: string, opening: string, destination: string) => {
+      if (!scope) return original
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
+      return rewritten ? `${opening}${rewritten}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
       original,
@@ -4246,9 +4295,32 @@ function rewriteRepositoryAssetLinks(
       quote: string,
       destination: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback, scope)
       return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
     })
+}
+
+/**
+ * Re-point the relative image references of a partial's text, written against the partial's directory, at the importing page's
+ * directory, so the page's image pass finds the partial's own files. Covers the forms `rewriteRepositoryAssetLinks` reads;
+ * code, URLs, absolute, `@site` and `~` references are left alone.
+ */
+function rebaseRelativeImages(body: string, fromDirectory: string, toDirectory: string): string {
+  const prefix = relative(toDirectory, fromDirectory).split(sep).join('/')
+  if (!prefix) return body
+  const rebase = (destination: string): string => {
+    const isBracketed = destination.startsWith('<') && destination.endsWith('>')
+    const raw = isBracketed ? destination.slice(1, -1) : destination
+    if (!raw || /^(?:[a-z][a-z0-9+.-]*:|\/\/|[/#@~?])/i.test(raw)) return destination
+    const path = raw.search(/[?#]/) >= 0 ? raw.slice(0, raw.search(/[?#]/)) : raw
+    if (!IMAGE_EXTENSIONS.has(extname(path).toLowerCase())) return destination
+    const rebased = posix.normalize(`${prefix}/${raw}`)
+    return isBracketed ? `<${rebased}>` : rebased
+  }
+  return replaceOutsideCode(body, (text) => text
+    .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (_original, opening: string, destination: string, closing: string) => `${opening}${rebase(destination)}${closing}`)
+    .replace(/^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)/gm, (_original, opening: string, destination: string) => `${opening}${rebase(destination)}`)
+    .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (_original, property: string, quote: string, destination: string) => `${property}=${quote}${rebase(destination)}${quote}`))
 }
 
 const LOCAL_EXPORT_DECLARATION = /^\s*export\s+(?:const|let|var|function|class|async\s+function)\s+([A-Za-z_$][\w$]*)/
@@ -4331,6 +4403,8 @@ function inlineMdxSnippets(
   // inlined, whatever its directory. One warning per occurrence; the returned
   // comment replaces the content.
   const source = relative(repositoryRoot, currentFile).replace(/\\/g, '/')
+  /** Docusaurus partial text keeps its images beside the partial; the page's image pass resolves beside the page. */
+  const fromPartial = (candidate: string, text: string): string => platform === 'docusaurus' ? rebaseRelativeImages(text, dirname(candidate), dirname(currentFile)) : text
   const blockInline = (candidate: string, shownPath: string, label = shownPath): string | undefined => {
     const verdict = gate?.(candidate)
     if (!verdict) return undefined
@@ -4426,7 +4500,7 @@ function inlineMdxSnippets(
         // An upper-case primitive export (`API_KEY_REF`) matches the component
         // pattern; leave it for the value-import pass that declares it.
         if (namedComponent && staticNamedSnippetValues(readFileSync(candidate, 'utf8')).has(namedComponent)) return _statement
-        const nested = inlineMdxSnippets(
+        const nested = fromPartial(candidate, inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -4436,7 +4510,7 @@ function inlineMdxSnippets(
           globalAliases,
           gate,
           platform,
-        )
+        ))
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
         else {
@@ -4534,7 +4608,7 @@ function inlineMdxSnippets(
             declarations.push(`export const ${binding!.local} = undefined;`)
             continue
           }
-          components.push([binding!.local, body])
+          components.push([binding!.local, fromPartial(candidate, body)])
           if (/^[A-Z]/.test(binding!.exported)) snippetProps.set(binding!.local, snippetParameters(snippetSource, binding!.exported))
         }
         for (const [name, body] of components) snippets.set(name, body)
@@ -4569,7 +4643,7 @@ function inlineMdxSnippets(
       snippets.set(componentName, blocked)
       continue
     }
-    const nested = inlineMdxSnippets(
+    const nested = fromPartial(candidate, inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
       repositoryRoot,
@@ -4579,7 +4653,7 @@ function inlineMdxSnippets(
       globalAliases,
       gate,
       platform,
-    )
+    ))
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
     else {
@@ -4620,7 +4694,7 @@ function inlineMdxSnippets(
         if (!candidate) throw new Error('file not found')
         const blocked = blockInline(candidate, filePath, tagLabel(filePath))
         if (blocked) return blocked
-        return isolateFences(alignToTag(closeOpenCodeFence(inlineMdxSnippets(
+        return isolateFences(alignToTag(closeOpenCodeFence(fromPartial(candidate, inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -4630,7 +4704,7 @@ function inlineMdxSnippets(
           globalAliases,
           gate,
           platform,
-        )), source, offset), source, offset, offset + tag.length)
+        ))), source, offset), source, offset, offset + tag.length)
       } catch {
         warnings.push({
           code: 'missing-page',
@@ -5020,6 +5094,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       docusaurusSidebars = options.docusaurusSkipSidebar || !docusaurusProjectRoot
         ? null
         : readDocusaurusSidebars(docusaurusProjectRoot, options.docusaurusSidebarPath)
+      for (const specifier of docusaurusSidebars?.unresolvedModules ?? []) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The sidebar file ${docusaurusSidebars!.sourcePath} imports "${specifier}", which is generated at build time and missing from the source, so its items were left out of the navigation. Generate the file before migrating, or add those pages to the navigation by hand.`,
+        })
+      }
     } catch (error) {
       warnings.push({
         code: 'unsupported-config',
@@ -5442,6 +5522,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       message: `${droppedGatedFiles.length - MAX_DROPPED_GATED_WARNINGS} more access-restricted page(s) were dropped by the file limit and NOT published; recover them from the source repository.`,
     })
   }
+  // A file a page inlines through `raw-loader` is imported after all; its warning is withdrawn once every page has been read.
+  const notImportedWarnings = new Map<string, MigrationWarning>()
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
     // Unlike Mintlify/Docusaurus, Fern only ever serves pages reachable from
@@ -5473,7 +5555,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) {
       skipped++
-      warnings.push({ code: 'skipped-file', message: 'Only Markdown and MDX are imported without an explicit converter.', source: file.relativePath })
+      const notImported: MigrationWarning = { code: 'skipped-file', message: 'Only Markdown and MDX are imported without an explicit converter.', source: file.relativePath }
+      warnings.push(notImported)
+      notImportedWarnings.set(file.absolutePath, notImported)
       continue
     }
     const size = lstatSync(file.absolutePath).size
@@ -5602,7 +5686,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       raw = normalizeExplicitHeadingIds(
         raw,
         (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }),
-        { headingMarkers: platform === 'mintlify' },
+        { headingMarkers: platform === 'mintlify', escapedIds: platform === 'docusaurus' },
       )
     }
     // Relative to `componentRoot`, like the component warnings for this page, so one page has one label.
@@ -5885,6 +5969,35 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     seenPageIds.add(page.id)
+    if (platform === 'docusaurus') {
+      // Images kept beside the docs are written relative to the page. Only a page that is kept gets its images copied.
+      const missing = new Set<string>()
+      const linked = new Set<string>()
+      page.body = replaceOutsideCode(page.body, (text) => rewriteRepositoryAssetLinks(
+        text, file.absolutePath, contentRoot,
+        (assetPath) => {
+          addAssetReference(assetPath, file.relativePath)
+          addAssetReference(`${DOCUSAURUS_DOCS_ASSET_PREFIX}${assetPath}`, file.relativePath)
+        },
+        undefined,
+        { extensions: IMAGE_EXTENSIONS, onMissing: (spelled, isSymbolicLink) => { (isSymbolicLink ? linked : missing).add(spelled) } },
+      ))
+      if (linked.size > 0) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Images this page links to are symbolic links, which are not followed, so they were not copied and the links were left as written: ${[...linked].slice(0, 10).map((spelled) => JSON.stringify(spelled)).join(', ')}${linked.size > 10 ? `, and ${linked.size - 10} more` : ''}. Replace each link with the file itself.`,
+          source: file.relativePath,
+        })
+      }
+      if (missing.size > 0) {
+        const named = [...missing].slice(0, 10).map((spelled) => JSON.stringify(spelled)).join(', ')
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Images this page links to were not found in the source (or lie outside it), so the links were left as written and the images will be broken: ${named}${missing.size > 10 ? `, and ${missing.size - 10} more` : ''}. Add the files to public/ and update the links.`,
+          source: file.relativePath,
+        })
+      }
+    }
     if (pageGate?.access?.groups) page.groups = pageGate.access.groups
     if (pageGate?.access?.isPublic !== undefined) page.public = pageGate.access.isPublic
     pages.push(page)
@@ -5993,6 +6106,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fontRelativePaths = new Set(mintlifyFonts.flatMap((font) => font.path ? [font.path] : []))
   // A `.js` that pages import as a component was copied under src/mdx/migrated;
   // loading it again as a site-wide script would run a module as a plain script.
+  for (const path of componentMigrator?.rawTextFiles() ?? []) {
+    const withdrawn = notImportedWarnings.get(path)
+    if (withdrawn) warnings.splice(warnings.indexOf(withdrawn), 1)
+  }
   const importedComponentSources = new Set((componentMigrator?.files() ?? []).flatMap((file) => {
     const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
     return source ? [resolvePath(repositoryDir, source)] : []
@@ -6077,9 +6194,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       && STYLESHEET_URL_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
     if (!siteKind && !loadedByStylesheet && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
-      && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
+      && !((platform === 'fern' || platform === 'docusaurus') && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
-    const assetPath = normalizeAssetPath(firstSegment === 'public'
+    // A file beside the docs that a page references by a relative path is served under its own prefix.
+    const isReferencedDocsImage = platform === 'docusaurus' && !repositoryAssets.includes(file)
+      && referencedAssetPaths.has(file.relativePath) && IMAGE_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+    const assetPath = normalizeAssetPath(isReferencedDocsImage
+      ? `${DOCUSAURUS_DOCS_ASSET_PREFIX}${file.relativePath}`
+      : firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)
       : isDocusaurusStatic
         ? file.relativePath.slice('static/'.length)
@@ -7223,6 +7345,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: `The Docusaurus ${DOCUSAURUS_IDENTITY_LABELS[field]} could not be read without running the config and was left out of the migration.${fallback} Use a string literal, or plain data in an imported module, to import it.`,
       })
     }
+    if (docusaurusSettings.unresolvedThemeConfig) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'The Docusaurus themeConfig could not be read without running the config, so the navbar, logo and footer were left out of the migration. Write themeConfig as an object literal to import them.',
+      })
+    }
     for (const token of docusaurusSettings.unresolvedCopyright ?? []) {
       warnings.push({
         code: 'unsupported-config',
@@ -7230,8 +7358,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     if (presentation) {
-      assets.push({ path: '_thally/source-theme.css', content: Buffer.from(presentation.css) })
-      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/_thally/source-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
+      assets.push({ path: 'migrated/docusaurus-theme.css', content: Buffer.from(presentation.css) })
+      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/migrated/docusaurus-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
       if (presentation.unresolved) warnings.push({ code: 'unsupported-config', message: 'Docusaurus Sass/Tailwind theme values could not be resolved statically; provide compiled build/assets/css/styles.*.css to retain those colors.' })
     }
     if (docusaurusSettings.banner) docsConfig = { ...docsConfig, banner: docusaurusSettings.banner }

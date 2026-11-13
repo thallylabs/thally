@@ -67,7 +67,7 @@ export function normalizeIndentedFences(content: string): string {
       if (listItem) listIndent = listItem[1].length
       else if (trimmed && listIndent !== undefined && indentation <= listIndent) listIndent = undefined
       const jsx = line.match(/^([ \t]{2,})<([A-Z][\w.]*)\b[^>]*>\s*$/)
-      if (jsx && listIndent !== undefined && jsx[1].length > listIndent && !trimmed.endsWith('/>')) {
+      if (jsx && listIndent !== undefined && jsx[1].length > listIndent && !trimmed.trimEnd().endsWith('/>')) {
         indentedJsx = { tag: jsx[2], indent: jsx[1] }
         return line.slice(jsx[1].length)
       }
@@ -315,6 +315,13 @@ const REACT_GLOBALS = new Set([
 const MAX_COMPONENT_FILES = 300
 const MAX_COMPONENT_BYTES = 20_000_000
 const MAX_FILE_BYTES = 2_000_000
+/** Largest file a `raw-loader` import may inline into a page. */
+const MAX_RAW_TEXT_BYTES = 256_000
+function rawTextProblem(error: unknown): string {
+  if (!(error instanceof Error)) return 'unreadable'
+  if ((error as NodeJS.ErrnoException).code) return 'the file was not found or cannot be read'
+  return /unsafe|escape|outside|symbolic|traversal/i.test(error.message) ? 'the file lies outside the source or behind a symbolic link' : error.message
+}
 
 /**
  * Where each Thally built-in MDX component actually lives, for building the
@@ -952,6 +959,8 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
+  /** Absolute paths of the files a `raw-loader` import has inlined into a page. */
+  rawTextFiles: () => ReadonlySet<string>
   /** Merge the component files of another migrated bundle (a sourceRef sub-site) into this one. */
   adopt: (incoming: ReadonlyArray<RenderedMigrationFile>) => void
 } {
@@ -962,6 +971,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
   // registry names to a temporary checkout path or changing repeat imports.
   const destinationRoot = `src/mdx/migrated/${hash(sourceIdentity)}`
   const copied = new Map<string, RenderedMigrationFile>()
+  const rawTextFiles = new Set<string>()
   const registrations = new Map<string, { path: string; imported: string }>()
   let copiedBytes = 0
 
@@ -980,6 +990,18 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     }
     if (!lstatSync(path).isFile()) throw new Error('dependency is not a regular file')
     return path
+  }
+
+  /** The text a `raw-loader` import names: an `@site/` path from the site directory or a path relative to the page, anywhere inside the source root. */
+  function readRawText(target: string, importer: string): string {
+    if (!target.startsWith('@site/') && !target.startsWith('.')) throw new Error('only @site/ and relative paths can be read')
+    const path = target.startsWith('@site/') ? resolve(root, target.slice('@site/'.length)) : resolve(dirname(importer), target)
+    checkedFile(path)
+    if (lstatSync(path).size > MAX_RAW_TEXT_BYTES) throw new Error(`the file is larger than ${MAX_RAW_TEXT_BYTES / 1000} KB`)
+    const bytes = readFileSync(path)
+    if (bytes.includes(0)) throw new Error('the file is binary')
+    rawTextFiles.add(path)
+    return bytes.toString('utf8')
   }
 
   function expandCandidates(candidate: string): Array<string> {
@@ -1331,6 +1353,11 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     }
     const aliases = new Map<string, string>()
     const unsupportedImports = new Map<string, string>()
+    // Files imported through `raw-loader`, bound to their text, and the components that cannot render them.
+    const rawTexts = new Map<string, { text: string; language: string }>()
+    const rawImportEdits: Array<{ edit: Replacement; locals: Array<string> }> = []
+    const themeCodeBlocks = new Set<string>()
+    const deadComponents = new Set<string>()
     // Local names dropped by the lowercase-named `.mdx?` import case below
     // (Docusaurus' auto-generated per-file `toc` export, merged into
     // another page's own `toc` via `...viewsToc`) — collected here so the
@@ -1454,6 +1481,23 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // `resolveDependency` already understands, so a locally-owned
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
+        const rawLoader = /^(?:!!?)?raw-loader!(.*)$/.exec(rawSpecifier)
+        if (rawLoader) {
+          // Docusaurus' loader import of a file's text: bind the name to that text so the page keeps working.
+          const edit: Replacement = { start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' }
+          let text = ''
+          try {
+            text = readRawText(rawLoader[1], currentFile)
+            const language = extname(rawLoader[1]).slice(1).toLowerCase().replace(/^[cm]js$/, 'js')
+            for (const binding of bindings) rawTexts.set(binding.local, { text, language })
+          } catch (error) {
+            warn(`The file imported with ${JSON.stringify(rawSpecifier)} could not be read (${rawTextProblem(error)}); the page was kept and the text was bound to an empty string.`, currentFile)
+          }
+          edit.value = bindings.map((binding) => `export const ${binding.local} = ${JSON.stringify(text)};`).join('\n')
+          rawImportEdits.push({ edit, locals: bindings.map((binding) => binding.local) })
+          edits.push(edit)
+          continue
+        }
         if (isScaffoldProvidedImport(specifier)) {
           // Some translated Mintlify pages place a React hook import above a
           // fenced example. Keeping that unused import turns server MDX into
@@ -1488,6 +1532,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // useBaseUrl, ...) are converted to Thally's equivalents by
             // normalizeMdx right after this pass; just drop the now-redundant
             // import and leave JSX usage untouched for that pass to rewrite.
+            if (specifier === '@theme/CodeBlock') for (const binding of bindings) themeCodeBlocks.add(binding.local)
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
           } else if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
             // Only JSX usage (`<Widget />`) is rewritten below; a reference
@@ -1724,6 +1769,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
           } else {
             edits.push({ start: importStart, end: importEnd, value: '' })
+            for (const binding of bindings) deadComponents.add(binding.local)
             warn(`Site-authored component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized; review this custom implementation manually.`, currentFile)
           }
         }
@@ -2082,11 +2128,65 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // migrated project can render it. A video-embed-shaped usage (an `id`
     // prop, a name suggesting an embedded player) gets a trivial working
     // `<iframe>`; anything else becomes a visible, greppable MDX comment.
+    const fencedRanges: Array<{ start: number; end: number }> = []
+    if (rawTexts.size > 0) {
+      const identifier = (node: MdxNode): string | undefined => {
+        const value = node.value?.trim()
+        return (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && value && rawTexts.has(value) ? value : undefined
+      }
+      const references = (root: MdxNode): Array<string> => {
+        const found: Array<string> = []
+        walk(root, (child) => {
+          const name = identifier(child)
+          if (name) found.push(name)
+          for (const attribute of child.attributes ?? []) {
+            const value = typeof attribute.value === 'object' && attribute.value ? attribute.value.value?.trim() : undefined
+            if (value && rawTexts.has(value)) found.push(value)
+          }
+        })
+        return found
+      }
+      walk(tree, (node) => {
+        const name = node.name
+        if (!name || (node.type !== 'mdxJsxFlowElement' && node.type !== 'mdxJsxTextElement') || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+        const start = node.position.start.offset
+        const end = node.position.end.offset
+        if (fencedRanges.some((range) => start >= range.start && end <= range.end)) return
+        const isCodeBlock = themeCodeBlocks.has(name)
+        if (!isCodeBlock && !deadComponents.has(name) && !unsupportedImports.has(name)) return
+        const used = references(node)
+        if (used.length === 0) return
+        const lineStart = content.lastIndexOf('\n', start - 1) + 1
+        const prefix = content.slice(lineStart, start)
+        if (!/^[ \t>]*$/.test(prefix)) return
+        const attribute = (wanted: string): string | undefined => {
+          const found = node.attributes?.find((candidate) => candidate.type === 'mdxJsxAttribute' && candidate.name === wanted)
+          return typeof found?.value === 'string' ? found.value : undefined
+        }
+        const raw = rawTexts.get(used[0])!
+        const language = (isCodeBlock ? attribute('language') ?? attribute('lang') : undefined) ?? raw.language
+        const title = attribute('title')
+        const code = raw.text.replace(/\r?\n$/, '')
+        const marker = '`'.repeat(Math.max(3, ...[...code.matchAll(/`+/g)].map((run) => run[0].length + 1)))
+        const lines = [`${marker}${language}${title ? ` title=${JSON.stringify(title)}` : ''}`, ...code.split(/\r?\n/), marker]
+        edits.push({ start, end, value: lines.map((line, index) => index === 0 || !line ? line : prefix + line).join('\n') })
+        fencedRanges.push({ start, end })
+        if (!isCodeBlock) warn(`The component <${name}> on this page could not be reproduced, so the file imported with raw-loader was written as a plain code block; the component's own formatting was not reproduced.`, currentFile)
+        // The inlined text is only worth keeping when something else still reads it.
+        for (const local of new Set(used)) {
+          const entry = rawImportEdits.find((candidate) => candidate.locals.includes(local))
+          if (entry && references(tree).filter((candidate) => candidate === local).length === references(node).filter((candidate) => candidate === local).length) {
+            entry.edit.value = entry.locals.filter((candidate) => candidate !== local).map((candidate) => `export const ${candidate} = ${JSON.stringify(rawTexts.get(candidate)?.text ?? '')};`).join('\n')
+          }
+        }
+      })
+    }
     walk(tree, (node) => {
       const specifier = node.name ? unsupportedImports.get(node.name) : undefined
       if (!specifier || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
       const start = node.position.start.offset
       const end = node.position.end.offset
+      if (fencedRanges.some((range) => start >= range.start && end <= range.end)) return
       const videoId = youtubeEmbedVideoId(node, specifier)
       const value = videoId
         ? `<iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}" title="Embedded video" allowFullScreen />`
@@ -2163,7 +2263,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       }
     }
   }
-  return { transform, files, adopt }
+  return { transform, files, adopt, rawTextFiles: () => rawTextFiles }
 }
 
 /** Preserve an authored component registry while adding an isolated import map. */

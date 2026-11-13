@@ -1,7 +1,7 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -525,6 +525,27 @@ describe('linked source anchors', () => {
     const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'es/intro')?.body
     expect(body).toContain('## Primeros pasos {/* #get-started */}')
     expect(body).not.toContain('<a id="get-started">')
+  })
+
+  it('keeps a Mintlify heading\'s escaped id as the literal text the author wrote', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-escaped-id-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['intro'] } }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n## Syntax \\{#custom-id}\n\nText.\n')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'intro')?.body
+    expect(body).toContain('## Syntax \\{#custom-id}')
+    expect(body).not.toContain('custom-id */')
+  })
+
+  it('does not warn that a file inlined through raw-loader was not imported, but still does for one nothing imports', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'guide', 'sample.txt'), 'inlined text\n')
+    writeFileSync(join(root, 'docs', 'guide', 'unused.txt'), 'nobody imports this\n')
+    writeFileSync(join(root, 'docs', 'guide', 'raw.mdx'), '---\ntitle: Raw\n---\n\nimport CodeBlock from "@theme/CodeBlock"\nimport Sample from "!!raw-loader!./sample.txt"\n\n<CodeBlock language="text">{Sample}</CodeBlock>\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.pages.find((candidate) => candidate.title === 'Raw')!.body).toContain('inlined text')
+    const notImported = bundle.warnings.filter((warning) => warning.message.startsWith('Only Markdown and MDX')).map((warning) => warning.source)
+    expect(notImported).toContain('guide/unused.txt')
+    expect(notImported).not.toContain('guide/sample.txt')
   })
 
   it('anchors a fragment that names a heading by the text of its inline component, which the renderer leaves out of the id', () => {
@@ -4355,6 +4376,220 @@ describe('Docusaurus repository migration', () => {
     })
   })
 
+  it('gives a Docusaurus heading with an escaped id the anchor it names', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'ids.mdx'), '---\ntitle: Ids\n---\n\n## Undefined validator \\{#undefined-validator}\n\nText.\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const body = bundle.pages.find((candidate) => candidate.title === 'Ids')!.body
+    expect(body).toContain('<a id="undefined-validator"></a>\n## Undefined validator')
+    expect(body).not.toContain('\\{#')
+  })
+
+  describe('import lines inside code fences', () => {
+    const migrateBody = (body: string) => {
+      const root = docusaurusFixture()
+      writeFileSync(join(root, 'docs', 'fences.mdx'), `---\ntitle: Fences\n---\n\n${body}\n`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+      return bundle.pages.find((candidate) => candidate.title === 'Fences')!.body
+    }
+    it.each([
+      ['a list item, backticks', '1. Step:\n\n   ```ts\n   import { x } from "y";\n   export const z = x;\n   ```\n'],
+      ['a nested list item', '- Outer\n\n  1. Step:\n\n     ```ts\n     import { x } from "y";\n     ```\n'],
+      ['a list item, tildes', '1. Step:\n\n   ~~~ts\n   import { x } from "y";\n   ~~~\n'],
+      ['a blockquote', '> ```ts\n> import { x } from "y";\n> ```\n'],
+      ['a long fence', '1. Step:\n\n   ````ts\n   import { x } from "y";\n   ````\n'],
+    ])('keeps them in %s', (_name, body) => {
+      expect(migrateBody(body)).toContain('import { x } from "y";')
+    })
+    it('still hoists a real top-level import', () => {
+      const body = migrateBody('import Tabs from "@theme/Tabs";\n\nText.')
+      expect(body).not.toContain('@theme/Tabs')
+    })
+  })
+
+  it('keeps the sidebar order and warns once when it imports a generated sidebar', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'sidebars.ts'), "const apiSidebar = require('./docs/api/sidebar.js');\nmodule.exports = { docs: ['guide', { type: 'category', label: 'API', items: apiSidebar }, ...apiSidebar] };")
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const messages = bundle.warnings.map((warning) => warning.message).filter((message) => message.includes('./docs/api/sidebar.js'))
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toContain('sidebars.ts')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('Generated navigation will be used')
+  })
+
+  it('warns when the theme config cannot be read as an object literal', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `export default { title: 'Acme Docs', themeConfig: buildTheme() }`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.warnings.map((warning) => warning.message)).toContain('The Docusaurus themeConfig could not be read without running the config, so the navbar, logo and footer were left out of the migration. Write themeConfig as an object literal to import them.')
+  })
+
+  describe('images stored beside the docs', () => {
+    function imageSite() {
+      const parent = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-images-'))
+      const root = join(parent, 'site')
+      mkdirSync(join(root, 'docs', '2_Online Payment', 'pic'), { recursive: true })
+      mkdirSync(join(root, 'docs', 'pic'), { recursive: true })
+      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { url: 'https://docs.acme.test', presets: [['classic', { docs: {} }]] }")
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'pic', '1.png'), 'one')
+      writeFileSync(join(root, 'docs', 'pic', 'shared.png'), 'shared')
+      writeFileSync(join(root, 'docs', 'pic', 'draft.png'), 'draft')
+      writeFileSync(join(root, 'docs', 'pic', 'notes.txt'), 'notes')
+      writeFileSync(join(parent, 'outside.png'), 'outside')
+      symlinkSync(join(parent, 'outside.png'), join(root, 'docs', 'pic', 'link.png'))
+      writeFileSync(join(root, 'docs', 'intro.md'), '---\ntitle: Intro\n---\n\nIntro.')
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'guide.md'), [
+        '---', 'title: Guide', '---', '',
+        '![one](./pic/1.png)', '', '![shared](../pic/shared.png)', '', '<img src="./pic/1.png" alt="again" />', '',
+        '![none](./pic/none.png)', '', '![escape](../../../outside.png)', '', '![link](../pic/link.png)', '', '![text](../pic/notes.txt)', '',
+        '```md', '![code](./pic/code.png)', '```', '',
+      ].join('\n'))
+      writeFileSync(join(root, 'docs', '2_Online Payment', 'draft.md'), '---\ntitle: Draft\ndraft: true\n---\n\n![d](../pic/draft.png)')
+      return root
+    }
+
+    it('copies the images a migrated page references and points the page at the copies', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![one](/migrated/docs/2_Online%20Payment/pic/1.png)')
+      expect(body).toContain('![shared](/migrated/docs/pic/shared.png)')
+      expect(body).toContain('<img src="/migrated/docs/2_Online%20Payment/pic/1.png" alt="again" />')
+      const copied = bundle.assets.map((asset) => asset.path)
+      expect(copied).toContain('migrated/docs/2_Online Payment/pic/1.png')
+      expect(copied).toContain('migrated/docs/pic/shared.png')
+    })
+
+    it('keeps a docs image and a static image of the same name apart', () => {
+      const root = imageSite()
+      mkdirSync(join(root, 'docs', 'img'), { recursive: true })
+      mkdirSync(join(root, 'static', 'img'), { recursive: true })
+      writeFileSync(join(root, 'docs', 'img', 'logo.png'), 'from-docs')
+      writeFileSync(join(root, 'static', 'img', 'logo.png'), 'from-static')
+      writeFileSync(join(root, 'docs', 'near.md'), '---\ntitle: Near\n---\n\n![l](./img/logo.png)')
+      writeFileSync(join(root, 'docs', 'far.md'), '---\ntitle: Far\n---\n\n![l](/img/logo.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      expect(bundle.pages.find((candidate) => candidate.title === 'Near')!.body).toContain('![l](/migrated/docs/img/logo.png)')
+      expect(bundle.pages.find((candidate) => candidate.title === 'Far')!.body).toContain('![l](/img/logo.png)')
+      const bytes = (path: string) => bundle.assets.find((asset) => asset.path === path)?.content.toString()
+      expect(bytes('migrated/docs/img/logo.png')).toBe('from-docs')
+      expect(bytes('img/logo.png')).toBe('from-static')
+    })
+
+    it('copies nothing for a draft page, outside the source root, behind a symlink or that is not an image', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const copied = bundle.assets.map((asset) => asset.path)
+      for (const unwanted of ['pic/draft.png', 'pic/link.png', 'pic/notes.txt', 'outside.png', 'migrated/docs/pic/draft.png', 'migrated/docs/pic/link.png', 'migrated/docs/pic/notes.txt']) expect(copied).not.toContain(unwanted)
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![escape](../../../outside.png)')
+      expect(body).toContain('![link](../pic/link.png)')
+      expect(body).toContain('![code](./pic/code.png)')
+    })
+
+    it('reports the missing images of a page in one capped warning', () => {
+      const root = imageSite()
+      const links = Array.from({ length: 12 }, (_, index) => `![m](./pic/missing-${index}.png)`).join('\n\n')
+      writeFileSync(join(root, 'docs', 'many.md'), `---\ntitle: Many\n---\n\n${links}`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const warnings = bundle.warnings.filter((warning) => warning.source === 'many.md')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('missing-0.png')
+      expect(warnings[0].message).not.toContain('missing-11.png')
+      expect(warnings[0].message).toContain('and 2 more')
+    })
+
+    it('copies the image a reference-style definition names and points the definition at the copy', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'ref.md'), '---\ntitle: Ref\n---\n\n![shared][pic]\n\n[pic]: ./pic/shared.png "Shared"\n[page]: ./intro.md')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Ref')!.body
+      expect(body).toContain('[pic]: /migrated/docs/pic/shared.png "Shared"')
+      expect(bundle.assets.map((asset) => asset.path)).toContain('migrated/docs/pic/shared.png')
+    })
+
+    it('points a differently-cased reference at the file name on disk', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'case.md'), '---\ntitle: Case\n---\n\n![shared](./PIC/Shared.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Case')!.body
+      // Only a case-insensitive source resolves the differently-cased name at all.
+      if (existsSync(join(root, 'docs', 'PIC', 'Shared.png'))) expect(body).toContain('![shared](/migrated/docs/pic/shared.png)')
+    })
+
+    it('keeps a reference to a missing image and warns with the page and path', () => {
+      const bundle = migrateRepository({ repositoryDir: imageSite(), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      const body = bundle.pages.find((candidate) => candidate.title === 'Guide')!.body
+      expect(body).toContain('![none](./pic/none.png)')
+      expect(bundle.warnings).toContainEqual(expect.objectContaining({
+        source: '2_Online Payment/guide.md',
+        message: expect.stringContaining('./pic/none.png'),
+      }))
+    })
+
+    it('says a symbolic-link image was not copied because links are not followed', () => {
+      const root = imageSite()
+      writeFileSync(join(root, 'docs', 'pic', 'real.png'), 'real')
+      symlinkSync(join(root, 'docs', 'pic', 'real.png'), join(root, 'docs', 'pic', 'inroot.png'))
+      writeFileSync(join(root, 'docs', 'linked.md'), '---\ntitle: Linked\n---\n\n![l](./pic/inroot.png)')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+      expect(bundle.pages.find((candidate) => candidate.title === 'Linked')!.body).toContain('![l](./pic/inroot.png)')
+      expect(bundle.assets.map((asset) => asset.path)).not.toContain('migrated/docs/pic/inroot.png')
+      const warnings = bundle.warnings.filter((warning) => warning.source === 'linked.md')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('symbolic link')
+      expect(warnings[0].message).toContain('not followed')
+      expect(warnings[0].message).toContain('./pic/inroot.png')
+      expect(warnings[0].message).not.toContain('were not found')
+    })
+  })
+
+  describe('relative images inside an inlined partial', () => {
+    function partialSite() {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-partial-images-'))
+      for (const directory of ['_shared/img', '_shared/deep', 'guide/img']) mkdirSync(join(root, 'docs', directory), { recursive: true })
+      writeFileSync(join(root, 'docusaurus.config.ts'), "export default { url: 'https://docs.acme.test', presets: [['classic', { docs: {} }]] }")
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'a.png'), 'partial-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'b.png'), 'second-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'c.png'), 'third-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'img', 'd.png'), 'fourth-bytes')
+      writeFileSync(join(root, 'docs', '_shared', 'deep', 'e.png'), 'nested-bytes')
+      return root
+    }
+    const migrate = (root: string) => migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+
+    it('binds a partial image to the partial\'s own file, not a same-named file beside the page', () => {
+      const root = partialSite()
+      writeFileSync(join(root, 'docs', 'guide', 'img', 'a.png'), 'page-bytes')
+      writeFileSync(join(root, 'docs', '_shared', '_x.mdx'), [
+        '![a](./img/a.png)', '', '<img src="./img/b.png" alt="b" />', '', '![c][ref]', '', '[ref]: ./img/c.png', '',
+        '![abs](/img/keep.png) ![url](https://example.com/u.png)', '',
+        '```md', '![code](./img/d.png)', '```', '', "import Deep from './deep/_y.mdx'", '', '<Deep />', '',
+      ].join('\n'))
+      writeFileSync(join(root, 'docs', '_shared', 'deep', '_y.mdx'), '![e](./e.png)\n')
+      writeFileSync(join(root, 'docs', 'guide', 'page.mdx'), "---\ntitle: Page\n---\n\nimport X from '../_shared/_x.mdx'\n\n<X />\n")
+      const bundle = migrate(root)
+      const body = bundle.pages.find((candidate) => candidate.title === 'Page')!.body
+      const bytes = (path: string) => bundle.assets.find((asset) => asset.path === path)?.content.toString()
+      expect(body).toContain('![a](/migrated/docs/_shared/img/a.png)')
+      expect(body).toContain('<img src="/migrated/docs/_shared/img/b.png" alt="b" />')
+      expect(body).toContain('[ref]: /migrated/docs/_shared/img/c.png')
+      expect(body).toContain('![e](/migrated/docs/_shared/deep/e.png)')
+      expect(body).toContain('![abs](https://docs.acme.test/img/keep.png)')
+      expect(body).toContain('![url](https://example.com/u.png)')
+      expect(body).toContain('![code](./img/d.png)')
+      expect(bytes('migrated/docs/_shared/img/a.png')).toBe('partial-bytes')
+      expect(bytes('migrated/docs/_shared/deep/e.png')).toBe('nested-bytes')
+      expect(bytes('migrated/docs/guide/img/a.png')).toBeUndefined()
+    })
+
+    it('reports the image of a partial that exists nowhere instead of finding none', () => {
+      const root = partialSite()
+      writeFileSync(join(root, 'docs', '_shared', '_x.mdx'), '![gone](./img/gone.png)\n')
+      writeFileSync(join(root, 'docs', 'guide', 'page.mdx'), "---\ntitle: Page\n---\n\nimport X from '../_shared/_x.mdx'\n\n<X />\n")
+      const bundle = migrate(root)
+      expect(bundle.warnings.filter((warning) => warning.source === 'guide/page.mdx' && warning.message.includes('gone.png'))).toHaveLength(1)
+    })
+  })
+
   it('reads site identity through an imported JSON module', () => {
     const root = docusaurusFixture()
     writeFileSync(join(root, 'site.json'), JSON.stringify({
@@ -4968,6 +5203,67 @@ describe('Docusaurus repository migration', () => {
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('wiki'),
+    }))
+  })
+
+  it.each([
+    ['routeBasePath before path', "{ routeBasePath: 'wiki', path: 'wiki', id: 'wiki' }"],
+    ['id last, other options between', "{ routeBasePath: 'wiki', sidebarPath: './sidebars.js', path: 'wiki', id: 'wiki' }"],
+    ['id first', "{ id: 'wiki', routeBasePath: 'wiki', path: 'wiki' }"],
+  ])('imports a content-docs plugin instance with %s', (_name, options) => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-order-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', ${options}]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.map((page) => page.id)).toContain('wiki')
+  })
+
+  it('warns when the options of a content-docs plugin instance cannot be read', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-unreadable-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      const wiki = { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' }
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', wiki]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('content-docs plugin instance'),
+    }))
+  })
+
+  it.each([
+    ['path', "{ id: 'wiki', path: wikiPath, routeBasePath: 'wiki' }", 'path'],
+    ['a template literal path', "{ id: 'wiki', path: `wiki`, routeBasePath: 'wiki' }", 'path'],
+    ['routeBasePath', "{ id: 'wiki', path: 'wiki', routeBasePath: base }", 'routeBasePath'],
+  ])('warns when a content-docs plugin instance has an unreadable %s', (_name, options, option) => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-option-nonliteral-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs' } }]],
+        plugins: [['@docusaurus/plugin-content-docs', ${options}]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining(`its ${option} could not be read`),
     }))
   })
 
