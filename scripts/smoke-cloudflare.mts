@@ -30,6 +30,9 @@ const navigationConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'docs.
 const navigation = projectNavigationContract(navigationConfig)
 const expectedNavigationPaths = navigation.visiblePageIds.map(navigationPagePath)
 const firstContentPath = expectedNavigationPaths.find((pagePath) => pagePath !== '/')
+// A page the navigation lists. A local assets build has no content index, so it serves only those
+// pages to the page APIs; a site's `introduction` may be an unlisted custom home page, or absent.
+const samplePageId = navigation.visiblePageIds[0] ?? 'introduction'
 
 const checks: ReadonlyArray<SmokeCheck> = [
   {
@@ -42,7 +45,7 @@ const checks: ReadonlyArray<SmokeCheck> = [
   { name: 'docs index', path: '/api/docs-index', contentType: 'application/json' },
   {
     name: 'structured document',
-    path: '/api/docs/introduction?format=json',
+    path: `/api/docs/${samplePageId}?format=json`,
     contentType: 'application/json',
   },
   { name: 'search', path: '/api/search?q=Thally', contentType: 'application/json' },
@@ -51,7 +54,7 @@ const checks: ReadonlyArray<SmokeCheck> = [
   { name: 'agent guidance', path: '/AGENTS.md', contentType: 'text/markdown' },
   {
     name: 'source Markdown',
-    path: '/api/markdown/introduction',
+    path: `/api/markdown/${samplePageId}`,
     contentType: 'text/markdown',
   },
   {
@@ -80,6 +83,24 @@ function smokeUrl(baseUrl: string, pathAndSearch: string): URL {
   return targetUrl
 }
 
+/**
+ * Fetch a smoke-origin URL, following only redirects that stay on that origin.
+ * Null when one leaves it: a docs.json redirect off the site (which can take
+ * over a page's own address) is answered by another server, not this Worker.
+ */
+async function fetchOnSite(url: URL, init: RequestInit): Promise<Response | null> {
+  let target = url
+  for (let hop = 0; hop <= 10; hop++) {
+    const response = await fetch(target, { ...init, redirect: 'manual' })
+    const location = response.headers.get('location')
+    if (response.status < 300 || response.status > 399 || !location) return response
+    await response.arrayBuffer()
+    target = new URL(location, target)
+    if (target.origin !== url.origin) return null
+  }
+  throw new Error(`${url.pathname} redirected more than 10 times.`)
+}
+
 /** Verify each canonical page advertised by llms.txt through real workerd. */
 async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
   const indexResponse = await fetch(`${baseUrl}/llms.txt`)
@@ -95,7 +116,7 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
         .filter((url) => new URL(url).origin === advertisedOrigin)
         .map((url) => {
           const resolvedUrl = new URL(
-            url.replace('{page-id}', 'introduction').replace('{query}', 'Thally'),
+            url.replace('{page-id}', samplePageId).replace('{query}', 'Thally'),
           )
           return `${resolvedUrl.pathname}${resolvedUrl.search}`
         }),
@@ -111,16 +132,26 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
 
   if (pagePaths.length === 0) throw new Error('llms.txt did not emit any canonical page links.')
 
-  const missingRoutes = missingNavigationRoutes(navigation, pagePaths)
+  // `introduction` is served at `/`, or at `/introduction` when docs.json redirects the root there
+  // (`servedRootHref` in src/data/docs.ts). llms.txt links the address the page is served at.
+  const missingRoutes = missingNavigationRoutes(
+    navigation,
+    pagePaths.map((pagePath) => (pagePath === '/introduction' ? '/' : pagePath)),
+  )
   if (missingRoutes.length > 0) {
     throw new Error(`Visible navigation routes absent from llms.txt: ${missingRoutes.join(', ')}.`)
   }
 
+  const offSitePaths = new Set<string>()
   for (const firstPartyPath of firstPartyPaths) {
     const targetUrl = smokeUrl(baseUrl, firstPartyPath)
-    const response = await fetch(targetUrl, {
+    const response = await fetchOnSite(targetUrl, {
       headers: { Accept: '*/*' },
     })
+    if (!response) {
+      offSitePaths.add(firstPartyPath)
+      continue
+    }
     const expectedStatus = targetUrl.pathname === '/api/mcp' ? 405 : 200
     if (response.status !== expectedStatus) {
       throw new Error(
@@ -130,11 +161,15 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
   }
 
   for (const pagePath of pagePaths) {
-    const pageUrl = smokeUrl(baseUrl, pagePath).toString()
+    const pageUrl = smokeUrl(baseUrl, pagePath)
     for (const representation of pageRepresentations) {
-      const response = await fetch(pageUrl, {
+      const response = await fetchOnSite(pageUrl, {
         headers: { Accept: representation.accept },
       })
+      if (!response) {
+        offSitePaths.add(pagePath)
+        break
+      }
       if (!response.ok) {
         throw new Error(`${pageUrl} returned ${response.status} for Accept: ${representation.accept}.`)
       }
@@ -160,9 +195,13 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
       }
     }
   }
+  if (pagePaths.every((pagePath) => offSitePaths.has(pagePath))) {
+    throw new Error('Every canonical page in llms.txt redirected off the site.')
+  }
 
   console.log(
-    `[cloudflare-smoke] llms.txt matrix: ${firstPartyPaths.length} first-party link(s), ${pagePaths.length} canonical page(s)`,
+    `[cloudflare-smoke] llms.txt matrix: ${firstPartyPaths.length} first-party link(s), ${pagePaths.length} canonical page(s)`
+      + (offSitePaths.size ? `; skipped ${offSitePaths.size} redirected off the site: ${[...offSitePaths].join(', ')}` : ''),
   )
 }
 
