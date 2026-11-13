@@ -5,7 +5,7 @@
  */
 
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
-import { extname, posix } from 'node:path'
+import { dirname, extname, posix } from 'node:path'
 
 import postcss from 'postcss'
 import { cssColorToHex } from './css-colors.js'
@@ -48,6 +48,8 @@ export interface DocusaurusPageDescriptor {
 export interface DocusaurusSidebars {
   config: Record<string, unknown>
   sourcePath: string
+  /** Relative modules the sidebar imports (generated at build time, so absent from the source) whose items were left out. */
+  unresolvedModules?: Array<string>
 }
 
 export interface DocusaurusNavigationResult {
@@ -376,10 +378,13 @@ export function rewriteDocusaurusLinks(
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
-    if (path.startsWith('/docs/') && options.assetPaths?.has(path.slice('/docs/'.length))) {
+    // A copied file is keyed by its real name, while a link spells spaces and the like as %XX.
+    let decoded = path
+    try { decoded = decodeURIComponent(path) } catch { /* keep the raw path */ }
+    if (decoded.startsWith('/docs/') && options.assetPaths?.has(decoded.slice('/docs/'.length))) {
       return `/${path.slice('/docs/'.length)}${suffix}`
     }
-    return options.assetPaths?.has(path.slice(1)) ? target : null
+    return options.assetPaths?.has(decoded.slice(1)) ? target : null
   }
 
   function rewriteTarget(target: string): string {
@@ -493,11 +498,11 @@ function braceTable(source: string): Map<number, number> {
 let lastBraceSource: string | undefined
 let lastBraceTable = new Map<number, number>()
 
-/** The object literal starting at `start` (after whitespace and comments), or null when none starts there or it never closes. */
-function matchingObjectLiteral(source: string, start: number): string | null {
+/** The object literal starting at `start` (after whitespace, comments and, when asked, opening parentheses), or null when none starts there or it never closes. */
+export function matchingObjectLiteral(source: string, start: number, allowParentheses = false): string | null {
   let index = start
   while (index < source.length) {
-    if (/\s/.test(source[index])) index++
+    if (/\s/.test(source[index]) || (allowParentheses && source[index] === '(')) index++
     else if (source.startsWith('//', index)) { const end = source.indexOf('\n', index); index = end < 0 ? source.length : end + 1 }
     else if (source.startsWith('/*', index)) { const end = source.indexOf('*/', index + 2); index = end < 0 ? source.length : end + 2 }
     else break
@@ -511,7 +516,67 @@ function matchingObjectLiteral(source: string, start: number): string | null {
   return end === undefined ? null : source.slice(index, end + 1)
 }
 
-function parseStaticSidebarModule(source: string): Record<string, unknown> {
+/** The local names an import clause or destructuring pattern binds (`a`, `* as a`, `{ a, b as c }`). */
+function boundNames(clause: string): Array<string> {
+  return clause.replace(/[{}]/g, ',').split(',')
+    .map((part) => part.trim().replace(/^\*\s*as\s+/, '').split(/\s+as\s+/).pop()!.trim())
+    .filter((name) => /^[A-Za-z_$][\w$]*$/.test(name))
+}
+
+/**
+ * A sidebar may import what a build step generates (docusaurus-plugin-openapi-docs writes one sidebar file per API).
+ * Such a module is absent from the source and cannot be run, so every name it binds stands for an empty item list:
+ * `items: name` becomes `items: []` and a spread or bare array entry of it disappears.
+ */
+function withoutGeneratedSidebarImports(source: string): { source: string; modules: Array<string> } {
+  const modules = new Set<string>()
+  const names = new Map<string, string>()
+  const declaration = (_match: string, clause: string, specifier: string): string => {
+    modules.add(specifier)
+    for (const name of boundNames(clause)) names.set(name, specifier)
+    return ''
+  }
+  let stripped = source
+    .replace(/^[ \t]*import\s+(?!type\b)([^;'"\n]+?)\s+from\s+['"](\.{1,2}\/[^'"]+)['"][ \t]*;?[ \t]*$/gm, declaration)
+    .replace(/^[ \t]*(?:const|let|var)\s+(\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)(?:\.\w+)?[ \t]*;?[ \t]*$/gm, declaration)
+  const used = new Set<string>()
+  for (const [name, specifier] of names) {
+    const reference = `${escapeRegExp(name)}(?:\\.\\w+)?(?![\\w$])`
+    const before = stripped
+    stripped = stripped
+      // A helper declared in the sidebar file that only reshapes the list (`apiSidebarItems(apiSidebar)`) has nothing to reshape.
+      .replace(new RegExp(`\\b([A-Za-z_$][\\w$]*)\\(\\s*${escapeRegExp(name)}\\s*\\)`, 'g'), (call: string, callee: string) =>
+        new RegExp(`(?:\\bfunction\\s+|\\b(?:const|let|var)\\s+)${escapeRegExp(callee)}(?![\\w$])`).test(source) ? '[]' : call)
+      .replace(new RegExp(`\\.\\.\\.\\s*${reference}\\s*,?`, 'g'), '')
+      .replace(new RegExp(`(:\\s*)${reference}`, 'g'), '$1[]')
+      .replace(new RegExp(`([\\[,]\\s*)${reference}\\s*(?=[,\\]])`, 'g'), '$1')
+    if (stripped !== before) used.add(specifier)
+  }
+  return { source: stripped.replace(/,(\s*,)+/g, ',').replace(/\[\s*,/g, '['), modules: [...used] }
+}
+
+function parseStaticSidebarModule(source: string, directory: string): { config: Record<string, unknown>; unresolvedModules: Array<string> } {
+  try {
+    return { config: parseSidebarObject(source), unresolvedModules: [] }
+  } catch (error) {
+    const { source: stripped, modules } = withoutGeneratedSidebarImports(source)
+    // A module that exists in the source is real data or code, not a build output: keep the original failure.
+    if (modules.length === 0 || modules.some((specifier) => sidebarModuleExists(directory, specifier))) throw error
+    try {
+      return { config: parseSidebarObject(stripped), unresolvedModules: modules }
+    } catch {
+      // The failure of the rewritten text would quote text the author never wrote.
+      throw error
+    }
+  }
+}
+
+function sidebarModuleExists(directory: string, specifier: string): boolean {
+  const base = posix.join(directory.replace(/\\/g, '/'), specifier)
+  return ['', '.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '/index.js', '/index.ts'].some((suffix) => existsSync(base + suffix))
+}
+
+function parseSidebarObject(source: string): Record<string, unknown> {
   const bindings = new Map<string, Record<string, unknown>>()
   const normalizedSource = replaceExternalFbContent(source)
   const parseFailures: Array<string> = []
@@ -669,11 +734,10 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   if (!sourcePath) return null
   const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
-  const parsed = extname(sourcePath).toLowerCase() === '.json'
-    ? objectValue(JSON5.parse(source))
-    : parseStaticSidebarModule(source)
+  const sidebarModule = extname(sourcePath).toLowerCase() === '.json' ? undefined : parseStaticSidebarModule(source, dirname(absolutePath))
+  const parsed = sidebarModule ? sidebarModule.config : objectValue(JSON5.parse(source))
   if (!parsed) throw new Error('Docusaurus sidebar config must export an object.')
-  return { config: parsed, sourcePath }
+  return { config: parsed, sourcePath, ...(sidebarModule?.unresolvedModules.length ? { unresolvedModules: sidebarModule.unresolvedModules } : {}) }
 }
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {
@@ -942,6 +1006,8 @@ export interface DocusaurusSiteSettings {
   unresolvedIdentity?: Array<'title' | 'tagline' | 'navbarTitle'>
   /** Copyright tokens that only exist at build time and were removed. */
   unresolvedCopyright?: string[]
+  /** The config has a `themeConfig` but no object literal could be read from it. */
+  unresolvedThemeConfig?: boolean
 }
 
 function propertyStart(source: string, name: string): number {
@@ -1177,7 +1243,7 @@ function staticObjectEntries(array: string | null): Array<string> {
   return entries
 }
 
-function staticStringField(source: string, name: string, bindings?: Map<string, string>): string | undefined {
+export function staticStringField(source: string, name: string, bindings?: Map<string, string>): string | undefined {
   const start = propertyStart(source, name)
   if (start < 0) return undefined
   const quoted = source.slice(start).match(/^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/)
@@ -1246,7 +1312,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
     .find((object): object is string => Boolean(object))
   const docsRouteBasePath = classicDocs && staticStringField(classicDocs, 'routeBasePath', bindings) || 'docs'
   const themeStart = propertyStart(source, 'themeConfig')
-  const theme = themeStart < 0 ? null : matchingObjectLiteral(source, themeStart)
+  const theme = themeStart < 0 ? null : matchingObjectLiteral(source, themeStart, true)
   const colorModeStart = theme ? propertyStart(theme, 'colorMode') : -1
   const colorMode = colorModeStart < 0 ? null : matchingObjectLiteral(theme!, colorModeStart)
   const configuredColorMode = colorMode ? staticStringField(colorMode, 'defaultMode') : undefined
@@ -1315,6 +1381,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
     ...(navbarTitle ? { navbarTitle } : {}),
     ...(unresolvedIdentity.length > 0 ? { unresolvedIdentity } : {}),
     ...(unresolvedCopyright.length > 0 ? { unresolvedCopyright } : {}),
+    ...(themeStart >= 0 && !theme ? { unresolvedThemeConfig: true } : {}),
     defaultColorMode,
     docsRouteBasePath,
     ...(logo && staticStringField(logo, 'src', bindings) ? {

@@ -7,7 +7,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, escapeUnparseableExpressions, esmTemplateLiteralRanges, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks, rewriteRelativeJsxHrefs } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -336,6 +336,11 @@ describe('normalizeMdx', () => {
     expect(output).toContain('````mdx\n:::note\n```js\nexample\n```\n:::\n````')
     expect(output).toContain('<Note>\nReal tip.\n</Note>')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('renders :::important like :::info, which Docusaurus aliases it to', () => {
+    const output = normalizeMdx(':::important Read this\nBody.\n:::', 'docusaurus')
+    expect(output).toBe('<Info>\n**Read this**\nBody.\n</Info>')
+    expect(output).not.toContain(':::')
   })
   it('closes an archived Docusaurus admonition before the next heading', () => {
     const body = [
@@ -1168,6 +1173,40 @@ describe('normalizeExplicitHeadingIds', () => {
     const result = normalizeExplicitHeadingIds('### Memory & embedder config {#memory-embedder-config}\n\nSome prose.')
     expect(result).toBe('<a id="memory-embedder-config"></a>\n### Memory & embedder config\n\nSome prose.')
     expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it.each(['\\{#custom-id}', '\\{#custom-id\\}'])('turns an escaped %s into the runtime heading id comment', (suffix) => {
+    const result = normalizeExplicitHeadingIds(`## Undefined validator ${suffix}\n\nProse.`, undefined, { escapedIds: true })
+    expect(result).toBe('## Undefined validator {/* #custom-id */}\n\nProse.')
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('keeps an escaped id that is not a usable anchor as text and warns', () => {
+    const messages: Array<string> = []
+    const body = '## Odd \\{#a b}\n\n## Comment \\{#a*/b}'
+    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message), { escapedIds: true })).toBe(body)
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toContain('Odd')
+  })
+
+  it.each(['v1.2', 'über', 'a:b'])('keeps the escaped id %s as an anchor, as it does an unescaped one', (id) => {
+    const messages: Array<string> = []
+    expect(normalizeExplicitHeadingIds(`## Title \\{#${id}}`, (message) => messages.push(message), { escapedIds: true })).toBe(`## Title {/* #${id} */}`)
+    expect(messages).toEqual([])
+  })
+
+  it('leaves an escaped id as literal text unless the source is Docusaurus', () => {
+    const messages: Array<string> = []
+    const body = '## Title \\{#custom-id}\n\n## Odd \\{#a b}'
+    expect(normalizeExplicitHeadingIds(body, (message) => messages.push(message))).toBe(body)
+    expect(normalizeMdx(body, 'mintlify')).not.toContain('{/* #custom-id */}')
+    expect(normalizeMdx(body, 'docusaurus')).toContain('## Title {/* #custom-id */}')
+    expect(messages).toEqual([])
+  })
+
+  it('leaves an escaped id inside a code fence alone', () => {
+    const body = ['```md', '## Not a heading \\{#fake-id}', '```'].join('\n')
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
   })
 
   it('leaves a real fenced code block containing heading-shaped text untouched', () => {
@@ -2217,6 +2256,18 @@ describe('Mintlify code-fence compatibility', () => {
   })
 })
 
+
+describe('indented backtick runs', () => {
+  const rename = (body: string) => replaceOutsideCode(body, (text) => text.replace(/TAIL|INSIDE/g, 'done'))
+
+  it('does not let a deeply indented run that nothing closes hide the rest of the page', () => {
+    expect(rename('Paragraph\n    ```js\n\nTAIL')).toBe('Paragraph\n    ```js\n\ndone')
+  })
+
+  it('still masks a deeply indented fence that is closed, as inside a list item', () => {
+    expect(rename('- item\n\n    ```html\n    INSIDE\n    ```\n\nTAIL')).toBe('- item\n\n    ```html\n    INSIDE\n    ```\n\ndone')
+  })
+})
 
 describe('Mintlify unsupported fence options', () => {
   it('reports renderer-only attributes and leaves source code unchanged', () => {

@@ -178,7 +178,7 @@ function escapeLeadingBlockMarker(line: string): string {
 
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {
   if (kind === 'danger') return 'Error'
-  if (kind === 'info') return 'Info'
+  if (kind === 'info' || kind === 'important') return 'Info'
   if (kind === 'caution' || kind === 'warning') return 'Warning'
   return 'Note'
 }
@@ -306,7 +306,7 @@ function normalizeDocusaurusAdmonitions(body: string): string {
     if (codeFence) return line
     if (/^#{1,6}\s/.test(line)) headingLines.push(index)
 
-    const opening = line.match(/^\s*(:{3,})(note|tip|info|warning|caution|danger)(?:\[([^\]]+)\]|\s+(.+))?\s*$/i)
+    const opening = line.match(/^\s*(:{3,})(note|tip|info|important|warning|caution|danger)(?:\[([^\]]+)\]|\s+(.+))?\s*$/i)
     if (opening) {
       const tag = docusaurusAdmonitionTag(opening[2].toLowerCase())
       openAdmonitions.push({ delimiter: opening[1], tag, openedAt: index })
@@ -392,7 +392,7 @@ const HTML_ID = /^[^\s"'<>`{}&]+$/u
 export function normalizeExplicitHeadingIds(
   raw: string,
   warn?: (message: string) => void,
-  options: { headingMarkers?: boolean; keepIdComments?: boolean } = {},
+  options: { headingMarkers?: boolean; keepIdComments?: boolean; escapedIds?: boolean } = {},
 ): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
@@ -402,6 +402,16 @@ export function normalizeExplicitHeadingIds(
     // against unbounded heading text; that combination backtracks on long
     // headings with no valid anchor.
     if (trimmed.endsWith('}')) {
+      // Docusaurus authors escape the brace (`\{#id}`) so the heading id survives MDX; the renderer reads it as a comment.
+      // Only Docusaurus gives the escape that meaning; elsewhere `\{#id}` is the literal text an author wrote.
+      const escapedMarker = options.escapedIds ? trimmed.lastIndexOf(' \\{#') : -1
+      if (escapedMarker >= 0) {
+        const id = trimmed.slice(escapedMarker + 4, -1).replace(/\\$/, '')
+        const heading = trimmed.slice(0, escapedMarker).trimEnd()
+        if (HTML_ID.test(id) && !id.includes('\\') && !id.includes('*/')) return `${heading} ${headingIdMarker(id)}`
+        warn?.(`Heading anchor \\{#${id}} is not a usable anchor (it is empty or holds whitespace, quotes, braces, "<", ">", "&" or "*/"), so it was kept as text on "${heading.replace(/^\s*#+\s*/, '')}".`)
+        return line
+      }
       const marker = trimmed.lastIndexOf(' {#')
       if (marker >= 0) {
         const id = trimmed.slice(marker + 3, -1)
@@ -1748,8 +1758,10 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
   // Note: MDX (mdx-js) disables CommonMark indented code blocks, so
   // 4-space-indented text is never code here and is intentionally left
   // unmasked, matching @mdx-js/mdx's own parsing.
-  for (const line of source.split('\n')) {
-    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+  const sourceLines = source.split('\n')
+  for (const [lineIndex, line] of sourceLines.entries()) {
+    // MDX has no indented code, so a fence may sit at any indentation (a list item's content is indented by its marker).
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
     if (codeFence) {
       fenceBuffer.push(line)
       // A closing fence has no info string. ` ```python` inside an open
@@ -1767,7 +1779,16 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
     // A backtick fence's info string cannot hold a backtick (CommonMark):
     // "```bash npm install x ```" is inline code, and opening a fence on it
     // would hide the rest of the page from every rename.
-    if (fenceMatch && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
+    // A run indented four or more spaces that nothing closes is more likely stray text than a fence swallowing the rest of the page.
+    let unclosedDeepRun = false
+    if (fenceMatch && /^ {4}|^\t/.test(line)) {
+      unclosedDeepRun = true
+      for (let later = lineIndex + 1; later < sourceLines.length && unclosedDeepRun; later++) {
+        const closing = sourceLines[later].match(/^\s*(`{3,}|~{3,})\s*$/)
+        if (closing && closing[1][0] === fenceMatch[1][0] && closing[1].length >= fenceMatch[1].length) unclosedDeepRun = false
+      }
+    }
+    if (fenceMatch && !unclosedDeepRun && !(fenceMatch[1][0] === '`' && line.slice(fenceMatch[0].length).includes('`'))) {
       codeFence = fenceMatch[1]
       fenceBuffer = [line]
       continue
@@ -1803,8 +1824,10 @@ export function closeOpenFence(body: string): string {
  * or list item that held the tag (its first line already sits there). Lines
  * inside a JS expression, an ESM block or a JSX attribute are left alone:
  * indenting them would change the text of a multi-line template literal. So is
- * every line of a fenced code block, fences included: the code stays exactly as
- * written. A snippet that does not parse as MDX on its own is returned unchanged.
+ * every line of a fenced code block that starts at the left edge of the snippet:
+ * the code stays exactly as written. A fence the snippet itself indents (inside
+ * one of its list items) moves with its container, all of its lines by the same
+ * amount, so the code is unchanged once the container's indentation is removed. A snippet that does not parse as MDX on its own is returned unchanged.
  */
 export function indentSnippetLines(snippet: string, indent: string): string {
   if (!indent || !snippet.includes('\n')) return snippet
@@ -1819,7 +1842,11 @@ export function indentSnippetLines(snippet: string, indent: string): string {
   }
   const visit = (node: MdxOffsetNode & { attributes?: Array<{ position?: MdxOffsetNode['position'] }> }): void => {
     if (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression' || node.type === 'mdxjsEsm') keep(node)
-    if (node.type === 'code') keep(node, fenced)
+    if (node.type === 'code') {
+      const start = node.position?.start.offset
+      // Only a fence that sits at the left edge stays put; a nested one must keep its place in its list item.
+      if (start !== undefined && !/^[ \t]/.test(snippet.slice(snippet.lastIndexOf('\n', start - 1) + 1, start + 1))) keep(node, fenced)
+    }
     node.attributes?.forEach((attribute) => keep(attribute))
     node.children?.forEach(visit)
   }
@@ -3157,7 +3184,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   let rewritten = normalizeExplicitHeadingIds(
     runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
     undefined,
-    { headingMarkers: runMintlify },
+    { headingMarkers: runMintlify, escapedIds: runDocusaurus },
   )
   // After the `{#id}` pass above, which would turn the marker this writes into an anchor element.
   if (runFern) rewritten = normalizeFernHeadingIds(rewritten)

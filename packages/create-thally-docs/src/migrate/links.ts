@@ -23,7 +23,10 @@ export function reportUnresolvedMigrationLinks(bundle: MigrationBundle): void {
       const prose = line.replace(/`[^`]*`/g, '')
       for (const match of prose.matchAll(/(?:\]\(|\bhref=["'])(\/(?!\/)[^\s)"']+)/g)) {
         const target = match[1].split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
-        if (!routes.has(literalRoute(target) ?? target) && !machineRoutes.has(target)) unknown.add(target)
+        // A copied file is listed by its real name; its link spells a space and the like as %XX.
+        let decoded = target
+        try { decoded = decodeURIComponent(target) } catch { /* keep the raw target */ }
+        if (!routes.has(literalRoute(target) ?? target) && !routes.has(literalRoute(decoded) ?? decoded) && !machineRoutes.has(target)) unknown.add(target)
       }
     }
     if (unknown.size) bundle.warnings.push({ code: 'unsupported-config', source: page.id, message: `Internal links have no imported destination and require review: ${[...unknown].slice(0, 20).join(', ')}${unknown.size > 20 ? `, and ${unknown.size - 20} more` : ''}.` })

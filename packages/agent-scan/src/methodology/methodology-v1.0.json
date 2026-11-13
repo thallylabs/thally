@@ -1,0 +1,247 @@
+{
+  "id": "thally-agent-scan",
+  "version": "1.0",
+  "frozenOn": "2026-11-12",
+  "license": "CC-BY-4.0",
+  "description": "Black-box agent-readiness checks that any HTTP client can reproduce against a public documentation site. Every check is binary or a pass rate across the sampled pages.",
+  "userAgent": "ThallyAgentScan/1.0 (+https://thally.io/agent-readiness-methodology)",
+  "robotsProductToken": "ThallyAgentScan",
+  "limits": {
+    "requestsPerSite": 25,
+    "minIntervalMsPerHost": 1000,
+    "timeoutMs": 10000,
+    "retries": 2,
+    "maxRedirects": 5,
+    "maxBodyBytes": 5242880,
+    "samplePages": 10
+  },
+  "scoring": {
+    "formula": "round(100 * sum(w_c * s_c) / sum(w_c)) over applicable categories; s_c = weighted mean of applicable scored check values",
+    "pageRateStatus": "pass when value == 1; fail otherwise",
+    "binaryStatus": "pass when value == 1; fail when value == 0",
+    "notApplicable": "a not-applicable check leaves its category mean; a category with no applicable scored checks leaves the weight sum"
+  },
+  "probes": {
+    "llmsTxt": "if root path != '/': ['<root>llms.txt', '/llms.txt'] else ['/llms.txt']; llms-full only beside the llms.txt hit, else '/llms-full.txt'",
+    "wellKnown": [
+      "/.well-known/mcp.json",
+      "/.well-known/mcp/server-card.json",
+      "/.well-known/agent-card.json"
+    ],
+    "aiBotTokens": ["GPTBot", "ClaudeBot", "PerplexityBot"],
+    "alternateVariants": ["link_alternate", "dot_md", "accept_negotiation", "format_json"],
+    "llmsFullMinBytes": 1024,
+    "llmsFullPrefixBytes": 2048,
+    "sitemapMaxIndexChildren": 2,
+    "sitemapMaxRobotsLines": 5,
+    "sitemapMaxRequests": 5,
+    "sitemapPaths": ["/sitemap.xml", "/sitemap-index.xml"],
+    "jsonLdPageTypes": [
+      "TechArticle",
+      "Article",
+      "BlogPosting",
+      "WebPage",
+      "APIReference",
+      "HowTo",
+      "FAQPage"
+    ],
+    "serverRenderedMinChars": 200,
+    "maxStatusRedirects": 2
+  },
+  "sampling": {
+    "pages": 10,
+    "order": "code-unit",
+    "method": "k = floor(n/10); U[i*k], i=0..9; plus docs root",
+    "robotsFiltered": true,
+    "fallback": "breadth-first same-site links from the docs root in document order, extended by links from already-sampled pages",
+    "metaRefresh": "an immediate (delay <= 1 s) same-site <meta http-equiv=refresh> on the docs root or a sampled page is followed like a redirect, within limits.maxRedirects and counting each hop as a request; the target page is evaluated and reported in sample.metaRefreshes, and the docs root is not moved. Offsite refreshes are not followed."
+  },
+  "grades": [
+    { "grade": "A", "min": 90 },
+    { "grade": "B", "min": 80 },
+    { "grade": "C", "min": 70 },
+    { "grade": "D", "min": 60 },
+    { "grade": "F", "min": 0 }
+  ],
+  "categories": [
+    { "id": "discovery", "name": "Discovery", "weight": 20 },
+    { "id": "identity", "name": "Identity", "weight": 15 },
+    { "id": "structure", "name": "Structure", "weight": 15 },
+    { "id": "retrieval", "name": "Retrieval", "weight": 30 },
+    { "id": "trust", "name": "Trust", "weight": 10 },
+    { "id": "parity", "name": "Parity", "weight": 10 }
+  ],
+  "checks": [
+    {
+      "id": "discovery.llms_txt",
+      "category": "discovery",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "The llms.txt location returns 200 with a text/* media type that is not text/html, and the decoded body, after removing the BOM and leading whitespace, starts with '# '.",
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
+    },
+    {
+      "id": "discovery.llms_full_txt",
+      "category": "discovery",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "llms-full.txt returns 200 with a text/* media type that is not text/html, and more than 1024 bytes. Only the first 2048 bytes are read.",
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
+    },
+    {
+      "id": "discovery.sitemap",
+      "category": "discovery",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "Sitemap candidates, in order and de-duplicated: the first probes.sitemapMaxRobotsLines robots.txt Sitemap lines under the docs root, then <root>sitemap.xml when the docs root is not '/', then the first probes.sitemapMaxRobotsLines other robots.txt Sitemap lines on the same site, then probes.sitemapPaths at the origin. Candidates are tried until one yields at least one <loc> under the docs root. At most 3 sitemap documents (2xx responses that parse as XML) are fetched in all, including <sitemapindex> children (at most probes.sitemapMaxIndexChildren per index, preferring children under the docs root); a 404 or other failed candidate does not count toward the 3, nor does a fetch whose final URL after redirects was already fetched. Separately, at most probes.sitemapMaxRequests sitemap requests are made, counting every attempt, retry and redirect hop. At least one fetched sitemap parses with root <urlset> or <sitemapindex> and yields at least one <loc> under the docs root.",
+      "notApplicableWhen": "the probe was reached with the request budget exhausted (reason: budget)"
+    },
+    {
+      "id": "discovery.robots_ai_agents",
+      "category": "discovery",
+      "weight": 1,
+      "scored": false,
+      "scope": "site",
+      "rule": "For each of GPTBot, ClaudeBot and PerplexityBot, robots.txt allows the docs root path. A missing or 4xx robots.txt allows all. Reported, not scored.",
+      "notApplicableWhen": null
+    },
+    {
+      "id": "discovery.agent_manifest",
+      "category": "discovery",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "Probe URLs share one allocation of 3 (the number of well-known paths). If llms.txt contains an absolute http(s) URL whose host starts with 'mcp.' or whose path has a segment 'mcp', that URL is fetched first with Accept: application/json, text/event-stream, judged by its status line and headers (a text/event-stream response ends when its headers arrive, and a timeout after the headers is not an error; at most 4096 body bytes are read), and takes one slot, or two when it is on another origin (that origin's robots.txt is fetched and honoured as well); the remaining slots go to the well-known paths in order. Passes on any of: (a) a well-known probe returns 200, a JSON media type and a JSON object; (b) the llms.txt MCP URL is plausibly an endpoint: status 400, 405 or 406, or status 401 with a WWW-Authenticate header (a 401 without it does not count), or a 2xx response with a JSON or text/event-stream media type, or any 2xx non-HTML response at a path whose last segment is 'mcp' (a 200 HTML page is not an endpoint); (c) the docs root HTML has <link rel=\"mcp\"> or the response has a Link header with rel=\"mcp\".",
+      "notApplicableWhen": "a probe was skipped for budget and nothing else passed (reason: budget)"
+    },
+    {
+      "id": "identity.canonical",
+      "category": "identity",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Exactly one <link rel=canonical>, and its href resolved against the final URL equals the final URL after normalization.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "identity.lang",
+      "category": "identity",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "<html lang> is non-empty.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "identity.title_description",
+      "category": "identity",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "<title> text is non-empty and <meta name=description> content is non-empty.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "identity.dates",
+      "category": "identity",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Any of: dateModified on the page's JSON-LD node (see parity.description for node selection) at any depth, or on any JSON-LD node when the page has no node of a page type in probes.jsonLdPageTypes; a non-empty <meta property=\"article:modified_time\">; or a <time> element whose own, parent's or grandparent's text matches /\\b(last\\s+)?(updated|modified|edited)\\b/i.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "structure.single_h1",
+      "category": "structure",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "The whole document contains exactly one <h1>.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "structure.heading_order",
+      "category": "structure",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Within the main content root, walking h1-h6 in document order, no heading is more than one level deeper than the previous heading. Upward jumps are allowed and the first heading may be any level. A page with fewer than 2 headings passes.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "structure.json_ld",
+      "category": "structure",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "At least one <script type=\"application/ld+json\">; every such script parses as JSON, and every top-level object, or every node of its @graph, has a non-empty @type.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "retrieval.server_rendered",
+      "category": "retrieval",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Main content root text is at least 200 characters in the raw HTML, without executing JavaScript. The main content root is the first <main>, else the first <article>, else the first [role=main], else <body> without header, nav, footer and aside; script, style, noscript, template and svg are removed first.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "retrieval.alternate",
+      "category": "retrieval",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "On the probe page, the variants are tried in order and the first valid one passes. Markdown: 200, media type text/markdown, text/x-markdown or text/plain (text/plain only for variants (1) and (2)), body not starting with '<'. JSON: 200, application/json or *+json, body parses to an object. Feeds never count: media types application/rss+xml, application/atom+xml and application/feed+json, and URLs whose path ends in 'feed.json' or 'feed'. Variants: (1) the first HTML <link rel=alternate> or HTTP Link alternate of type text/markdown or application/json whose target is not llms.txt, llms-full.txt or a feed and is on the same site (a declared alternate on another host is recorded and not fetched, and the check fails if nothing else passes); (2) <url>.md, or <url>index.md when the path ends with '/'; (3) the same URL with Accept: text/markdown, application/json;q=0.9 (plain content negotiation; a text/markdown, text/x-markdown or JSON response counts); (4) <url>?format=json with Accept: application/json.",
+      "notApplicableWhen": "every variant was skipped for budget (reason: budget)"
+    },
+    {
+      "id": "retrieval.status_health",
+      "category": "retrieval",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "The sampled page reached a final status of 200 with at most 2 redirects. Errors and offsite redirects fail.",
+      "notApplicableWhen": "no sampled page was attempted"
+    },
+    {
+      "id": "trust.ownership",
+      "category": "trust",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Any of: a JSON-LD node with @type Organization at any depth (including publisher or author); or a <footer> or [role=contentinfo] containing at least one <a href> and text matching /©|\\(c\\)|copyright/i.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "trust.correction_path",
+      "category": "trust",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "Any <a href> matching github.com/<owner>/<repo>/(edit|blob|tree)/, gitlab.com/.+/-/(edit|blob)/ or bitbucket.org/.+/src/, or page text matching /edit (this )?page|suggest (an )?edit|improve this (page|doc)|report an issue|was this (page )?helpful|give feedback/i.",
+      "notApplicableWhen": "no HTML pages"
+    },
+    {
+      "id": "parity.title",
+      "category": "parity",
+      "weight": 1,
+      "scored": true,
+      "scope": "site",
+      "rule": "The alternate title (Markdown: frontmatter title, else the first '# ' heading; JSON: top-level title, then headline, then name, where a JSON-LD shaped object with @graph or @type uses the page node selected as in parity.description), normalized by NFKC, lower-case, collapsed whitespace and stripped punctuation, equals the normalized first <h1>, or the normalized <title> starts with it.",
+      "notApplicableWhen": "no alternate obtained (reason: no_alternate)"
+    },
+    {
+      "id": "parity.description",
+      "category": "parity",
+      "weight": 1,
+      "scored": true,
+      "scope": "page",
+      "rule": "On pages that have both a meta description and a JSON-LD description, the normalized values are equal. The JSON-LD description is taken from the page node: among top-level nodes (including @graph members) of a type in probes.jsonLdPageTypes, the node whose url or @id (ignoring the fragment) equals the page URL, else the first node of the earliest type in that list (in document order); a site-level node (for example WebSite or Organization) is used only when the page has no node of a page type.",
+      "notApplicableWhen": "no page has both (reason: no_comparable_pages)"
+    }
+  ]
+}

@@ -49,6 +49,52 @@ describe('Docusaurus projection', () => {
     expect(readDocusaurusSidebars(root)?.config).toEqual({ docs: ['guide'] })
   })
 
+  describe('sidebars that import generated files', () => {
+    const rest = "  { type: 'category', label: 'Guides', items: ['guide'] },"
+    it.each([
+      ['an ES import', "import apiSidebar from './docs/management-api/sidebar';\nexport default { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };"],
+      ['a require with .js', "const apiSidebar = require('./docs/management-api/sidebar.js');\nmodule.exports = { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };"],
+      ['a typed const with a default export', "import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';\nimport apiSidebar from './docs/management-api/sidebar';\nconst sidebars: SidebarsConfig = { docs: [\n  'intro',\n  { type: 'category', label: 'API', items: apiSidebar },\n  ...apiSidebar,\n" + rest + "\n] };\nexport default sidebars;"],
+    ])('reads the rest of the sidebar with %s', (_name, source) => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.ts'), source)
+      const result = readDocusaurusSidebars(root)
+      expect(result?.config).toEqual({ docs: ['intro', { type: 'category', label: 'API', items: [] }, { type: 'category', label: 'Guides', items: ['guide'] }] })
+      expect(result?.unresolvedModules).toEqual([expect.stringMatching(/^\.\/docs\/management-api\/sidebar(?:\.js)?$/)])
+    })
+
+    it('treats a call of a helper declared in the sidebar file on a generated sidebar as an empty list', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.js'), [
+        "import { default as apiSidebar } from './docs/api/sidebar';",
+        'function apiItems(sidebar) { return sidebar.slice(1) }',
+        "module.exports = { docs: ['intro', { type: 'category', label: 'API', items: apiItems(apiSidebar) }] };",
+      ].join('\n'))
+      const result = readDocusaurusSidebars(root)
+      expect(result?.config).toEqual({ docs: ['intro', { type: 'category', label: 'API', items: [] }] })
+      expect(result?.unresolvedModules).toEqual(['./docs/api/sidebar'])
+    })
+
+    it('does not call an existing module generated: a sidebar that imports data from the source is rejected as before', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'items.json'), '["guide"]')
+      writeFileSync(join(root, 'sidebars.js'), "const data = require('./items.json');\nmodule.exports = { docs: ['intro', { type: 'category', label: 'More', items: data }] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/executable/)
+    })
+
+    it('reports the failure of the author\'s text, not of the rewritten text', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.js'), "import gen from './gen';\nexport default { docs: ['intro', ...gen.filter(Boolean)] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/gen\.filter/)
+    })
+
+    it('still rejects a sidebar that computes its items', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'sidebars.ts'), "import apiSidebar from './docs/api/sidebar';\nexport default { docs: [...apiSidebar, makeItems()] };")
+      expect(() => readDocusaurusSidebars(root)).toThrow(/executable/)
+    })
+  })
+
   it('resolves a category metadata link to a local document id', () => {
     const root = fixture()
     mkdirSync(join(root, 'api/themes'), { recursive: true })
@@ -88,6 +134,41 @@ describe('Docusaurus projection', () => {
       name: 'Docs', navbarTitle: 'Docmost', defaultColorMode: 'light',
     })
     expect(readDocusaurusSiteSettings(root).logo).toBeUndefined()
+  })
+
+  it('reads a theme config written as a parenthesised, type-annotated object', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `const config = {
+      title: 'Docs',
+      themeConfig:
+        /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
+        ({
+          navbar: {
+            title: 'Acme',
+            logo: { alt: 'Acme', src: 'img/logo.svg' },
+            items: [
+              { type: 'doc', docId: 'intro', position: 'left', label: 'Tutorial' },
+              { href: 'https://example.test/repo', label: 'Repo', position: 'right' },
+            ],
+          },
+          footer: { copyright: \`Copyright © \${new Date().getFullYear()} Acme.\` },
+        }),
+    }
+    export default config`)
+    const settings = readDocusaurusSiteSettings(root)
+    expect(settings).toMatchObject({ navbarTitle: 'Acme', logo: { light: 'img/logo.svg' }, copyright: 'Copyright © {year} Acme.' })
+    expect(settings.navbarLinks).toEqual([
+      { label: 'Tutorial', docId: 'intro' },
+      { label: 'Repo', href: 'https://example.test/repo' },
+    ])
+    expect(settings.unresolvedThemeConfig).toBeUndefined()
+  })
+
+  it('reports a theme config that is not an object literal', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docusaurus.config.ts'), `import theme from './theme'
+    export default { title: 'Docs', themeConfig: buildTheme() }`)
+    expect(readDocusaurusSiteSettings(root).unresolvedThemeConfig).toBe(true)
   })
 
   it('reads a static default color mode from the theme config', () => {

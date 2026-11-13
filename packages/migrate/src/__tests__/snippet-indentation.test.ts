@@ -64,6 +64,16 @@ describe('indentation of an inlined snippet', () => {
     expect(body).toBe('- **Name**: first\n- **Description**: second')
   })
 
+  it('moves a fence nested in the snippet together with the list items that hold it', () => {
+    const order = '- **field**\n\n  - nested item\n\n    ```json\n    {"a": 1}\n    ```\n\n  - last item\n'
+    const body = migrate(
+      `import Order from '/snippets/_order.mdx'\n\n- **order**\n\n  <details>\n  <summary>x</summary>\n\n  <Order />\n\n  </details>`,
+      { 'snippets/_order.mdx': order },
+    )
+    expect(body).toContain('      ```json\n      {"a": 1}\n      ```\n')
+    expect(body).toContain('last item')
+  })
+
   describe('code fences', () => {
     const python = '```python\nprint("hello")\n```'
     const nested = '````md\n```js\nx()\n```\n````'
