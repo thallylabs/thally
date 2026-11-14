@@ -214,11 +214,17 @@ jobs:
               # so compatibility requires both exact immutable locator fields
               # from a successful run by the allowlisted legacy publisher.
               while read -r legacy_run; do
-                legacy_log="$(
+                # GitHub deletes run logs after the retention period. A run
+                # whose log is gone cannot prove this release, so it is
+                # skipped and the release is re-driven instead.
+                if ! legacy_log="$(
                   gh run view "$legacy_run" \
                     --repo thallylabs/thally-cloud \
-                    --log
-                )"
+                    --log 2>/dev/null
+                )"; then
+                  echo "::notice::Skipped legacy promotion run $legacy_run: its log is no longer available."
+                  continue
+                fi
                 if grep -Fq "\"release_id\": \"$release_id\"" <<<"$legacy_log" && \
                    grep -Fq "\"record_commit_sha\": \"$record_sha\"" <<<"$legacy_log"; then
                   cloud_complete=success

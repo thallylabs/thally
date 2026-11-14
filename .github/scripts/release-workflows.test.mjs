@@ -258,6 +258,9 @@ test("computes and correlates releases from frozen source commits", () => {
   assert.match(controllerScript, /event=repository_dispatch/);
   assert.match(controllerScript, /LEGACY_RELEASE_ACTOR/);
   assert.match(controllerScript, /legacy_log/);
+  // An expired legacy run log must not abort the resume check.
+  assert.match(controllerScript, /if ! legacy_log="\$\(/);
+  assert.match(controllerScript, /--log 2>\/dev\/null\s*\)"; then\s+echo "::notice::[^\n]*\n\s+continue/);
 });
 
 test("does not bump runtime packages after the starter source is frozen", () => {
