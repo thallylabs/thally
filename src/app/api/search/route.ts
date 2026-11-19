@@ -1,6 +1,6 @@
 /** Public search with explicit ranking degradation in constrained runtimes. */
 import { type NextRequest } from 'next/server'
-import { searchDocs, type SearchMode } from '@/lib/search/engine'
+import { searchDocs, type SearchHit, type SearchMode } from '@/lib/search/engine'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
 import { problemResponse } from '@/lib/http/problem'
@@ -42,6 +42,64 @@ async function resolveSearchMode(request: NextRequest): Promise<{ mode: SearchMo
   return allowed ? { mode: 'hybrid' } : { mode: 'fulltext', degradedReason: 'rate_limited' }
 }
 
+/**
+ * Compound words readers type as one token. The index tokenizes page titles on
+ * word boundaries ("Self-host" → `self`, `host`), so a compact query such as
+ * `selfhost` misses unless it is split before the fallback search.
+ */
+const RELATED_COMPOUNDS: Array<[RegExp, string]> = [
+  [/\bselfhost(ed|ing|s)?\b/g, 'self host$1'],
+  [/\bquickstart\b/g, 'quick start'],
+  [/\bapireference\b/g, 'api reference'],
+  [/\bclireference\b/g, 'cli reference'],
+  [/\bmcpserver\b/g, 'mcp server'],
+  [/\bdocsjson\b/g, 'docs json'],
+]
+
+/** One normalized retry for a zero-result query, or null when it adds nothing. */
+function normalizeRelatedQuery(query: string): string | null {
+  const original = query.trim().toLowerCase()
+  let related = query
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[-_]+/g, ' ')
+  for (const [pattern, replacement] of RELATED_COMPOUNDS) {
+    related = related.replace(pattern, replacement)
+  }
+  related = related.replace(/\s+/g, ' ').trim()
+  return related && related !== original ? related : null
+}
+
+function toSearchResult(hit: SearchHit, baseUrl: string, locale: string | undefined) {
+  return {
+    type: hit.type,
+    page_id: hit.pageId,
+    title: hit.title,
+    description: hit.description,
+    url: `${baseUrl}${hit.href}`,
+    ...(hit.anchor ? { section_url: `${baseUrl}${hit.href}#${hit.anchor}`, heading: hit.heading } : {}),
+    // Generated API operations have no `/api/docs` page projection; their
+    // structured form is MCP `get_api_operation`.
+    ...(hit.type === 'page' ? { api_url: `${baseUrl}/api/docs/${locale ? `${locale}/` : ''}${hit.pageId}` } : {}),
+    ...(hit.method ? { method: hit.method, path: hit.path } : {}),
+    score: hit.score,
+    snippet: hit.snippet,
+  }
+}
+
+/**
+ * The fallback query uses the same one-character tolerance as the main search,
+ * so "host" also matches "post". Keep only fallback hits whose public text
+ * contains every normalized term; a miss falls through to the no-result state.
+ */
+function relevantRelatedHits(query: string, hits: Array<SearchHit>): Array<SearchHit> {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  return hits.filter((hit) => {
+    const text = `${hit.title} ${hit.description} ${hit.snippet}`.toLowerCase()
+    return terms.every((term) => text.includes(term))
+  })
+}
+
 export async function GET(request: NextRequest) {
   const baseUrl = request.nextUrl.origin
   const params = request.nextUrl.searchParams
@@ -77,6 +135,10 @@ export async function GET(request: NextRequest) {
 
   const { mode, degradedReason } = await resolveSearchMode(request)
   const hits = await searchDocs(query, { limit, mode, locale })
+  const relatedQuery = hits.length === 0 ? normalizeRelatedQuery(query) : null
+  const relatedHits = relatedQuery
+    ? relevantRelatedHits(relatedQuery, await searchDocs(relatedQuery, { limit, mode, locale }))
+    : []
 
   // Record the search (best-effort) — feeds the admin Search analytics.
   try {
@@ -102,20 +164,8 @@ export async function GET(request: NextRequest) {
       ...(degradedReason ? { mode_requested: 'hybrid', mode_degraded_reason: degradedReason } : {}),
       total: hits.length,
       as_of: new Date().toISOString(),
-      results: hits.map((hit) => ({
-        type: hit.type,
-        page_id: hit.pageId,
-        title: hit.title,
-        description: hit.description,
-        url: `${baseUrl}${hit.href}`,
-        ...(hit.anchor ? { section_url: `${baseUrl}${hit.href}#${hit.anchor}`, heading: hit.heading } : {}),
-        // Generated API operations have no `/api/docs` page projection; their
-        // structured form is MCP `get_api_operation`.
-        ...(hit.type === 'page' ? { api_url: `${baseUrl}/api/docs/${locale ? `${locale}/` : ''}${hit.pageId}` } : {}),
-        ...(hit.method ? { method: hit.method, path: hit.path } : {}),
-        score: hit.score,
-        snippet: hit.snippet,
-      })),
+      related: relatedHits.map((hit) => toSearchResult(hit, baseUrl, locale)),
+      results: hits.map((hit) => toSearchResult(hit, baseUrl, locale)),
     },
     {
       headers: {

@@ -34,6 +34,7 @@ interface CodeActionsContextValue {
   reportCode: (code: string) => void
   askAssistant: (code: string) => void
   openAssistant: () => void
+  openAssistantWithPrompt: (prompt: string) => void
 }
 
 const unavailableCodeActions: CodeActionsContextValue = {
@@ -43,6 +44,7 @@ const unavailableCodeActions: CodeActionsContextValue = {
   reportCode: () => {},
   askAssistant: () => {},
   openAssistant: () => {},
+  openAssistantWithPrompt: () => {},
 }
 
 const CodeActionsContext = createContext<CodeActionsContextValue>(
@@ -128,6 +130,10 @@ export function DocsCodeActionsProvider({
     requestAssistant(null)
   }, [requestAssistant])
 
+  const openAssistantWithPrompt = useCallback((prompt: string) => {
+    requestAssistant(prompt)
+  }, [requestAssistant])
+
   useEffect(() => {
     if (!chatStatus.show) return
     function handleAssistantShortcut(event: KeyboardEvent) {
@@ -153,7 +159,8 @@ export function DocsCodeActionsProvider({
     reportCode,
     askAssistant,
     openAssistant,
-  }), [askAssistant, chatStatus, label, openAssistant, reportCode, repositoryUrl])
+    openAssistantWithPrompt,
+  }), [askAssistant, chatStatus, label, openAssistant, openAssistantWithPrompt, reportCode, repositoryUrl])
 
   return (
     <CodeActionsContext.Provider value={actions}>
