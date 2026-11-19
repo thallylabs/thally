@@ -292,9 +292,9 @@ describe('managed content cache headers', () => {
 
     expect(browser.headers.get('x-middleware-next')).toBe('1')
     expect(browser.headers.get('X-Llms-Txt')).toBe('https://docs.example.com/llms.txt')
-    expect(browser.headers.get('Link')).toContain('</llms.txt>; rel="llms-txt"')
+    expect(browser.headers.get('Link')).toContain('</llms.txt>; rel="describedby"')
     expect(browser.headers.get('Link')).toContain(
-      '</llms.txt>; rel="alternate"; type="text/markdown"',
+      '</api/default/posts/get.md>; rel="alternate"; type="text/markdown"',
     )
     expect(browser.headers.get('Link')).toContain(
       '</openapi.yaml>; rel="service-desc"; type="application/yaml"',

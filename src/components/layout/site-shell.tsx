@@ -121,6 +121,7 @@ interface SiteShellProps {
   navigationVersions?: Array<DocsNavigationVersion>
   navigationShortcuts?: Array<DocsNavigationShortcut>
   identity: SiteIdentity
+  llmsUrl?: string
 }
 
 /** Compose navigation and the shared footer with request-resolved site policy. */
@@ -137,6 +138,7 @@ export function SiteShell({
   navigationVersions = [],
   navigationShortcuts = [],
   identity,
+  llmsUrl = '/llms.txt',
 }: SiteShellProps) {
   const pathname = usePathname()
 
@@ -260,6 +262,10 @@ export function SiteShell({
           />}
           <div className="flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-10 pb-24">
+              <p className="sr-only">
+                For the full documentation index, see{' '}
+                <a href={llmsUrl}>llms.txt</a>.
+              </p>
               <PageContainer className={layout.pageGap}>{children}</PageContainer>
             </main>
             <Footer

@@ -65,7 +65,7 @@ describe('reader auth in middleware', () => {
     expect(response.headers.get('location')).toBeNull()
     expect(response.status).toBe(200)
     // Discovery headers are still advertised on documents.
-    expect(response.headers.get('Link')).toContain('rel="llms-txt"')
+    expect(response.headers.get('Link')).toContain('rel="describedby"')
   })
 
   it.each([

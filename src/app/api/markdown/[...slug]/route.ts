@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server'
 import { canReaderViewPage, ensureDocPublication, isDocPublished, isLocaleDirectory } from '@/data/docs'
-import path from 'node:path'
-import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
-import { mdxToMarkdown } from '@thallylabs/core/markdown'
+import { markdownMirrorCandidates, renderMarkdownMirror } from '@/lib/markdown-mirror'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { getReaderAuthConfig } from '@/lib/reader-auth/config'
 import { canReaderAccessPage, parsePageAccess } from '@/lib/reader-auth/access'
@@ -18,7 +16,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string[] }> },
 ) {
-  const cloud = await getCloudSiteConfig(new URL(request.url).origin)
+  const origin = new URL(request.url).origin
+  const cloud = await getCloudSiteConfig(origin)
   if (!isMarkdownPagesEnabled(cloud?.siteConfig.portable)) {
     return new NextResponse('Not Found', { status: 404 })
   }
@@ -34,7 +33,9 @@ export async function GET(
   // The HTML page 404s when its documented OpenAPI operation is hidden or
   // excluded; its Markdown mirror must not publish it either.
   await ensureDocPublication()
-  const pageId = slugPath.replace(/\/index$/, '') || 'introduction'
+  // A bare locale root (`/es.md`) is that locale's introduction page.
+  const localeRoot = slug.length === 1 && isLocaleDirectory(slug[0])
+  const pageId = localeRoot ? 'introduction' : slugPath.replace(/\/index$/, '') || 'introduction'
   if (!isDocPublished(pageId)) {
     return new NextResponse('Not Found', { status: 404 })
   }
@@ -44,8 +45,13 @@ export async function GET(
     return new NextResponse('Not Found', { status: 404 })
   }
   // `/fr/guide.md` serves the translation file directly; the primary page's
-  // rules apply too, so a translation that omits `groups` opens nothing.
-  if (slug.length > 1 && isLocaleDirectory(slug[0])) {
+  // rules apply too, so a translation that omits `groups` opens nothing. A
+  // bare locale root (`/es.md`) follows the same rule.
+  if (localeRoot) {
+    if (!(await canReaderViewPage(pageId, reader, slug[0]))) {
+      return new NextResponse('Not Found', { status: 404 })
+    }
+  } else if (slug.length > 1 && isLocaleDirectory(slug[0])) {
     const primaryId = slug.slice(1).join('/').replace(/\/index$/, '') || 'introduction'
     if (!(await canReaderViewPage(primaryId, reader, slug[0]))) {
       return new NextResponse('Not Found', { status: 404 })
@@ -53,11 +59,8 @@ export async function GET(
   }
 
   const rootPrefix = `${localDocsRoot}/`
-  const candidates = [
-    path.posix.join(localDocsRoot, `${slugPath}.mdx`),
-    path.posix.join(localDocsRoot, `${slugPath}.md`),
-    path.posix.join(localDocsRoot, `${slugPath}/index.mdx`),
-  ]
+  const mirrorId = localeRoot ? `${slug[0]}/introduction` : slugPath
+  const candidates = markdownMirrorCandidates(mirrorId)
 
   const source = getContentSource()
   for (const filePath of candidates) {
@@ -77,13 +80,9 @@ export async function GET(
       if (!canReaderAccessPage(fileAccess, reader, getReaderAuthConfig())) {
         return new NextResponse('Not Found', { status: 404 })
       }
-      // Strip internal provenance frontmatter so it never ships publicly, then
-      // clean the MDX body to real Markdown (JSX components → Markdown) while
-      // preserving the public frontmatter block.
-      const stripped = stripInternalFrontmatter(file.content)
-      const frontmatter = stripped.match(/^\s*---\n[\s\S]*?\n---\n?/)?.[0] ?? ''
-      const body = mdxToMarkdown(stripped.slice(frontmatter.length))
-      return new NextResponse(frontmatter + body, {
+      // One serializer for the `.md` mirror and the negotiated markdown. The
+      // public frontmatter is limited to title and description.
+      return new NextResponse(renderMarkdownMirror(file.content, origin), {
         status: 200,
         headers: {
           'Content-Type': 'text/markdown; charset=utf-8',

@@ -141,6 +141,17 @@ describe('most specific collection ownership', () => {
   })
 })
 
+describe('agent discovery pointer', () => {
+  it('renders the llms.txt pointer as the first child of the main content', () => {
+    const markup = renderToStaticMarkup(shell([tab('docs', '/docs')]))
+    expect(markup).toContain(
+      '<main id="main-content" class="thally-docs-main flex-1 py-10 pb-24"><p class="sr-only">',
+    )
+    expect(markup).toContain('For the full documentation index, see')
+    expect(markup).toContain('<a href="/llms.txt">llms.txt</a>')
+  })
+})
+
 describe('a picked tab', () => {
   let container: HTMLDivElement
   beforeEach(() => {

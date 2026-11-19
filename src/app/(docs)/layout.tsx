@@ -2,6 +2,8 @@
 
 import { shouldShowPoweredBy } from '@/lib/cloud-link/powered-by'
 import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
+import { isCloudAccessConfiguredEdge } from '@/lib/cloud-link/edge'
+import { getRequestOrigin } from '@/lib/cloud-link/request'
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { getAiConfig, getNavbarConfig, getFooterConfig, getNavigationPresentation, getNavigationVersions, getNavigationShortcuts } from '@/data/docs'
@@ -29,6 +31,12 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   const footerConfig = getFooterConfig()
   const navigationPresentation = getNavigationPresentation()
   const effectiveSite = resolveBuildSiteConfig()
+  // Keep unlinked self-hosts statically renderable. A configured origin or a
+  // linked site needs the absolute agent pointer; otherwise keep it relative.
+  const hasConfiguredOrigin = Boolean(process.env.THALLY_SITE_URL?.trim())
+  const linked = isCloudAccessConfiguredEdge()
+  const origin = hasConfiguredOrigin || linked ? await getRequestOrigin() : undefined
+  const llmsUrl = origin ? `${origin.replace(/\/+$/, '')}/llms.txt` : '/llms.txt'
   const codeReportRepositoryUrl =
     effectiveSite.repoUrl ||
     effectiveSite.links.find((link) => link.label.toLowerCase() === 'github')?.href ||
@@ -54,6 +62,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
           navigationVersions={getNavigationVersions()}
           navigationShortcuts={getNavigationShortcuts()}
           identity={siteIdentity(effectiveSite)}
+          llmsUrl={llmsUrl}
         >
           {children}
         </SiteShell>

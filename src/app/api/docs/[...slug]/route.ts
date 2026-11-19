@@ -1,8 +1,9 @@
 import { type NextRequest } from 'next/server'
 import { canReaderViewPage, getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
-import { mdxToMarkdown } from '@thallylabs/core/markdown'
 import { loadContentDocument } from '@/lib/content'
+import { getContentSource } from '@/lib/content-source'
+import { markdownMirrorCandidates, renderMarkdownMirror } from '@/lib/markdown-mirror'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { resolveSiteConfig } from '@/lib/site-config'
 import { problemResponse } from '@/lib/http/problem'
@@ -247,33 +248,26 @@ export async function GET(
   }
 
   // -------------------------------------------------------------------------
-  // Markdown response (default — backward compat)
+  // Markdown response. Same bytes as the `.md` mirror.
   // -------------------------------------------------------------------------
-  const lines: Array<string> = []
-
-  lines.push('---')
-  lines.push(`title: ${title}`)
-  if (description) lines.push(`description: ${description}`)
-  lines.push(`url: ${canonicalUrl}`)
-  if (lastUpdated) lines.push(`lastUpdated: ${lastUpdated}`)
-  if (entry.lastVerified) lines.push(`lastVerified: ${entry.lastVerified}`)
-  if (entry.verifiedVersion) lines.push(`verifiedVersion: ${entry.verifiedVersion}`)
-  lines.push('---')
-  lines.push('')
-  lines.push(`# ${title}`)
-  lines.push('')
-  if (description) {
-    lines.push(description)
-    lines.push('')
+  const mirrorId = route.isLocaleRoute ? `${route.locale}/${entry.id}` : entry.id
+  const source = getContentSource()
+  for (const filePath of markdownMirrorCandidates(mirrorId)) {
+    const file = await source.read(filePath)
+    if (!file) continue
+    return new Response(renderMarkdownMirror(file.content, baseUrl), {
+      headers: {
+        ...commonHeaders,
+        'Content-Type': 'text/markdown; charset=utf-8',
+      },
+    })
   }
-  // Clean MDX → Markdown so agents asking for text/markdown get real Markdown,
-  // not JSX component tags mixed into the prose.
-  lines.push(mdxToMarkdown(content.markdown))
 
-  return new Response(lines.join('\n'), {
+  return new Response('# Markdown mirror unavailable\n', {
+    status: 500,
     headers: {
-      ...commonHeaders,
       'Content-Type': 'text/markdown; charset=utf-8',
+      'Cache-Control': 'no-store',
     },
   })
 }
