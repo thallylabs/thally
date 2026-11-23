@@ -370,6 +370,30 @@ jobs:
             echo "::error::thally main advanced before CI was bound to the release PR."
             exit 1
           fi
+          # Prints the run's conclusion once it has completed, or nothing if
+          # GitHub could not be read for several consecutive attempts.
+          # `gh run watch` only waits: it also exits non-zero on a transient
+          # API error, so the conclusion is read separately and decides alone.
+          run_conclusion() {
+            local repo="$1" run="$2" failures=0 state
+            while [[ "$failures" -lt 10 ]]; do
+              gh run watch "$run" --repo "$repo" >&2 || true
+              if state="$(
+                gh run view "$run" --repo "$repo" --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+              )"; then
+                failures=0
+                if [[ "$state" == completed/* ]]; then
+                  echo "${state#completed/}"
+                  return 0
+                fi
+              else
+                failures=$((failures + 1))
+              fi
+              sleep 30
+            done
+            return 0
+          }
+          # A failed lookup counts as "not found yet" and is retried.
           run_id=""
           for attempt in {1..60}; do
             run_id="$(
@@ -380,7 +404,7 @@ jobs:
                 --json databaseId,headSha \
                 --jq ".[] | select(.headSha == \"$head_sha\") | .databaseId" \
                 | head -n 1
-            )"
+            )" || run_id=""
             [[ -n "$run_id" ]] && break
             sleep 5
           done
@@ -388,7 +412,11 @@ jobs:
             echo "::error::CI did not start for pull request #$PR_NUMBER."
             exit 1
           fi
-          gh run watch "$run_id" --exit-status
+          ci_conclusion="$(run_conclusion "$GITHUB_REPOSITORY" "$run_id")"
+          if [[ "$ci_conclusion" != "success" ]]; then
+            echo "::error::CI run $run_id for pull request #$PR_NUMBER ended with \"${ci_conclusion:-a result GitHub did not return}\"; the release record was not merged."
+            exit 1
+          fi
 
           # Starter gate. The record binds an exact starter commit, and that
           # commit reaches starter main only after starter CI verified it.

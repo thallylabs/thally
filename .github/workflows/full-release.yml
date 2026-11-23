@@ -156,7 +156,7 @@ jobs:
                 --json databaseId,displayTitle \
                 --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
                 | head -n 1
-            )"
+            )" || run_id=""
             [[ -n "$run_id" ]] && break
             sleep 5
           done
@@ -391,7 +391,7 @@ jobs:
                 --json databaseId,displayTitle \
                 --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
                 | head -n 1
-            )"
+            )" || run_id=""
             [[ -n "$run_id" ]] && break
             sleep 5
           done
@@ -519,7 +519,34 @@ jobs:
           PROMOTION_RUN_ID: ${{ steps.promotion.outputs.run_id }}
         run: |
           set -euo pipefail
-          gh run watch "$PROMOTION_RUN_ID" --repo thallylabs/thally --exit-status
+          # Prints the run's conclusion once it has completed, or nothing if
+          # GitHub could not be read for several consecutive attempts.
+          # `gh run watch` only waits: it also exits non-zero on a transient
+          # API error, so the conclusion is read separately and decides alone.
+          run_conclusion() {
+            local repo="$1" run="$2" failures=0 state
+            while [[ "$failures" -lt 10 ]]; do
+              gh run watch "$run" --repo "$repo" >&2 || true
+              if state="$(
+                gh run view "$run" --repo "$repo" --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+              )"; then
+                failures=0
+                if [[ "$state" == completed/* ]]; then
+                  echo "${state#completed/}"
+                  return 0
+                fi
+              else
+                failures=$((failures + 1))
+              fi
+              sleep 30
+            done
+            return 0
+          }
+          conclusion="$(run_conclusion thallylabs/thally "$PROMOTION_RUN_ID")"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::Promotion run $PROMOTION_RUN_ID ended with \"${conclusion:-a result GitHub did not return}\". Inspect it, then run Full release again."
+            exit 1
+          fi
 
       - name: Resolve the published release record
         if: steps.stable.outputs.needed == 'true'
@@ -657,6 +684,30 @@ jobs:
           REQUEST_ID: ${{ needs.release.outputs.request_id }}
         run: |
           set -euo pipefail
+          # Prints the run's conclusion once it has completed, or nothing if
+          # GitHub could not be read for several consecutive attempts.
+          # `gh run watch` only waits: it also exits non-zero on a transient
+          # API error, so the conclusion is read separately and decides alone.
+          run_conclusion() {
+            local repo="$1" run="$2" failures=0 state
+            while [[ "$failures" -lt 10 ]]; do
+              gh run watch "$run" --repo "$repo" >&2 || true
+              if state="$(
+                gh run view "$run" --repo "$repo" --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+              )"; then
+                failures=0
+                if [[ "$state" == completed/* ]]; then
+                  echo "${state#completed/}"
+                  return 0
+                fi
+              else
+                failures=$((failures + 1))
+              fi
+              sleep 30
+            done
+            return 0
+          }
+          # A failed lookup counts as "not found yet" and is retried.
           publish_run=""
           for attempt in {1..120}; do
             if [[ "$IS_NEW_RELEASE" == "true" ]]; then
@@ -669,7 +720,7 @@ jobs:
                   --json databaseId,headSha \
                   --jq ".[] | select(.headSha == \"$RECORD_SHA\") | .databaseId" \
                   | head -n 1
-              )"
+              )" || publish_run=""
             else
               publish_run="$(
                 gh run list \
@@ -680,7 +731,7 @@ jobs:
                   --json databaseId,displayTitle \
                   --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
                   | head -n 1
-              )"
+              )" || publish_run=""
             fi
             [[ -n "$publish_run" ]] && break
             sleep 5
@@ -689,10 +740,23 @@ jobs:
             echo "::error::Package publication did not start for $RECORD_SHA."
             exit 1
           fi
-          gh run watch "$publish_run" --repo thallylabs/thally --exit-status
-          publish_attempt="$(
-            gh api "repos/thallylabs/thally/actions/runs/$publish_run" --jq .run_attempt
-          )"
+          conclusion="$(run_conclusion thallylabs/thally "$publish_run")"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::Package publication run $publish_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it, then run Full release again."
+            exit 1
+          fi
+          publish_attempt=""
+          for attempt in 1 2 3 4 5 6; do
+            publish_attempt="$(
+              gh api "repos/thallylabs/thally/actions/runs/$publish_run" --jq .run_attempt
+            )" || publish_attempt=""
+            [[ -n "$publish_attempt" ]] && break
+            sleep 10
+          done
+          if [[ -z "$publish_attempt" ]]; then
+            echo "::error::GitHub did not return the attempt number of publication run $publish_run. Run Full release again."
+            exit 1
+          fi
           handoff_id="handoff-${publish_run}-${publish_attempt}"
           echo "expected_cloud_title=scaffold-production · automated · ${handoff_id} · ${RELEASE_ID} · ${RECORD_SHA}" >> "$GITHUB_OUTPUT"
 
@@ -720,6 +784,30 @@ jobs:
           RELEASE_ID: ${{ needs.release.outputs.release_id }}
         run: |
           set -euo pipefail
+          # Prints the run's conclusion once it has completed, or nothing if
+          # GitHub could not be read for several consecutive attempts.
+          # `gh run watch` only waits: it also exits non-zero on a transient
+          # API error, so the conclusion is read separately and decides alone.
+          run_conclusion() {
+            local repo="$1" run="$2" failures=0 state
+            while [[ "$failures" -lt 10 ]]; do
+              gh run watch "$run" --repo "$repo" >&2 || true
+              if state="$(
+                gh run view "$run" --repo "$repo" --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+              )"; then
+                failures=0
+                if [[ "$state" == completed/* ]]; then
+                  echo "${state#completed/}"
+                  return 0
+                fi
+              else
+                failures=$((failures + 1))
+              fi
+              sleep 30
+            done
+            return 0
+          }
+          # A failed lookup counts as "not found yet" and is retried.
           cloud_run=""
           for attempt in {1..120}; do
             cloud_run="$(
@@ -730,7 +818,7 @@ jobs:
                   --arg title "$EXPECTED_TITLE" \
                   '.workflow_runs[] | select(.display_title == $title and .actor.login == $actor) | .id' \
                 | head -n 1
-            )"
+            )" || cloud_run=""
             [[ -n "$cloud_run" ]] && break
             sleep 5
           done
@@ -738,7 +826,11 @@ jobs:
             echo "::error::Cloud scaffold promotion did not start for $RELEASE_ID."
             exit 1
           fi
-          gh run watch "$cloud_run" --repo thallylabs/thally-cloud --exit-status
+          conclusion="$(run_conclusion thallylabs/thally-cloud "$cloud_run")"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::Cloud scaffold promotion run $cloud_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it in thally-cloud, then run Full release again."
+            exit 1
+          fi
 
       - name: Write release summary
         shell: bash
