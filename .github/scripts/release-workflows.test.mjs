@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
 const workflow = parse(
@@ -20,15 +21,36 @@ const ciWorkflow = parse(
   readFileSync(".github/workflows/ci.yml", "utf8"),
 );
 
+/** Every shell script of one job, joined in step order. */
+const jobScript = (job) => job.steps.map((step) => step.run ?? "").join("\n");
+/** Find a step by name and fail with that name when it is missing. */
+function namedStep(job, name) {
+  const step = job.steps.find((candidate) => candidate.name === name);
+  assert.ok(step, `missing step: ${name}`);
+  return step;
+}
+/** Offset of a required fragment in a script; fails when it is absent. */
+function offsetOf(script, pattern) {
+  const match = pattern.exec(script);
+  assert.ok(match, `script is missing ${pattern}`);
+  return match.index;
+}
+
 test("rejects missing package bumps in pull-request CI before a main merge", () => {
-  const checkout = ciWorkflow.jobs.verify.steps.find((step) => step.name === "Checkout");
-  const disposition = ciWorkflow.jobs.verify.steps.find(
+  // The disposition lives in the always-run contracts job, and the required
+  // gate cannot pass unless that job succeeded.
+  const contracts = ciWorkflow.jobs.contracts;
+  const checkout = contracts.steps.find((step) => step.name === "Checkout");
+  const disposition = contracts.steps.find(
     (step) => step.name === "Require a release disposition for changed packages",
   );
   assert.equal(checkout.with["fetch-depth"], 0);
   assert.match(disposition.run, /release-package-plan\.mjs/);
   assert.match(disposition.env.BASE_SHA, /pull_request\.base\.sha/);
   assert.equal(disposition.if, "github.event_name != 'workflow_dispatch'");
+  assert.equal(contracts.if, undefined);
+  assert.equal(ciWorkflow.jobs.verify.name, "Test · Build");
+  assert.ok(ciWorkflow.jobs.verify.needs.includes("contracts"));
 });
 
 test("starts only from a reviewed stable-record merge or an operator recovery", () => {
@@ -47,7 +69,7 @@ test("starts only from a reviewed stable-record merge or an operator recovery", 
   assert.equal(workflow.jobs.plan.outputs.release_sha, "${{ steps.source.outputs.sha }}");
   assert.equal(workflow.jobs.plan.outputs.has_packages, "${{ steps.package-plan.outputs.has_packages }}");
   assert.equal(workflow.jobs.plan.outputs.plan_sha256, "${{ steps.package-plan.outputs.plan_sha256 }}");
-  assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "attest"]);
+  assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "test", "attest"]);
   assert.match(workflow.jobs.plan.steps[0].run, /refs\/heads\/main/);
   assert.match(
     workflow.jobs.plan.steps.find(
@@ -68,11 +90,14 @@ test("starts only from a reviewed stable-record merge or an operator recovery", 
   assert.match(packagePlan.run, /sha256sum/);
 });
 
-test("tests and packs before the minimal OIDC publish job", () => {
+test("packs once, without privilege, before the minimal OIDC publish job", () => {
   const verify = workflow.jobs.verify;
   const attest = workflow.jobs.attest;
   const publish = workflow.jobs.publish;
+  assert.equal(verify.name, "Pack once");
+  assert.equal(verify.needs, "plan");
   assert.equal(verify.permissions, undefined);
+  assert.equal(verify.environment, undefined);
   assert.deepEqual(attest.permissions, {
     attestations: "write",
     contents: "read",
@@ -86,6 +111,17 @@ test("tests and packs before the minimal OIDC publish job", () => {
     verify.steps.map((step) => step.name).slice(-3),
     ["Pack immutable release artifacts", "Clean-install the selected tarballs", "Upload immutable release artifacts"],
   );
+  // The suite moved to the parallel `test` job, taking the `pretest` build
+  // with it. The packed `dist` output must still be compiled here, from the
+  // release source, after a clean install and before packing.
+  const names = verify.steps.map((step) => step.name);
+  const build = verify.steps.find((step) => step.name === "Build workspace packages");
+  assert.equal(build.run, "npm run packages:build");
+  assert.equal(build["working-directory"], "release-source");
+  assert.equal(build.if, undefined);
+  assert.ok(names.indexOf("Install dependencies") < names.indexOf("Build workspace packages"));
+  assert.ok(names.indexOf("Build workspace packages") < names.indexOf("Pack immutable release artifacts"));
+  assert.doesNotMatch(verify.steps.map((step) => step.run ?? "").join("\n"), /npm (?:run )?test\b|vitest|test-shards/);
   const uploadStep = verify.steps.find(
     (step) => step.name === "Upload immutable release artifacts",
   );
@@ -94,6 +130,114 @@ test("tests and packs before the minimal OIDC publish job", () => {
   assert.match(publishScript, /publish-release-artifacts\.mjs/);
   assert.doesNotMatch(publishScript, /npm ci|npm test|npm pack|--workspace/);
   assert.match(publishScript, /EXPECTED_PLAN_SHA256/);
+});
+
+test("runs the release suite beside packing, on the same source and toolchain", () => {
+  const job = workflow.jobs.test;
+  const pack = workflow.jobs.verify;
+  const named = (candidate, name) => candidate.steps.find((step) => step.name === name);
+
+  // It starts with the pack job rather than ahead of it.
+  assert.equal(job.needs, pack.needs);
+  assert.equal(job.if, pack.if);
+  assert.equal(job["runs-on"], pack["runs-on"]);
+  assert.ok(Number.isInteger(job["timeout-minutes"]));
+
+  // Same checkouts, selected commit, Node version, and clean install as the
+  // job whose bytes are published.
+  const shared = ["Checkout trusted release policy", "Checkout immutable release source",
+    "Select the authorized immutable release source", "Set up Node", "Install dependencies"];
+  for (const name of shared) assert.deepEqual(named(job, name), named(pack, name), name);
+  assert.deepEqual(job.steps.map((step) => step.name), [...shared, "Build workspace packages", "Run test shard"]);
+  assert.equal(named(job, "Select the authorized immutable release source").env.RELEASE_SHA,
+    "${{ needs.plan.outputs.release_sha }}");
+  assert.equal(named(job, "Install dependencies").run, "npm ci");
+  assert.equal(named(job, "Install dependencies")["working-directory"], "release-source");
+  assert.deepEqual(named(job, "Build workspace packages"), named(pack, "Build workspace packages"));
+
+  // Every shard of one matrix runs, so together they cover the whole suite.
+  // The trusted runner executes inside the release source it tests.
+  assert.equal(job.strategy["fail-fast"], false);
+  assert.deepEqual(job.strategy.matrix, { shard: [1, 2, 3, 4] });
+  assert.equal(named(job, "Run test shard").run.trim(), [
+    "cd release-source",
+    "node ../.github/scripts/test-shards.mjs run ${{ matrix.shard }}/${{ strategy.job-total }}",
+  ].join("\n"));
+  for (const step of job.steps) {
+    assert.equal(step.if, undefined, step.name);
+    assert.equal(step["continue-on-error"], undefined, step.name);
+  }
+  assert.equal(job["continue-on-error"], undefined);
+});
+
+test("the release suite holds no privilege and contributes no release bytes", () => {
+  const job = workflow.jobs.test;
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.equal(job.permissions, undefined);
+  assert.equal(job.environment, undefined);
+  assert.equal(job.outputs, undefined);
+  assert.doesNotMatch(JSON.stringify(job), /secrets\.|vars\.|id-token|GH_TOKEN|NODE_AUTH_TOKEN/);
+  assert.deepEqual(
+    job.steps.filter((step) => step.uses).map((step) => step.uses.split("@")[0]),
+    ["actions/checkout", "actions/checkout", "actions/setup-node"],
+  );
+  for (const step of job.steps.filter((candidate) => /actions\/checkout@/.test(candidate.uses))) {
+    assert.equal(step.with["persist-credentials"], false);
+  }
+});
+
+test("no release job restores a dependency or build cache", () => {
+  for (const [id, job] of Object.entries(workflow.jobs)) {
+    for (const step of job.steps) {
+      assert.doesNotMatch(step.uses ?? "", /actions\/cache|\.github\/actions\/install/, `${id}: ${step.name}`);
+      if (/actions\/setup-node@/.test(step.uses ?? "")) {
+        assert.equal(step.with["package-manager-cache"], false, `${id}: ${step.name}`);
+        assert.equal(step.with.cache, undefined, `${id}: ${step.name}`);
+        assert.equal(step.with["node-version"], 24, `${id}: ${step.name}`);
+      }
+    }
+  }
+});
+
+test("attestation and publication both require the pack job and every test shard", () => {
+  const { attest, publish } = workflow.jobs;
+  assert.deepEqual(attest.needs, ["plan", "verify", "test"]);
+  assert.deepEqual(publish.needs, ["plan", "verify", "test", "attest"]);
+  // A status function such as always() would let a job run past a failed or
+  // skipped dependency; the plain condition keeps the implicit success().
+  for (const job of [attest, publish]) {
+    assert.equal(job.if, "needs.plan.outputs.has_packages == 'true'");
+  }
+  assert.doesNotMatch(workflow.jobs.handoff.if, /always\(\)|failure\(\)|cancelled\(\)/);
+  assert.ok(workflow.jobs.handoff.needs.includes("publish"));
+});
+
+test("no job after packing can act unless every test shard passed", () => {
+  // Before the suite moved beside packing, everything downstream of `verify`
+  // inherited its test gate. Now each job that attests, publishes, hands off,
+  // or consumes the packed artifact must reach `test` through its own needs,
+  // and none may use a status function that runs past a failed dependency.
+  const needsOf = (id) => [workflow.jobs[id].needs ?? []].flat();
+  const ancestors = (id, seen = new Set()) => {
+    for (const parent of needsOf(id)) if (!seen.has(parent)) { seen.add(parent); ancestors(parent, seen); }
+    return seen;
+  };
+  const gated = Object.keys(workflow.jobs).filter((id) => !["plan", "test", "verify"].includes(id));
+  assert.deepEqual(gated.sort(), ["attest", "handoff", "publish"]);
+  for (const id of gated) {
+    assert.ok(ancestors(id).has("test"), id);
+    assert.doesNotMatch(workflow.jobs[id].if ?? "", /always\(\)|failure\(\)|cancelled\(\)|success\(\)/, id);
+  }
+  // The test job itself must cover the suite: every shard of one matrix.
+  assert.equal(workflow.jobs.test.strategy["fail-fast"], false);
+});
+
+test("the shard runner reads its timings from beside the trusted script", async () => {
+  // The release job runs the policy checkout's runner with the release source
+  // as the working directory, so a path relative to that directory would read
+  // (or miss) the source's copy instead.
+  const { TIMINGS_PATH } = await import("./test-shards.mjs");
+  assert.equal(TIMINGS_PATH, fileURLToPath(new URL("../ci/test-timings.json", import.meta.url)));
 });
 
 test("mints a narrowed Cloud workflow token only after publish succeeds", () => {
@@ -130,6 +274,11 @@ test("recovers immutable sources with the current trusted release policy", () =>
       (step) => step.name === "Select the authorized immutable release source",
     ),
   );
+  const testSteps = workflow.jobs.test.steps;
+  for (const name of ["Checkout trusted release policy", "Checkout immutable release source",
+    "Select the authorized immutable release source"]) {
+    assert.ok(testSteps.some((step) => step.name === name), name);
+  }
   assert.ok(handoffSteps.some((step) => step.name === "Checkout trusted handoff policy"));
   const prepare = handoffSteps.find(
     (step) => step.name === "Validate and prepare the immutable locator",
@@ -178,9 +327,10 @@ test("keeps the one-click coordinator on main with a short-lived App token", () 
 });
 
 test("coordinates the exact starter, package, and Cloud release workflows", () => {
-  const script = fullReleaseWorkflow.jobs.release.steps
-    .map((step) => step.run ?? "")
-    .join("\n");
+  const script = [
+    jobScript(fullReleaseWorkflow.jobs.release),
+    jobScript(fullReleaseWorkflow.jobs.publication),
+  ].join("\n");
   assert.match(script, /workflow run sync-runtime\.yml/);
   assert.match(script, /-f runtime_ref="\$RUNTIME_SHA"/);
   assert.match(script, /workflow run promote-release\.yml/);
@@ -197,7 +347,7 @@ test("recovers the current stable record before selecting another runtime", () =
     (step) => step.name === "Detect an already-stable release before selecting new work",
   );
   const syncIndex = steps.findIndex(
-    (step) => step.name === "Synchronize and merge the standalone starter",
+    (step) => step.name === "Start the standalone starter synchronization",
   );
   const detect = steps[detectIndex];
   const sync = steps[syncIndex];
@@ -246,9 +396,10 @@ test("computes and correlates releases from frozen source commits", () => {
     "${{ steps.sources.outputs.runtime_sha }}",
   );
 
-  const controllerScript = fullReleaseWorkflow.jobs.release.steps
-    .map((step) => step.run ?? "")
-    .join("\n");
+  const controllerScript = [
+    jobScript(fullReleaseWorkflow.jobs.release),
+    jobScript(fullReleaseWorkflow.jobs.publication),
+  ].join("\n");
   assert.match(controllerScript, /commits\?path=.*stable-scaffold-release\.json/);
   assert.match(controllerScript, /candidate_record/);
   assert.match(controllerScript, /-f release_commit_sha="\$RECORD_SHA"/);
@@ -261,6 +412,289 @@ test("computes and correlates releases from frozen source commits", () => {
   // An expired legacy run log must not abort the resume check.
   assert.match(controllerScript, /if ! legacy_log="\$\(/);
   assert.match(controllerScript, /--log 2>\/dev\/null\s*\)"; then\s+echo "::notice::[^\n]*\n\s+continue/);
+});
+
+test("overlaps the starter synchronization with the release-record promotion", () => {
+  const job = fullReleaseWorkflow.jobs.release;
+  const order = [
+    "Detect an already-stable release before selecting new work",
+    "Start the standalone starter synchronization",
+    "Freeze and verify the starter selection",
+    "Check whether this pair is already stable",
+    "Start the immutable release-record promotion",
+    "Require the starter synchronization to succeed",
+    "Wait for the merged release record",
+    "Resolve the published release record",
+  ].map((name) => {
+    namedStep(job, name);
+    return job.steps.findIndex((step) => step.name === name);
+  });
+  assert.deepEqual(order, [...order].sort((left, right) => left - right));
+
+  // The first wait ends when the starter pull request exists, not when the
+  // starter run does; the whole run is watched only after promotion started.
+  const sync = namedStep(job, "Start the standalone starter synchronization");
+  assert.doesNotMatch(sync.run, /gh run watch/);
+  assert.match(sync.run, /select\(\.name == "Open synchronization pull request" and \.status == "completed"\)/);
+  assert.match(sync.run, /"\$pr_step" != "success"/);
+  assert.match(sync.run, /ended .* before opening its pull request/);
+  assert.match(sync.run, /run_id=\$run_id/);
+
+  const promotion = namedStep(job, "Start the immutable release-record promotion");
+  assert.equal(promotion.if, "steps.stable.outputs.needed == 'true'");
+  assert.doesNotMatch(promotion.run, /gh run watch/);
+  assert.match(promotion.run, /run_id=\$run_id/);
+
+  const wait = namedStep(job, "Wait for the merged release record");
+  assert.equal(wait.if, "steps.stable.outputs.needed == 'true'");
+  assert.match(wait.run, /gh run watch "\$PROMOTION_RUN_ID" --repo thallylabs\/thally --exit-status/);
+  assert.equal(wait.env.PROMOTION_RUN_ID, "${{ steps.promotion.outputs.run_id }}");
+});
+
+test("selects the starter commit its own synchronization run produced", () => {
+  const job = fullReleaseWorkflow.jobs.release;
+  const selection = namedStep(job, "Freeze and verify the starter selection");
+  assert.equal(selection.if, "steps.release.outputs.current_stable != 'true'");
+  assert.equal(selection.env.SYNC_RUN_ID, "${{ steps.sync.outputs.run_id }}");
+  // The run's merge step decides between starter main and the pull request,
+  // so a pull request left open by an earlier attempt is never selected when
+  // this run changed nothing.
+  assert.match(selection.run, /select\(\.name == "Merge after CI succeeds"\)/);
+  const unchanged = offsetOf(selection.run, /\n\s+skipped\)\n\s+starter_sha="\$\(gh api repos\/thallylabs\/starter\/commits\/main --jq \.sha\)"/);
+  const changed = offsetOf(selection.run, /\n\s+in_progress\|success\)/);
+  const unknown = offsetOf(selection.run, /\n\s+\*\)\n\s+echo "::error::[^\n]*\n\s+exit 1/);
+  assert.ok(unchanged < changed && changed < unknown);
+  assert.match(selection.run, /sync_branch="automation\/runtime-\$\{RUNTIME_SHA:0:12\}"/);
+  assert.match(selection.run, /git\/ref\/heads\/\$sync_branch/);
+  assert.match(selection.run, /pulls\?state=open&base=main&head=thallylabs:\$sync_branch/);
+  assert.match(selection.run, /"\$branch_sha" == "\$pr_head_sha"/);
+  // Whichever commit is selected must pin the runtime being released.
+  const pin = offsetOf(selection.run, /contents\/starter-release\.json\?ref=\$starter_sha/);
+  const mismatch = offsetOf(selection.run, /"\$pinned_runtime" != "\$RUNTIME_SHA"/);
+  const output = offsetOf(selection.run, /starter_sha=\$starter_sha" >> "\$GITHUB_OUTPUT"/);
+  assert.ok(unknown < pin && pin < mismatch && mismatch < output);
+});
+
+test("the blocking stage fails unless the starter synchronization succeeds", () => {
+  const job = fullReleaseWorkflow.jobs.release;
+  const required = namedStep(job, "Require the starter synchronization to succeed");
+  // Not conditional on a promotion: an already-recorded pair still requires it.
+  assert.equal(required.if, "steps.release.outputs.current_stable != 'true'");
+  assert.equal(required["continue-on-error"], undefined);
+  assert.equal(required.env.SYNC_RUN_ID, "${{ steps.sync.outputs.run_id }}");
+  assert.equal(required.env.STARTER_SHA, "${{ steps.starter.outputs.starter_sha }}");
+
+  // The run's result is read from its recorded conclusion, with retries; a
+  // failing `gh run watch` alone (for example a network error) decides nothing.
+  assert.match(required.run, /gh run watch "\$SYNC_RUN_ID" --repo thallylabs\/starter >&2 \|\| true/);
+  assert.doesNotMatch(required.run, /--exit-status/);
+  assert.match(required.run, /--json status,conclusion \\\n\s+--jq 'select\(\.status == "completed"\) \| \.conclusion'/);
+  // The selected commit itself, not just some synchronization, reached main,
+  // and "not on main" needs two agreeing reads.
+  assert.match(required.run, /compare\/\$\{STARTER_SHA\}\.\.\.main" --jq \.status/);
+  assert.match(required.run, /ahead\|identical\)\n\s+echo landed/);
+  assert.match(required.run, /behind\|diverged\)\n\s+missing=\$\(\(missing \+ 1\)\)\n\s+if \[\[ "\$missing" -ge 2 \]\]; then\n\s+echo missing/);
+  assert.equal(required.run.match(/delay=\$\(\(delay \* 2\)\)/g).length, 2);
+
+  // Success is exactly: the run succeeded and the commit landed. Everything
+  // else exits non-zero.
+  const success = offsetOf(required.run, /if \[\[ "\$conclusion" == "success" && "\$state" == "landed" \]\]; then\n\s+exit 0\nfi/);
+  assert.ok(success < offsetOf(required.run, /case "\$\{conclusion:-unobserved\}\/\$state" in/));
+  assert.match(required.run, /esac\nexit 1\n?$/);
+  assert.equal(required.run.match(/exit 0/g).length, 1);
+
+  // The promotion is cancelled only when the commit will definitely not
+  // land, or the run failed and the commit is not known to have landed.
+  const branches = Object.fromEntries(
+    [...required.run.matchAll(/\n {2}(\S+)\)\n([\s\S]*?)\n {4};;/g)].map((match) => [match[1], match[2]]),
+  );
+  assert.deepEqual(Object.keys(branches), [
+    "success/missing", "success/unknown", "unobserved/landed", "unobserved/*", "*/landed", "*/missing", "*",
+  ]);
+  const cancels = Object.entries(branches)
+    .filter(([, body]) => /\bstop_promotion\b/.test(body))
+    .map(([pattern]) => pattern);
+  assert.deepEqual(cancels, ["success/missing", "*/missing", "*"]);
+  // Only the case that really is a non-fast-forward merge says so.
+  const blamesSquash = Object.entries(branches)
+    .filter(([, body]) => /squash/.test(body))
+    .map(([pattern]) => pattern);
+  assert.deepEqual(blamesSquash, ["success/missing"]);
+  assert.ok(Object.values(branches).every((body) => /::error::/.test(body)));
+  assert.match(required.run, /gh run cancel "\$PROMOTION_RUN_ID" --repo thallylabs\/thally/);
+});
+
+test("splits the controller into a blocking stage and a publication tail", () => {
+  assert.deepEqual(Object.keys(fullReleaseWorkflow.jobs), ["release", "publication"]);
+  const blocking = fullReleaseWorkflow.jobs.release;
+  const tail = fullReleaseWorkflow.jobs.publication;
+  const tailCondition =
+    "needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'";
+
+  // The blocking stage ends at the merged record and never waits on the tail.
+  assert.deepEqual(blocking.steps.map((step) => step.name).slice(-4), [
+    "Resolve the published release record",
+    "Re-drive an interrupted stable release",
+    "Resolve the active release",
+    "Write blocking-stage summary",
+  ]);
+  assert.doesNotMatch(jobScript(blocking), /--workflow publish-packages\.yml|display_title == \$title/);
+  assert.match(namedStep(blocking, "Write blocking-stage summary").run, /continuing in the \*\*Publish · Promote to Cloud\*\* job/);
+  assert.equal(tail.name, "Publish · Promote to Cloud");
+
+  // A tail failure fails the run: it depends only on the blocking stage, is
+  // never skipped or tolerated, and no step ignores an error.
+  assert.equal(tail.needs, "release");
+  assert.equal(tail.if, undefined);
+  for (const job of [blocking, tail]) {
+    assert.equal(job["continue-on-error"], undefined);
+    assert.ok(job.steps.every((step) => step["continue-on-error"] === undefined));
+    assert.equal(job.environment, "release-control");
+    assert.match(namedStep(job, "Reject non-main dispatches").run, /refs\/heads\/main/);
+  }
+  assert.deepEqual(tail.steps.map((step) => [step.name, step.if]), [
+    ["Reject non-main dispatches", undefined],
+    ["Mint the publication observer token", tailCondition],
+    ["Wait for npm publication", tailCondition],
+    ["Mint the Cloud observer token", tailCondition],
+    ["Wait for exact Cloud production handoff", tailCondition],
+    ["Write release summary", undefined],
+  ]);
+
+  // Only identifiers cross the job boundary. The tail mints its own
+  // read-only tokens and cannot see a step output of the blocking stage.
+  assert.deepEqual(blocking.outputs, {
+    needed: "${{ steps.stable.outputs.needed }}",
+    cloud_complete: "${{ steps.stable.outputs.cloud_complete }}",
+    record_sha: "${{ steps.active-release.outputs.record_sha }}",
+    release_id: "${{ steps.active-release.outputs.release_id }}",
+    new_release_id: "${{ steps.published.outputs.release_id }}",
+    existing_release_id: "${{ steps.stable.outputs.release_id }}",
+    request_id: "${{ steps.release.outputs.request_id }}",
+    runtime_sha: "${{ steps.release.outputs.runtime_sha }}",
+    starter_sha: "${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}",
+  });
+  assert.doesNotMatch(JSON.stringify(blocking.outputs), /token/i);
+  const tailText = JSON.stringify(tail);
+  assert.doesNotMatch(tailText, /steps\.(?:coordinator|release|stable|starter|published|active-release|sync|promotion)\./);
+  for (const [name, repository] of [
+    ["Mint the publication observer token", "thally"],
+    ["Mint the Cloud observer token", "thally-cloud"],
+  ]) {
+    const token = namedStep(tail, name);
+    assert.match(token.uses, /actions\/create-github-app-token@[0-9a-f]{40}/);
+    assert.equal(token.with.repositories, repository);
+    assert.equal(token.with["permission-actions"], "read");
+    assert.equal(token.with["permission-contents"], "read");
+    assert.equal(token.with["private-key"], "${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}");
+  }
+  const publication = namedStep(tail, "Wait for npm publication");
+  assert.deepEqual(publication.env, {
+    GH_TOKEN: "${{ steps.publication-observer.outputs.token }}",
+    IS_NEW_RELEASE: "${{ needs.release.outputs.needed }}",
+    RECORD_SHA: "${{ needs.release.outputs.record_sha }}",
+    RELEASE_ID: "${{ needs.release.outputs.release_id }}",
+    REQUEST_ID: "${{ needs.release.outputs.request_id }}",
+  });
+  assert.match(publication.run, /gh run watch "\$publish_run" --repo thallylabs\/thally --exit-status/);
+  const cloud = namedStep(tail, "Wait for exact Cloud production handoff");
+  assert.equal(cloud.env.GH_TOKEN, "${{ steps.cloud-observer.outputs.token }}");
+  assert.equal(cloud.env.EXPECTED_TITLE, "${{ steps.publication.outputs.expected_cloud_title }}");
+  assert.match(cloud.run, /gh run watch "\$cloud_run" --repo thallylabs\/thally-cloud --exit-status/);
+});
+
+test("accepts a pending starter commit only for the controller's merging dispatch", () => {
+  const sources = namedStep(promotionWorkflow.jobs.promote, "Prove the selected sources are on main");
+  assert.equal(
+    sources.env.ALLOW_PENDING_STARTER,
+    "${{ inputs.auto_merge && github.actor == vars.RELEASE_COORDINATOR_ACTOR }}",
+  );
+  // The runtime must always be on main; only the starter rule is relaxed.
+  assert.match(sources.run, /git -C runtime-source merge-base --is-ancestor "\$selected_runtime_sha" origin\/main\n/);
+  const offMain = offsetOf(sources.run, /if ! git -C starter-source merge-base --is-ancestor "\$selected_sha" origin\/main; then/);
+  const strict = offsetOf(
+    sources.run,
+    /if \[\[ "\$ALLOW_PENDING_STARTER" != "true" \|\| -z "\$STARTER_SHA_INPUT" \]\]; then\n[^\n]*is not on starter main[^\n]*\n\s+exit 1/,
+  );
+  const pullRequest = offsetOf(sources.run, /pulls\?state=open&base=main&head=thallylabs:\$\{sync_branch\}/);
+  const missing = offsetOf(sources.run, /if \[\[ -z "\$starter_pending_pr" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
+  const parent = offsetOf(
+    sources.run,
+    /"\$pending_parents" != "\$\(git -C starter-source rev-parse origin\/main\)" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/,
+  );
+  assert.ok(offMain < strict && strict < pullRequest && pullRequest < missing && missing < parent);
+  assert.match(sources.run, /sync_branch="automation\/runtime-\$\{selected_runtime_sha:0:12\}"/);
+  assert.match(
+    sources.run,
+    /select\(\.head\.repo\.full_name == "thallylabs\/starter" and \.head\.ref == \$branch and \.head\.sha == \$sha\)/,
+  );
+  assert.match(sources.run, /starter_pending_pr=\$starter_pending_pr" >> "\$GITHUB_OUTPUT"/);
+});
+
+test("never merges a release record before its starter commit is on starter main", () => {
+  const steps = promotionWorkflow.jobs.promote.steps;
+  const merge = namedStep(promotionWorkflow.jobs.promote, "Merge after CI succeeds");
+  assert.equal(merge.env.STARTER_SHA, "${{ steps.sources.outputs.starter_sha }}");
+  assert.match(
+    merge.run,
+    /starter_is_on_main\(\) \{\n\s+git -C starter-source fetch --no-tags --quiet origin main &&\n\s+git -C starter-source merge-base --is-ancestor "\$STARTER_SHA" FETCH_HEAD\n\}/,
+  );
+  const ci = offsetOf(merge.run, /gh run watch "\$run_id" --exit-status/);
+  const wait = offsetOf(merge.run, /for attempt in \{1\.\.120\}; do\n\s+if starter_is_on_main; then/);
+  const timeout = offsetOf(merge.run, /if \[\[ "\$starter_landed" != "true" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
+  const base = offsetOf(merge.run, /"\$current_base" != "\$EXPECTED_BASE_SHA" \|\| "\$final_base" != "\$EXPECTED_BASE_SHA"/);
+  const gate = offsetOf(merge.run, /if ! starter_is_on_main; then\n[^\n]*::error::[^\n]*\n\s+exit 1\nfi\ngh pr merge "\$PR_NUMBER"/);
+  assert.ok(ci < wait && wait < timeout && timeout < base && base < gate);
+  assert.equal(merge.run.match(/gh pr merge/g).length, 1);
+
+  // A starter merged by squash, or a superseded pull request, stops the
+  // promotion with an actionable error instead of waiting for the timeout.
+  assert.match(merge.run, /"\$starter_pr_head" != "\$STARTER_SHA" \]\]; then\n[^\n]*superseded[^\n]*\n\s+exit 1/);
+  assert.match(merge.run, /"\$starter_pr_state" == "closed"[\s\S]*?fast-forward[^\n]*squash[^\n]*\n\s+exit 1/);
+
+});
+
+test("a failed controller promotion closes its record so a re-dispatch starts fresh", () => {
+  const promote = promotionWorkflow.jobs.promote;
+  const steps = promote.steps;
+  const merge = namedStep(promote, "Merge after CI succeeds");
+  const cleanup = namedStep(promote, "Close an unmerged release record after a failed promotion");
+  assert.equal(steps.indexOf(cleanup), steps.indexOf(merge) + 1);
+  assert.equal(steps.indexOf(cleanup), steps.length - 1);
+  // Keyed on the computed release, not the pull request number, so it also
+  // runs when the failure came before that number was recorded.
+  assert.equal(
+    cleanup.if,
+    "(failure() || cancelled()) && inputs.auto_merge && github.actor == vars.RELEASE_COORDINATOR_ACTOR && steps.record.outputs.release_id != ''",
+  );
+  assert.equal(cleanup.env.RELEASE_ID, "${{ steps.record.outputs.release_id }}");
+  assert.match(cleanup.run, /branch="release\/promote-\$\{RELEASE_ID\}"/);
+  assert.match(cleanup.run, /"\$branch" =~ \^release\/promote-\[0-9\]\{4\}/);
+  // Fail closed: nothing about the starter has to be proven before closing.
+  assert.doesNotMatch(cleanup.run, /starter-source|merge-base|git fetch|exit 0/);
+  assert.match(cleanup.run, /--state open \\\n\s+--json number,isCrossRepository/);
+  assert.match(cleanup.run, /gh pr close "\$number"/);
+  assert.match(cleanup.run, /\[\[ "\$failed" == "false" \]\]\n?$/);
+  assert.doesNotMatch(cleanup.run, /gh pr merge/);
+  // A merged record's branch is never deleted by cleanup.
+  assert.ok(
+    offsetOf(cleanup.run, /"\$merged_count" == "0" \|\| "\$merged_count" == "unknown" \]\] &&/) <
+      offsetOf(cleanup.run, /--method DELETE "repos\/\$GITHUB_REPOSITORY\/git\/refs\/heads\/\$branch"/),
+  );
+  // A failed listing or close still removes the branch, which closes the
+  // pull request on GitHub, and still fails the step.
+  assert.match(cleanup.run, /if ! open_numbers="\$\(/);
+  assert.match(cleanup.run, /\)" \|\| merged_count="unknown"/);
+
+  // The next dispatch must not adopt the pull request this step closed.
+  const open = namedStep(promote, "Open the release-record PR");
+  assert.doesNotMatch(open.run, /gh pr view/);
+  assert.match(open.run, /--state open \\\n\s+--json number,url,isCrossRepository/);
+  assert.match(open.run, /map\(select\(\.isCrossRepository == false\)\) \| \.\[0\] \/\/ empty/);
+  const lookup = offsetOf(open.run, /pr_json="\$\(open_pull_request\)"\nif \[\[ -z "\$pr_json" \]\]; then\n\s+gh pr create/);
+  const guard = offsetOf(open.run, /if \[\[ ! "\$pr_number" =~ \^\[0-9\]\+\$ \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
+  const output = offsetOf(open.run, /number=\$pr_number" >> "\$GITHUB_OUTPUT"/);
+  assert.ok(lookup < guard && guard < output);
 });
 
 test("does not bump runtime packages after the starter source is frozen", () => {
@@ -294,5 +728,6 @@ test("rechecks complete historical upgrades before artifact attestation and npm 
   assert.equal(steps[gate]["working-directory"], "release-source");
   assert.match(steps[gate].run, /BASE_SHA/);
   assert.match(steps[gate].run, /download/);
-  assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "attest"]);
+  assert.deepEqual(workflow.jobs.attest.needs, ["plan", "verify", "test"]);
+  assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "test", "attest"]);
 });

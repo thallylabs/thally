@@ -145,8 +145,73 @@ jobs:
             echo "should_handoff=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # The suite runs beside packing instead of ahead of it, so it adds no time to
+  # the release. It still gates the release: `attest` and `publish` both need
+  # every shard, so no bytes are attested or published unless the tests passed.
+  #
+  # Invariants:
+  # - Tests the same immutable source, on the same Node version and with the
+  #   same clean `npm ci`, as the job that packs it.
+  # - Holds no elevated permission, environment, or secret, restores no cache,
+  #   and uploads nothing. Release bytes come only from the pack job.
+  # - The shard runner and its timings come from the trusted policy checkout,
+  #   so a recovered source that predates them is still tested.
+  test:
+    name: Test (shard ${{ matrix.shard }})
+    needs: plan
+    if: needs.plan.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Let every shard report, so one release attempt shows all failures.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout trusted release policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout immutable release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the authorized immutable release source
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: git -C release-source checkout --detach "$RELEASE_SHA"
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        working-directory: release-source
+        run: npm ci
+
+      # Many suites spawn the built CLIs or read package output, and the shard
+      # runner starts Vitest directly, which skips the `pretest` build.
+      - name: Build workspace packages
+        working-directory: release-source
+        run: npm run packages:build
+
+      # Every shard derives the same assignment, and together they run each
+      # test file exactly once; see .github/scripts/test-shards.mjs.
+      - name: Run test shard
+        run: |
+          cd release-source
+          node ../.github/scripts/test-shards.mjs run ${{ matrix.shard }}/${{ strategy.job-total }}
+
   verify:
-    name: Test · Pack once
+    name: Pack once
     needs: plan
     if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
@@ -191,9 +256,11 @@ jobs:
         working-directory: release-source
         run: npm ci
 
-      - name: Test
+      # The packed `dist` directories come from this build. The suite itself
+      # runs in the parallel `test` job and writes nothing that is packed.
+      - name: Build workspace packages
         working-directory: release-source
-        run: npm test
+        run: npm run packages:build
 
       # Recheck in the unprivileged verification job, so a record edited in a
       # reviewed PR or recovered manually cannot bypass the promotion gate.
@@ -232,7 +299,7 @@ jobs:
 
   attest:
     name: Attest package bytes
-    needs: [plan, verify]
+    needs: [plan, verify, test]
     if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -253,7 +320,7 @@ jobs:
 
   publish:
     name: Publish exact package bytes
-    needs: [plan, verify, attest]
+    needs: [plan, verify, test, attest]
     if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     environment: npm-production

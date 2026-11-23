@@ -1,0 +1,73 @@
+name: Install dependencies
+description: >-
+  Set up Node and provide installed dependencies for a Linux CI job, restoring
+  them from a lockfile-addressed cache when one exists.
+
+# Invariants:
+# - The key binds the runner OS, architecture, Node major, and the exact
+#   lockfile, and there are no restore-keys: a different lockfile is always a
+#   clean `npm ci`, never a partially matching tree.
+# - Only installed dependencies are cached. Build outputs (packages/*/dist,
+#   .next, .open-next) and the generated runtime sources are rebuilt from the
+#   candidate's tracked source in every job.
+# - Pull-request caches are scoped to their own ref and cannot seed another
+#   pull request; warm-ci-dependency-cache.yml seeds the shared entry from
+#   trusted main.
+# - The repository must be checked out before this action is used.
+
+inputs:
+  save:
+    description: >-
+      Save the dependency tree after a cache miss. Enable it in one job per
+      workflow so parallel jobs do not all upload the same entry.
+    required: false
+    default: 'false'
+
+outputs:
+  cache-hit:
+    description: Whether dependencies were restored instead of installed.
+    value: ${{ steps.dependencies.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      with:
+        # Wrangler 4.111+ requires Node 22 for the exact dry-run package gate.
+        node-version: 22
+        # The installed tree is cached below; also restoring npm's download
+        # cache would cost time on every hit and help only on a miss.
+        package-manager-cache: false
+
+    - name: Restore installed dependencies
+      id: dependencies
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
+    - name: Install dependencies
+      if: steps.dependencies.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci --no-audit --no-fund
+
+    # Saved immediately after the install so no later step's output (tool
+    # caches under node_modules, built packages) can enter the entry.
+    - name: Save installed dependencies
+      if: steps.dependencies.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+        key: ${{ steps.dependencies.outputs.cache-primary-key }}
+
+    # `npm ci` runs the root postinstall, which generates runtime sources from
+    # tracked files. A restored tree skipped it, so generate them here.
+    - name: Generate runtime sources
+      if: steps.dependencies.outputs.cache-hit == 'true'
+      shell: bash
+      run: npm run runtime-sources:build

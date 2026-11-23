@@ -10,6 +10,17 @@
 # publish-packages.yml; only after npm verification succeeds does that workflow
 # hand the immutable record locator to Thally Cloud.
 #
+# The full-release controller may start this workflow while the starter's own
+# CI is still verifying the selected starter commit, so the two checks overlap.
+# In that case only, the starter commit may be the head of the open starter
+# synchronization pull request instead of a commit on starter main. The record
+# is still never merged for an unverified starter: the merge step waits until
+# that exact commit is on starter main, which the starter workflow allows only
+# after its CI passes. A controller promotion that fails or is cancelled
+# closes its record pull request, so a record for a starter commit that never
+# landed cannot be merged by hand; the next dispatch opens a fresh one.
+# Manual dispatches always require a commit already on starter main.
+#
 # Repository writes use a short-lived GitHub App token narrowed to Actions
 # read, Contents/Pull requests write, and Issues write for the release label.
 # Its private key is available only through the main-restricted
@@ -110,10 +121,15 @@ jobs:
         id: sources
         shell: bash
         env:
+          # True only for the controller's merging dispatch; a manual dispatch
+          # can never bind a starter commit that is not yet on starter main.
+          ALLOW_PENDING_STARTER: ${{ inputs.auto_merge && github.actor == vars.RELEASE_COORDINATOR_ACTOR }}
           REQUEST_ID: ${{ inputs.request_id }}
           RELEASE_BASE_SHA: ${{ inputs.release_base_sha }}
           RUNTIME_SHA_INPUT: ${{ inputs.runtime_sha }}
           STARTER_SHA_INPUT: ${{ inputs.starter_sha }}
+          # The starter is public; this token only reads its pull requests.
+          STARTER_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -n "$REQUEST_ID" && ! "$REQUEST_ID" =~ ^[a-zA-Z0-9._-]{1,80}$ ]]; then
@@ -142,8 +158,39 @@ jobs:
           git -C runtime-source fetch --no-tags origin main
           selected_sha="$(git -C starter-source rev-parse HEAD)"
           selected_runtime_sha="$(git -C runtime-source rev-parse HEAD)"
-          git -C starter-source merge-base --is-ancestor "$selected_sha" origin/main
           git -C runtime-source merge-base --is-ancestor "$selected_runtime_sha" origin/main
+          starter_pending_pr=""
+          if ! git -C starter-source merge-base --is-ancestor "$selected_sha" origin/main; then
+            if [[ "$ALLOW_PENDING_STARTER" != "true" || -z "$STARTER_SHA_INPUT" ]]; then
+              echo "::error::Starter commit $selected_sha is not on starter main."
+              exit 1
+            fi
+            # The controller selected a commit whose starter CI is still
+            # running. Accept it only as the current head of the open
+            # synchronization pull request for this runtime, one commit on
+            # top of starter main. The merge step below still refuses to
+            # merge until this commit is on starter main.
+            sync_branch="automation/runtime-${selected_runtime_sha:0:12}"
+            starter_pending_pr="$(
+              GH_TOKEN="$STARTER_READ_TOKEN" gh api \
+                "repos/thallylabs/starter/pulls?state=open&base=main&head=thallylabs:${sync_branch}&per_page=100" \
+                | jq -r \
+                  --arg branch "$sync_branch" \
+                  --arg sha "$selected_sha" \
+                  '.[] | select(.head.repo.full_name == "thallylabs/starter" and .head.ref == $branch and .head.sha == $sha) | .number' \
+                | head -n 1
+            )"
+            if [[ -z "$starter_pending_pr" ]]; then
+              echo "::error::Starter commit $selected_sha is neither on starter main nor the head of the open synchronization pull request for $sync_branch. If the starter merged that pull request by squash, run Full release again to bind the merged starter main."
+              exit 1
+            fi
+            pending_parents="$(git -C starter-source rev-list --parents -n 1 "$selected_sha" | cut -d' ' -f2-)"
+            if [[ "$pending_parents" != "$(git -C starter-source rev-parse origin/main)" ]]; then
+              echo "::error::Starter commit $selected_sha is not a single commit on top of starter main."
+              exit 1
+            fi
+            echo "Starter commit $selected_sha is pending in starter pull request #$starter_pending_pr."
+          fi
           if [[ -n "$STARTER_SHA_INPUT" && "$selected_sha" != "$STARTER_SHA_INPUT" ]]; then
             echo "::error::The starter checkout does not match starter_sha."
             exit 1
@@ -153,6 +200,7 @@ jobs:
             exit 1
           fi
           echo "starter_sha=$selected_sha" >> "$GITHUB_OUTPUT"
+          echo "starter_pending_pr=$starter_pending_pr" >> "$GITHUB_OUTPUT"
           echo "runtime_sha=$selected_runtime_sha" >> "$GITHUB_OUTPUT"
           echo "release_base_sha=$selected_release_base" >> "$GITHUB_OUTPUT"
 
@@ -257,17 +305,39 @@ jobs:
           packages** dispatch remains an idempotent recovery path.
           EOF
 
-          if pr_json="$(gh pr view "$branch" --json number,url 2>/dev/null)"; then
-            pr_url="$(jq -r .url <<<"$pr_json")"
-            pr_number="$(jq -r .number <<<"$pr_json")"
-          else
-            pr_url="$(gh pr create \
+          # Reuse only an OPEN pull request from this repository. A release
+          # id is stable for a UTC day, so a re-dispatch after a failed
+          # attempt computes the same branch; the earlier attempt's closed
+          # pull request must not be mistaken for this one, or the merge step
+          # would wait on a pull request that can never merge.
+          open_pull_request() {
+            gh pr list \
+              --head "$branch" \
+              --base main \
+              --state open \
+              --json number,url,isCrossRepository \
+              --jq 'map(select(.isCrossRepository == false)) | .[0] // empty'
+          }
+          pr_json="$(open_pull_request)"
+          if [[ -z "$pr_json" ]]; then
+            gh pr create \
               --base main \
               --head "$branch" \
               --label release-promotion \
               --title "release: promote scaffold release ${RELEASE_ID}" \
-              --body-file /tmp/promote-pr-body.md)"
-            pr_number="$(gh pr view "$branch" --json number --jq .number)"
+              --body-file /tmp/promote-pr-body.md
+            # The listing can trail the creation by a moment.
+            for attempt in {1..10}; do
+              pr_json="$(open_pull_request)"
+              [[ -n "$pr_json" ]] && break
+              sleep 3
+            done
+          fi
+          pr_url="$(jq -r .url <<<"$pr_json")"
+          pr_number="$(jq -r .number <<<"$pr_json")"
+          if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "::error::No open release-record pull request exists for $branch."
+            exit 1
           fi
           echo "number=$pr_number" >> "$GITHUB_OUTPUT"
           echo "url=$pr_url" >> "$GITHUB_OUTPUT"
@@ -282,8 +352,17 @@ jobs:
           EXPECTED_BASE_SHA: ${{ steps.sources.outputs.release_base_sha }}
           GH_TOKEN: ${{ steps.pr-bot.outputs.token }}
           PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+          STARTER_PENDING_PR: ${{ steps.sources.outputs.starter_pending_pr }}
+          STARTER_READ_TOKEN: ${{ github.token }}
+          STARTER_SHA: ${{ steps.sources.outputs.starter_sha }}
         run: |
           set -euo pipefail
+          # True only when a fresh fetch of starter main contains the commit
+          # this record binds. Any fetch or ancestry failure counts as false.
+          starter_is_on_main() {
+            git -C starter-source fetch --no-tags --quiet origin main &&
+              git -C starter-source merge-base --is-ancestor "$STARTER_SHA" FETCH_HEAD
+          }
           pr_identity="$(gh pr view "$PR_NUMBER" --json baseRefOid,headRefOid)"
           base_sha="$(jq -r .baseRefOid <<<"$pr_identity")"
           head_sha="$(jq -r .headRefOid <<<"$pr_identity")"
@@ -310,13 +389,126 @@ jobs:
             exit 1
           fi
           gh run watch "$run_id" --exit-status
+
+          # Starter gate. The record binds an exact starter commit, and that
+          # commit reaches starter main only after starter CI verified it.
+          # Starter CI can finish after this repository's record CI, so wait
+          # for it, but never merge without it. The starter advances main by
+          # fast-forward; a squash merge would publish a different commit and
+          # this gate would then fail instead of binding unverified bytes.
+          starter_landed=false
+          for attempt in {1..120}; do
+            if starter_is_on_main; then
+              starter_landed=true
+              break
+            fi
+            if [[ -n "$STARTER_PENDING_PR" ]]; then
+              starter_pr="$(
+                GH_TOKEN="$STARTER_READ_TOKEN" gh api \
+                  "repos/thallylabs/starter/pulls/$STARTER_PENDING_PR" \
+                  --jq '[.state, .head.sha] | @tsv'
+              )" || starter_pr=""
+              starter_pr_state="$(cut -f1 <<<"$starter_pr")"
+              starter_pr_head="$(cut -f2 <<<"$starter_pr")"
+              if [[ -n "$starter_pr_head" && "$starter_pr_head" != "$STARTER_SHA" ]]; then
+                echo "::error::Starter pull request #$STARTER_PENDING_PR now points at $starter_pr_head; the record for $STARTER_SHA is superseded and was not merged."
+                exit 1
+              fi
+              if [[ "$starter_pr_state" == "closed" ]]; then
+                # main is updated before the pull request closes; look again.
+                if starter_is_on_main; then
+                  starter_landed=true
+                  break
+                fi
+                echo "::error::Starter pull request #$STARTER_PENDING_PR closed without starter main fast-forwarding to $STARTER_SHA, so the release record was not merged. The starter's Sync Thally runtime workflow must advance main by fast-forward to the commit its CI verified (a squash merge creates a different commit); deploy that starter workflow before this one. Run Full release again to bind the current starter main."
+                exit 1
+              fi
+            fi
+            sleep 10
+          done
+          if [[ "$starter_landed" != "true" ]]; then
+            echo "::error::Starter commit $STARTER_SHA did not reach starter main within 20 minutes. Its CI has not passed, so the release record was not merged."
+            exit 1
+          fi
+
           current_base="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
           final_base="$(gh pr view "$PR_NUMBER" --json baseRefOid --jq .baseRefOid)"
           if [[ "$current_base" != "$EXPECTED_BASE_SHA" || "$final_base" != "$EXPECTED_BASE_SHA" ]]; then
             echo "::error::main advanced after CI; rerun promotion against the new base."
             exit 1
           fi
+          # Hard gate, re-proved from a fresh fetch immediately before merging.
+          if ! starter_is_on_main; then
+            echo "::error::Starter commit $STARTER_SHA is not on starter main; refusing to merge the release record."
+            exit 1
+          fi
           gh pr merge "$PR_NUMBER" \
             --squash \
             --delete-branch \
             --match-head-commit "$head_sha"
+
+      # A controller promotion that did not merge must not leave its record
+      # pull request open. The record may bind a starter commit that never
+      # reached starter main, and left open it could be merged by hand and
+      # publish a scaffold bound to unverified bytes. This step does not try
+      # to prove whether the starter commit landed: closing is the safe
+      # outcome either way, and the next Full release dispatch pushes the
+      # branch again and opens a fresh pull request with a fresh CI run. It
+      # finds the pull request by branch, so it also covers a failure between
+      # pushing the branch and recording the pull request number.
+      - name: Close an unmerged release record after a failed promotion
+        if: >-
+          (failure() || cancelled()) &&
+          inputs.auto_merge &&
+          github.actor == vars.RELEASE_COORDINATOR_ACTOR &&
+          steps.record.outputs.release_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.pr-bot.outputs.token }}
+          RELEASE_ID: ${{ steps.record.outputs.release_id }}
+          STARTER_SHA: ${{ steps.sources.outputs.starter_sha }}
+        run: |
+          set -euo pipefail
+          branch="release/promote-${RELEASE_ID}"
+          if [[ ! "$branch" =~ ^release/promote-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9a-f]{8}\.[0-9a-f]{8}$ ]]; then
+            echo "::error::Refusing to clean up unexpected branch name $branch."
+            exit 1
+          fi
+          # A merged pull request is not open and is left alone, as is the
+          # branch its merge already deleted.
+          failed=false
+          if ! open_numbers="$(
+            gh pr list \
+              --head "$branch" \
+              --base main \
+              --state open \
+              --json number,isCrossRepository \
+              --jq '.[] | select(.isCrossRepository == false) | .number'
+          )"; then
+            echo "::error::Could not list pull requests for $branch; deleting the branch so GitHub closes any open one."
+            open_numbers=""
+            failed=true
+          fi
+          for number in $open_numbers; do
+            if gh pr close "$number" \
+              --comment "Closed automatically: this promotion did not complete, so its release record (starter commit \`$STARTER_SHA\`) must not be merged. Run **Full release** again to open a fresh record pull request."; then
+              echo "Closed release-record pull request #$number."
+            else
+              echo "::error::Could not close release-record pull request #$number; deleting its branch closes it instead."
+              failed=true
+            fi
+          done
+          # Deleting the head branch also closes any pull request still open
+          # from it, so this runs even when the calls above failed. It is
+          # skipped only when the record is known to have merged.
+          merged_count="$(
+            gh pr list --head "$branch" --base main --state merged --json number --jq length
+          )" || merged_count="unknown"
+          if [[ "$merged_count" == "0" || "$merged_count" == "unknown" ]] &&
+             git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" >/dev/null; then
+              echo "::error::Could not delete $branch; delete it and close its pull request by hand."
+              failed=true
+            fi
+          fi
+          [[ "$failed" == "false" ]]

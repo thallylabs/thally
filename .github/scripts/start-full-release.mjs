@@ -8,7 +8,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+
+import { isMainModule } from './main-module.mjs'
 
 const REPOSITORY = 'thallylabs/thally'
 const WORKFLOW = 'full-release.yml'
@@ -36,6 +37,6 @@ export function startFullRelease(argumentsList = process.argv.slice(2)) {
   console.log(`Release started: https://github.com/${REPOSITORY}/actions/workflows/${WORKFLOW}`)
 }
 
-if (fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   startFullRelease()
 }

@@ -10,8 +10,9 @@
 import { spawnSync } from 'node:child_process'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
+
+import { isMainModule } from './main-module.mjs'
 
 const RELEASE_DEPENDENCY_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies']
 const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/
@@ -169,7 +170,7 @@ export async function createReleasePlan(rootDirectory, baseRef, sourceRef = 'HEA
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const argument = (name) => process.argv[process.argv.indexOf(name) + 1]
   const base = process.argv.includes('--base') ? argument('--base') : null
   const output = process.argv.includes('--output') ? argument('--output') : null

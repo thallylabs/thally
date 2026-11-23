@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { isMainModule } from './main-module.mjs'
+
 function entryTargets(value) {
   if (typeof value === 'string') return [value]
   if (!value || typeof value !== 'object') return []
@@ -68,6 +70,6 @@ export async function verifyReleaseInstall(manifestPath) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   await verifyReleaseInstall(process.argv[2])
 }

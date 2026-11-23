@@ -22,7 +22,8 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+
+import { isMainModule } from "./main-module.mjs";
 
 const MANIFEST_PATH = "starter-release.json";
 const EXPECTED_STARTER_REPOSITORY = "thallylabs/starter";
@@ -627,10 +628,7 @@ async function main() {
   );
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-) {
+if (isMainModule(import.meta.url)) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

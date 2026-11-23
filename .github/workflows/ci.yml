@@ -1,5 +1,33 @@
 name: CI
 
+# Verify a candidate before merge.
+#
+# Shape: independent jobs start together and a final gate job carries the
+# required check name. No job waits on a separate planning job; each job that
+# depends on the change classification computes the same deterministic plan
+# itself, which keeps planning off the critical path.
+#
+# The planner (.github/scripts/plan-public-ci.mjs) selects `full` unless it can
+# prove a cheaper plan is safe: `content` for prose and static images, or
+# `record` for a diff whose content is exactly a generated scaffold
+# release-record promotion.
+#
+# Invariants:
+# - Content checks, the release-handoff tests, and the release disposition run
+#   for every candidate.
+# - The broad test shards and the Windows job skip only when the plan
+#   positively reports `full == 'false'` (`content` or `record`).
+# - The release-record consumer tests run whenever the shards do not and the
+#   plan is not proven prose; the managed Worker build skips only for a proven
+#   record. A missing plan output therefore runs everything.
+# - Every job computes its plan from the same two commits. A git failure fails
+#   that job's plan step instead of choosing a plan, so jobs that succeed
+#   always agree and none can skip work another job assumed it would do.
+# - No job restores build outputs from a cache; only installed dependencies
+#   are cached (see .github/actions/install).
+# - `Test · Build` is the only required status check. It runs on every event
+#   and fails unless every other job succeeded.
+
 permissions:
   contents: read
 
@@ -15,36 +43,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Test · Build
+  contracts:
+    name: Content · Release contracts
     runs-on: ubuntu-latest
-    outputs:
-      full: ${{ steps.plan.outputs.full }}
-    env:
-      # Reused only in this job; no build outputs are restored from a cache.
-      THALLY_CI_PACKAGE_BUILD_PROOF: 'true'
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          # The release disposition and the plan diff against the base commit.
           fetch-depth: 0
 
+      # Read only to decide whether a missed dependency cache is worth saving;
+      # every step of this job runs for every plan.
       - name: Plan validation from changed paths
         id: plan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: node .github/scripts/plan-public-ci.mjs "$BASE_SHA"
 
-      - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          # Wrangler 4.111+ requires Node 22 for the exact dry-run package gate.
-          node-version: 22
-          cache: npm
-
+      # The one job that saves a missed dependency cache, so a pull request
+      # that changes the lockfile pays the full install only on its first run.
+      # A release-record pull request always changes the lockfile and normally
+      # runs once, so saving its pull-request-scoped entry would upload a tree
+      # nothing reads, on the release's critical path.
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install
+        with:
+          save: ${{ steps.plan.outputs.mode != 'record' && 'true' || 'false' }}
 
       - name: Require a release disposition for changed packages
         if: github.event_name != 'workflow_dispatch'
@@ -55,19 +82,128 @@ jobs:
       - name: Build workspace packages
         run: npm run packages:build
 
-      - name: Test
-        if: steps.plan.outputs.full == 'true'
-        run: npm test
-
-      # Reuse the workspace CLI compiled above; a separate workflow used
-      # to repeat checkout and tool installation for the same candidate.
+      # Uses the workspace CLI compiled above.
       - name: Check authored content
         run: node packages/cli/dist/index.js check --ci .
 
       - name: Test release handoff boundary
         run: node --test .github/scripts/*.test.mjs
 
+  test:
+    name: Test (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          # The plan diffs against the base commit, so it needs history.
+          fetch-depth: 0
+
+      - name: Plan validation from changed paths
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node .github/scripts/plan-public-ci.mjs "$BASE_SHA"
+
+      - name: Install dependencies
+        if: steps.plan.outputs.full != 'false'
+        uses: ./.github/actions/install
+
+      # Many suites spawn the built CLIs or read package output.
+      - name: Build workspace packages
+        if: steps.plan.outputs.full != 'false'
+        run: npm run packages:build
+
+      # Files are assigned by recorded test time so the shards finish together;
+      # see .github/scripts/test-shards.mjs. Vitest is invoked directly because
+      # `npm test` would rebuild the packages through `pretest`.
+      - name: Run test shard
+        if: steps.plan.outputs.full != 'false'
+        run: node .github/scripts/test-shards.mjs run ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # A release-record promotion changes versions, pins, and records but no
+  # source, so the shards would repeat the run its base already passed. This
+  # job runs the part of the suite that can observe a promotion: the tests of
+  # every workspace a promotion versions and of every workspace that depends on
+  # one. A record the suite would reject therefore fails the required check
+  # instead of being merged. The whole suite still gates publication:
+  # publish-packages.yml attests and publishes nothing unless every one of its
+  # test shards passed on the merged record commit.
+  #
+  # It runs beside `contracts` rather than after it because it is on the
+  # release's critical path. For any other plan it stops after the plan step.
+  # The condition is "the shards did not run and the diff is not proven
+  # prose", so a missing plan output runs it.
+  # .github/scripts/record-ci-tests.test.mjs keeps the directory list complete.
+  record:
+    name: Test release-record consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          # The plan diffs against the base commit, so it needs history.
+          fetch-depth: 0
+
+      - name: Plan validation from changed paths
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node .github/scripts/plan-public-ci.mjs "$BASE_SHA"
+
+      - name: Install dependencies
+        if: steps.plan.outputs.full != 'true' && steps.plan.outputs.mode != 'content'
+        uses: ./.github/actions/install
+
+      # Several of these suites spawn the built CLIs or read package output.
+      - name: Build workspace packages
+        if: steps.plan.outputs.full != 'true' && steps.plan.outputs.mode != 'content'
+        run: npm run packages:build
+
+      # Vitest is invoked directly because `npm test` would rebuild the
+      # packages through `pretest`.
+      - name: Test release-record consumers
+        if: steps.plan.outputs.full != 'true' && steps.plan.outputs.mode != 'content'
+        run: npx vitest run packages/agent/ packages/cli/ packages/create-thally-docs/ packages/mcp/
+
+  # Skipped only for a proven release-record promotion. The root application
+  # depends on no workspace package except @thallylabs/core, and a diff that
+  # touches core is never a record promotion, so the Worker bundle cannot
+  # change. Any other plan, or a missing plan output, builds it.
+  worker:
+    name: Managed Worker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          # The plan diffs against the base commit, so it needs history.
+          fetch-depth: 0
+
+      - name: Plan validation from changed paths
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node .github/scripts/plan-public-ci.mjs "$BASE_SHA"
+
+      - name: Install dependencies
+        if: steps.plan.outputs.worker != 'false'
+        uses: ./.github/actions/install
+
+      # The build's own `prebuild` compiles the workspace packages, so this job
+      # has no separate package build step.
       - name: Build and enforce managed Worker size
+        if: steps.plan.outputs.worker != 'false'
         run: npm run build:cloudflare
         env:
           # Keep the build deterministic and offline — embeddings fall back to the
@@ -76,9 +212,8 @@ jobs:
 
   windows-updates:
     name: Windows · Starter updates
-    needs: verify
-    if: needs.verify.outputs.full == 'true'
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - name: Use Windows line endings
         run: git config --global core.autocrlf true
@@ -87,20 +222,65 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          # The plan diffs against the base commit, so it needs history.
+          fetch-depth: 0
 
+      # Bash expands "$BASE_SHA" the same way as on Linux; the default
+      # PowerShell would pass an empty argument and force a full run. The
+      # planner reads both sides from git objects, never the CRLF working
+      # tree, so it classifies the same diff the Linux jobs do.
+      - name: Plan validation from changed paths
+        id: plan
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node .github/scripts/plan-public-ci.mjs "$BASE_SHA"
+
+      # The installed tree is too large to cache usefully on Windows, so this
+      # job restores npm's download cache instead of using the install action.
       - name: Set up Node
+        if: steps.plan.outputs.full != 'false'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Build workspace packages
-        run: npm run packages:build
+        if: steps.plan.outputs.full != 'false'
+        run: npm ci --no-audit --no-fund
 
       # Exercise native filesystem paths as well as CRLF equivalence. The
       # updater must preserve authored bytes and exact mutation preconditions.
+      # Both suites import package source only, so this job does not compile
+      # the workspace packages.
       - name: Verify safe starter updates
+        if: steps.plan.outputs.full != 'false'
         run: npx vitest run packages/create-thally-docs/src/__tests__/starter-file-comparison.test.ts packages/create-thally-docs/src/__tests__/starter-update.test.ts
+
+  # Branch protection requires exactly this check name. A job whose planned
+  # steps were skipped still concludes `success`, so the gate accepts nothing
+  # else: a failed, cancelled, or skipped job fails the candidate.
+  verify:
+    name: Test · Build
+    needs: [contracts, test, record, worker, windows-updates]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every job succeeded
+        env:
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          RECORD_RESULT: ${{ needs.record.result }}
+          WORKER_RESULT: ${{ needs.worker.result }}
+          WINDOWS_RESULT: ${{ needs.windows-updates.result }}
+        run: |
+          failed=0
+          for entry in "contracts:$CONTRACTS_RESULT" "test:$TEST_RESULT" "record:$RECORD_RESULT" "worker:$WORKER_RESULT" "windows-updates:$WINDOWS_RESULT"; do
+            echo "$entry"
+            if [ "${entry#*:}" != success ]; then
+              echo "::error::Job ${entry%%:*} concluded '${entry#*:}'; every job must succeed."
+              failed=1
+            fi
+          done
+          exit "$failed"

@@ -9,7 +9,8 @@
 
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+
+import { isMainModule } from './main-module.mjs'
 
 const SCAFFOLD_RECORD_WORKSPACE = 'packages/create-thally-docs'
 const RELEASE_DEPENDENCY_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies']
@@ -85,7 +86,7 @@ export function bumpReleasePackages(rootDirectory = process.cwd()) {
   return versions
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMainModule(import.meta.url)) {
   const versions = bumpReleasePackages()
   console.log(`Prepared ${Object.entries(versions).map(([name, version]) => `${name}@${version}`).join(', ')}.`)
 }

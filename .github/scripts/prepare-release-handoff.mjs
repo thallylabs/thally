@@ -8,7 +8,8 @@
 
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+
+import { isMainModule } from './main-module.mjs'
 
 export const RELEASE_HANDOFF_SCHEMA_VERSION = 1
 export const RELEASE_HANDOFF_EVENT = 'scaffold-release-published'
@@ -118,8 +119,7 @@ export function writeReleaseHandoffOutputs(outputPath, payload) {
   )
 }
 
-const isDirectRun =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+const isDirectRun = isMainModule(import.meta.url)
 
 if (isDirectRun) {
   const releaseSourceDirectory = process.env.RELEASE_SOURCE_DIRECTORY ?? '.'
