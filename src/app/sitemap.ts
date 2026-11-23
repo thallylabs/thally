@@ -81,5 +81,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ]
 
-  return [...docPages, ...apiPages, ...staticPages]
+  // Special routes can also be navigable documents. Keep their first entry,
+  // which contains document locale alternates and authored modification dates.
+  return [...docPages, ...apiPages, ...staticPages].filter((entry, index, pages) =>
+    pages.findIndex(candidate => candidate.url === entry.url) === index)
 }
