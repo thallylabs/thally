@@ -368,7 +368,8 @@ test("auto-merges release records only after the exact PR CI run succeeds", () =
     "inputs.auto_merge && github.actor == vars.RELEASE_COORDINATOR_ACTOR",
   );
   assert.match(mergeStep.run, /--workflow ci\.yml/);
-  assert.match(mergeStep.run, /gh run watch "\$run_id" --exit-status/);
+  assert.match(mergeStep.run, /ci_conclusion="\$\(run_conclusion "\$GITHUB_REPOSITORY" "\$run_id"\)"/);
+  assert.match(mergeStep.run, /if \[\[ "\$ci_conclusion" != "success" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
   assert.match(mergeStep.run, /base_sha.*EXPECTED_BASE_SHA/);
   assert.match(mergeStep.run, /current_base.*commits\/main/);
   assert.match(mergeStep.run, /current_base.*EXPECTED_BASE_SHA/);
@@ -447,7 +448,8 @@ test("overlaps the starter synchronization with the release-record promotion", (
 
   const wait = namedStep(job, "Wait for the merged release record");
   assert.equal(wait.if, "steps.stable.outputs.needed == 'true'");
-  assert.match(wait.run, /gh run watch "\$PROMOTION_RUN_ID" --repo thallylabs\/thally --exit-status/);
+  assert.match(wait.run, /conclusion="\$\(run_conclusion thallylabs\/thally "\$PROMOTION_RUN_ID"\)"/);
+  assert.match(wait.run, /if \[\[ "\$conclusion" != "success" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
   assert.equal(wait.env.PROMOTION_RUN_ID, "${{ steps.promotion.outputs.run_id }}");
 });
 
@@ -596,11 +598,14 @@ test("splits the controller into a blocking stage and a publication tail", () =>
     RELEASE_ID: "${{ needs.release.outputs.release_id }}",
     REQUEST_ID: "${{ needs.release.outputs.request_id }}",
   });
-  assert.match(publication.run, /gh run watch "\$publish_run" --repo thallylabs\/thally --exit-status/);
+  assert.match(publication.run, /conclusion="\$\(run_conclusion thallylabs\/thally "\$publish_run"\)"/);
+  assert.match(publication.run, /if \[\[ "\$conclusion" != "success" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
+  assert.match(publication.run, /if \[\[ -z "\$publish_attempt" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
   const cloud = namedStep(tail, "Wait for exact Cloud production handoff");
   assert.equal(cloud.env.GH_TOKEN, "${{ steps.cloud-observer.outputs.token }}");
   assert.equal(cloud.env.EXPECTED_TITLE, "${{ steps.publication.outputs.expected_cloud_title }}");
-  assert.match(cloud.run, /gh run watch "\$cloud_run" --repo thallylabs\/thally-cloud --exit-status/);
+  assert.match(cloud.run, /conclusion="\$\(run_conclusion thallylabs\/thally-cloud "\$cloud_run"\)"/);
+  assert.match(cloud.run, /if \[\[ "\$conclusion" != "success" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
 });
 
 test("accepts a pending starter commit only for the controller's merging dispatch", () => {
@@ -639,7 +644,7 @@ test("never merges a release record before its starter commit is on starter main
     merge.run,
     /starter_is_on_main\(\) \{\n\s+git -C starter-source fetch --no-tags --quiet origin main &&\n\s+git -C starter-source merge-base --is-ancestor "\$STARTER_SHA" FETCH_HEAD\n\}/,
   );
-  const ci = offsetOf(merge.run, /gh run watch "\$run_id" --exit-status/);
+  const ci = offsetOf(merge.run, /if \[\[ "\$ci_conclusion" != "success" \]\]; then/);
   const wait = offsetOf(merge.run, /for attempt in \{1\.\.120\}; do\n\s+if starter_is_on_main; then/);
   const timeout = offsetOf(merge.run, /if \[\[ "\$starter_landed" != "true" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
   const base = offsetOf(merge.run, /"\$current_base" != "\$EXPECTED_BASE_SHA" \|\| "\$final_base" != "\$EXPECTED_BASE_SHA"/);
@@ -730,4 +735,40 @@ test("rechecks complete historical upgrades before artifact attestation and npm 
   assert.match(steps[gate].run, /download/);
   assert.deepEqual(workflow.jobs.attest.needs, ["plan", "verify", "test"]);
   assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "test", "attest"]);
+});
+
+test("waits on other workflow runs without failing on a transient GitHub error", () => {
+  // `gh run watch --exit-status` also exits non-zero when one API read fails,
+  // which once failed a release whose publication went on to succeed. Every
+  // wait reads the run's conclusion separately, and every lookup treats a
+  // failed read as "not found yet".
+  const helper = /run_conclusion\(\) \{\n\s+local repo="\$1" run="\$2" failures=0 state\n\s+while \[\[ "\$failures" -lt 10 \]\]; do\n\s+gh run watch "\$run" --repo "\$repo" >&2 \|\| true\n/;
+  const waits = [
+    [fullReleaseWorkflow.jobs.release, "Wait for the merged release record"],
+    [fullReleaseWorkflow.jobs.publication, "Wait for npm publication"],
+    [fullReleaseWorkflow.jobs.publication, "Wait for exact Cloud production handoff"],
+    [promotionWorkflow.jobs.promote, "Merge after CI succeeds"],
+  ];
+  for (const [job, name] of waits) {
+    const { run } = namedStep(job, name);
+    assert.match(run, helper, name);
+    // The helper never fails the step itself; an empty answer is handled
+    // by the caller's explicit success check.
+    assert.match(run, /sleep 30\n\s+done\n\s+return 0\n\s*\}/, name);
+  }
+  for (const workflow of [fullReleaseWorkflow, promotionWorkflow]) {
+    for (const job of Object.values(workflow.jobs)) {
+      for (const step of job.steps ?? []) {
+        if (typeof step.run !== "string") continue;
+        assert.doesNotMatch(step.run, /gh run watch[^\n]*--exit-status/, step.name);
+        // Each polling lookup assigned inside a retry loop survives a failed read.
+        for (const variable of ["run_id", "publish_run", "cloud_run", "publish_attempt"]) {
+          const assignments = step.run.match(new RegExp(`\\b${variable}="\\$\\(\\n[\\s\\S]*?\\n\\s*\\)"[^\\n]*`, "g")) ?? [];
+          for (const assignment of assignments) {
+            assert.match(assignment, new RegExp(`\\)" \\|\\| ${variable}=""$`), `${step.name}: ${variable}`);
+          }
+        }
+      }
+    }
+  }
 });
