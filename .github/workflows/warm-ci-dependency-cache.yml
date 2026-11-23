@@ -1,0 +1,72 @@
+name: Warm CI dependency cache
+
+# Pull-request caches live on refs/pull/*/merge and cannot seed the next pull
+# request, and CI does not run on pushes to main. This workflow publishes the
+# dependency caches from trusted main so pull requests read them.
+#
+# Invariants:
+# - It installs dependencies only; it builds, verifies, and deploys nothing.
+# - It writes caches only from main, with read-only repository permissions.
+# - Each job produces exactly the key its CI counterpart reads: the Linux job
+#   through the shared install action, the Windows job through the same
+#   line-ending configuration, because setup-node hashes the lockfile as
+#   checked out.
+on:
+  push:
+    branches: [main]
+    paths:
+      - package-lock.json
+      - .github/actions/install/**
+      - .github/workflows/warm-ci-dependency-cache.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-ci-dependency-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Seed Linux installed dependencies
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact trusted main commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install and save dependencies on cache miss
+        uses: ./.github/actions/install
+        with:
+          save: 'true'
+
+  windows:
+    name: Seed Windows npm download cache
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      # Must match the CI job: the cache key hashes the checked-out lockfile.
+      - name: Use Windows line endings
+        run: git config --global core.autocrlf true
+
+      - name: Checkout exact trusted main commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # setup-node saves npm's download cache in its post step after a miss.
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund

@@ -1,6 +1,19 @@
-# One operator dispatch drives the complete public release: synchronize the
-# standalone starter, promote an immutable release record, publish and verify
-# npm packages, then wait for Thally Cloud to promote the exact scaffold.
+# One operator dispatch drives the complete public release in two stages.
+#
+# Stage 1 (`release`, the blocking stage) synchronizes the standalone starter
+# and merges an immutable release record. The starter synchronization and the
+# record promotion overlap: the starter workflow advances its `main` by
+# fast-forward to the commit its CI verifies, so that commit's SHA is known as
+# soon as the synchronization pull request opens and the record can be
+# prepared and checked while starter CI is still running. Nothing is merged
+# early. The record merges only after its own CI passes and the selected
+# starter commit is on starter `main`, and this stage succeeds only after the
+# starter synchronization run itself succeeds.
+#
+# Stage 2 (`publication`, the asynchronous tail) starts once the record is on
+# `main`. It waits for npm publication and verification, then for Thally Cloud
+# to promote the exact scaffold. A failure there fails this workflow run.
+#
 # Destination workflows retain their own validation and recovery entrypoints;
 # this controller only coordinates fixed workflows on protected main.
 
@@ -20,13 +33,25 @@ concurrency:
 
 jobs:
   release:
-    name: Sync · Publish · Promote
+    name: Sync · Promote · Merge record
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     # This no-review environment is restricted to main. It prevents a workflow
     # revision on another branch from receiving the coordinator App key while
     # keeping the dispatch itself as the single operator authorization.
     environment: release-control
+    # Only identifiers cross to the tail job. Tokens never do: each job mints
+    # its own, and step outputs are scoped to the job that produced them.
+    outputs:
+      needed: ${{ steps.stable.outputs.needed }}
+      cloud_complete: ${{ steps.stable.outputs.cloud_complete }}
+      record_sha: ${{ steps.active-release.outputs.record_sha }}
+      release_id: ${{ steps.active-release.outputs.release_id }}
+      new_release_id: ${{ steps.published.outputs.release_id }}
+      existing_release_id: ${{ steps.stable.outputs.release_id }}
+      request_id: ${{ steps.release.outputs.request_id }}
+      runtime_sha: ${{ steps.release.outputs.runtime_sha }}
+      starter_sha: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
     steps:
       - name: Checkout trusted release policy
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -100,8 +125,12 @@ jobs:
           request_id="full-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
 
-      - name: Synchronize and merge the standalone starter
+      # Dispatch the starter synchronization and wait only until it has opened
+      # (or found unnecessary) its pull request. Its CI and merge continue in
+      # the background and are required to succeed further down.
+      - name: Start the standalone starter synchronization
         if: steps.release.outputs.current_stable != 'true'
+        id: sync
         shell: bash
         env:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
@@ -135,8 +164,33 @@ jobs:
             echo "::error::The starter synchronization run did not start."
             exit 1
           fi
-          gh run watch "$run_id" --repo thallylabs/starter --exit-status
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
+          # The starter workflow keeps this step name stable for this poll.
+          pr_step=""
+          for attempt in {1..180}; do
+            run_json="$(
+              gh run view "$run_id" --repo thallylabs/starter --json status,conclusion,jobs
+            )" || run_json='{}'
+            pr_step="$(
+              jq -r '[.jobs[]?.steps[]? | select(.name == "Open synchronization pull request" and .status == "completed")][0].conclusion // ""' <<<"$run_json"
+            )"
+            [[ -n "$pr_step" ]] && break
+            if [[ "$(jq -r '.status // ""' <<<"$run_json")" == "completed" ]]; then
+              echo "::error::Starter synchronization run $run_id ended ($(jq -r '.conclusion // "unknown"' <<<"$run_json")) before opening its pull request."
+              exit 1
+            fi
+            sleep 5
+          done
+          if [[ "$pr_step" != "success" ]]; then
+            echo "::error::Starter synchronization run $run_id did not open its pull request (step result: ${pr_step:-timed out})."
+            exit 1
+          fi
+
+      # The selection is frozen before starter CI finishes. That is safe
+      # because promote-release.yml merges the record only once this exact
+      # commit is on starter main, and this job requires the synchronization
+      # run to succeed before it reports the record as merged.
       - name: Freeze and verify the starter selection
         if: steps.release.outputs.current_stable != 'true'
         id: starter
@@ -144,9 +198,68 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
           RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          SYNC_RUN_ID: ${{ steps.sync.outputs.run_id }}
         run: |
           set -euo pipefail
-          starter_sha="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+          # The synchronization run's merge step is skipped exactly when the
+          # starter already matched the runtime, and runs when this run pushed
+          # a generated commit. Its state says which commit to select without
+          # trusting a pull request left open by an earlier attempt.
+          merge_step=""
+          for attempt in {1..60}; do
+            merge_step="$(
+              gh run view "$SYNC_RUN_ID" --repo thallylabs/starter --json jobs \
+                --jq '[.jobs[]?.steps[]? | select(.name == "Merge after CI succeeds")][0] | if . == null then "" elif .status == "completed" then .conclusion elif .status == "in_progress" then "in_progress" else "" end'
+            )" || merge_step=""
+            [[ -n "$merge_step" ]] && break
+            sleep 5
+          done
+
+          case "$merge_step" in
+            skipped)
+              starter_sha="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+              selection="starter main"
+              ;;
+            in_progress|success)
+              # The generated commit is the head of this runtime's
+              # synchronization branch and of its open pull request. Requiring
+              # both to agree rejects a stale or lagging view of either. If
+              # the run already merged and deleted the branch, the commit is
+              # the new starter main.
+              sync_branch="automation/runtime-${RUNTIME_SHA:0:12}"
+              selection="pull request branch $sync_branch"
+              starter_sha=""
+              for attempt in {1..12}; do
+                branch_sha="$(
+                  gh api "repos/thallylabs/starter/git/ref/heads/$sync_branch" --jq .object.sha 2>/dev/null
+                )" || branch_sha=""
+                pr_head_sha="$(
+                  gh api "repos/thallylabs/starter/pulls?state=open&base=main&head=thallylabs:$sync_branch" \
+                    --jq '.[0].head.sha // ""'
+                )" || pr_head_sha=""
+                if [[ "$branch_sha" =~ ^[0-9a-f]{40}$ && "$branch_sha" == "$pr_head_sha" ]]; then
+                  starter_sha="$branch_sha"
+                  break
+                fi
+                if [[ -z "$branch_sha" && -z "$pr_head_sha" ]] && \
+                   [[ "$(gh run view "$SYNC_RUN_ID" --repo thallylabs/starter --json conclusion --jq .conclusion)" == "success" ]]; then
+                  starter_sha="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+                  selection="starter main after the synchronization merged"
+                  break
+                fi
+                sleep 5
+              done
+              if [[ -z "$starter_sha" ]]; then
+                echo "::error::The open starter synchronization pull request for $sync_branch could not be resolved."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID did not report whether it changed the starter (merge step: ${merge_step:-unknown})."
+              exit 1
+              ;;
+          esac
+
           pinned_runtime="$(
             gh api "repos/thallylabs/starter/contents/starter-release.json?ref=$starter_sha" --jq .content \
               | tr -d '\n' \
@@ -154,9 +267,10 @@ jobs:
               | jq -r .runtime.commitSha
           )"
           if [[ "$pinned_runtime" != "$RUNTIME_SHA" ]]; then
-            echo "::error::Starter main pins $pinned_runtime, not $RUNTIME_SHA."
+            echo "::error::Starter commit $starter_sha ($selection) pins $pinned_runtime, not $RUNTIME_SHA."
             exit 1
           fi
+          echo "Selected starter commit $starter_sha from $selection."
           echo "starter_sha=$starter_sha" >> "$GITHUB_OUTPUT"
 
       - name: Check whether this pair is already stable
@@ -246,8 +360,9 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Promote and merge the immutable release record
+      - name: Start the immutable release-record promotion
         if: steps.stable.outputs.needed == 'true'
+        id: promotion
         shell: bash
         env:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
@@ -284,7 +399,127 @@ jobs:
             echo "::error::The release promotion run did not start."
             exit 1
           fi
-          gh run watch "$run_id" --repo thallylabs/thally --exit-status
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      # The starter run was left in the background above. The blocking stage
+      # cannot succeed unless it does, and the selected commit must be the one
+      # that reached starter main.
+      #
+      # Each observation is retried with backoff and ends in one of three
+      # answers: yes, definitely no, or unknown. The promotion is cancelled
+      # only when the selected commit is definitely not going to reach starter
+      # main. When GitHub cannot be read, nothing is cancelled: the promotion
+      # may already be merging, and its own gate refuses to merge until the
+      # commit is on starter main, so this job fails with what it actually
+      # knows and leaves that gate to decide.
+      - name: Require the starter synchronization to succeed
+        if: steps.release.outputs.current_stable != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          PROMOTION_RUN_ID: ${{ steps.promotion.outputs.run_id }}
+          STARTER_SHA: ${{ steps.starter.outputs.starter_sha }}
+          SYNC_RUN_ID: ${{ steps.sync.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          # Prints the run's conclusion once it has completed, or nothing if
+          # that could not be read. `gh run watch` only waits here; its exit
+          # status is ignored because it also fails on a network error.
+          starter_run_conclusion() {
+            local delay=5 attempt conclusion
+            for attempt in 1 2 3 4 5 6; do
+              gh run watch "$SYNC_RUN_ID" --repo thallylabs/starter >&2 || true
+              if conclusion="$(
+                gh run view "$SYNC_RUN_ID" --repo thallylabs/starter \
+                  --json status,conclusion \
+                  --jq 'select(.status == "completed") | .conclusion'
+              )" && [[ -n "$conclusion" ]]; then
+                echo "$conclusion"
+                return 0
+              fi
+              sleep "$delay"
+              delay=$((delay * 2))
+            done
+          }
+          # Prints landed, missing, or unknown. "ahead" or "identical" means
+          # starter main contains the selection. "missing" needs two reads
+          # that agree, so one stale answer just after a merge is not final.
+          selected_commit_state() {
+            local delay=5 attempt relation missing=0
+            for attempt in 1 2 3 4 5 6; do
+              if relation="$(
+                gh api "repos/thallylabs/starter/compare/${STARTER_SHA}...main" --jq .status
+              )"; then
+                case "$relation" in
+                  ahead|identical)
+                    echo landed
+                    return 0
+                    ;;
+                  behind|diverged)
+                    missing=$((missing + 1))
+                    if [[ "$missing" -ge 2 ]]; then
+                      echo missing
+                      return 0
+                    fi
+                    ;;
+                esac
+              fi
+              sleep "$delay"
+              delay=$((delay * 2))
+            done
+            echo unknown
+          }
+          stop_promotion() {
+            if [[ -n "$PROMOTION_RUN_ID" ]]; then
+              gh run cancel "$PROMOTION_RUN_ID" --repo thallylabs/thally ||
+                echo "::warning::Could not cancel promotion run $PROMOTION_RUN_ID; its own gate still refuses to merge."
+            fi
+          }
+
+          conclusion="$(starter_run_conclusion)"
+          state="$(selected_commit_state)"
+          echo "Starter synchronization run $SYNC_RUN_ID: ${conclusion:-not observed}; selected commit $STARTER_SHA: $state."
+
+          if [[ "$conclusion" == "success" && "$state" == "landed" ]]; then
+            exit 0
+          fi
+          case "${conclusion:-unobserved}/$state" in
+            success/missing)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID succeeded, but starter main does not contain the selected commit $STARTER_SHA. The starter must advance main by fast-forward to the commit its CI verified; a squash merge creates a different commit. Deploy the fast-forward Sync Thally runtime workflow in thallylabs/starter, then run Full release again to bind the merged starter main. The release record was not merged."
+              stop_promotion
+              ;;
+            success/unknown)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID succeeded, but GitHub could not confirm that starter main contains $STARTER_SHA. The promotion was left running; it merges the record only if that commit is on starter main. Check the promotion run, then run Full release again."
+              ;;
+            unobserved/landed)
+              echo "::error::The result of starter synchronization run $SYNC_RUN_ID could not be read from GitHub, although its commit $STARTER_SHA is on starter main. The promotion was left running. Check both runs, then run Full release again."
+              ;;
+            unobserved/*)
+              echo "::error::Neither the result of starter synchronization run $SYNC_RUN_ID nor the position of $STARTER_SHA on starter main could be confirmed. The promotion was left running; it merges the record only if that commit is on starter main. Check both runs, then run Full release again."
+              ;;
+            */landed)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID ended with \"$conclusion\" after its verified commit $STARTER_SHA reached starter main. The promotion was left running because the commit it binds is verified and merged. Inspect the starter run, then run Full release again."
+              ;;
+            */missing)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID ended with \"$conclusion\" and its commit $STARTER_SHA is not on starter main. The release record will not be merged."
+              stop_promotion
+              ;;
+            *)
+              echo "::error::Starter synchronization run $SYNC_RUN_ID ended with \"$conclusion\", and GitHub could not confirm whether $STARTER_SHA is on starter main. The promotion was cancelled; if it had already merged, run Full release again to finish that release."
+              stop_promotion
+              ;;
+          esac
+          exit 1
+
+      - name: Wait for the merged release record
+        if: steps.stable.outputs.needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          PROMOTION_RUN_ID: ${{ steps.promotion.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run watch "$PROMOTION_RUN_ID" --repo thallylabs/thally --exit-status
 
       - name: Resolve the published release record
         if: steps.stable.outputs.needed == 'true'
@@ -353,16 +588,73 @@ jobs:
           echo "record_sha=$record_sha" >> "$GITHUB_OUTPUT"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
+      - name: Write blocking-stage summary
+        shell: bash
+        env:
+          CLOUD_COMPLETE: ${{ steps.stable.outputs.cloud_complete }}
+          NEEDED: ${{ steps.stable.outputs.needed }}
+          RECORD_SHA: ${{ steps.active-release.outputs.record_sha || steps.stable.outputs.record_sha }}
+          RELEASE_ID: ${{ steps.active-release.outputs.release_id || steps.stable.outputs.release_id }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
+        run: |
+          {
+            echo "## Release record merged"
+            echo
+            echo "- Release: \`$RELEASE_ID\`"
+            echo "- Record commit: \`$RECORD_SHA\`"
+            echo "- Runtime: \`$RUNTIME_SHA\`"
+            echo "- Starter: \`$STARTER_SHA\`"
+            if [[ "$NEEDED" == "true" ]]; then
+              echo "- Status: the starter is synchronized and the release record is on \`main\`."
+              echo "- Next: npm publication and Cloud promotion are continuing in the **Publish · Promote to Cloud** job of this run."
+            elif [[ "$CLOUD_COMPLETE" == "true" ]]; then
+              echo "- Status: this exact pair was already the stable release; nothing is left to do."
+            else
+              echo "- Status: this exact pair was already recorded; its interrupted publication was restarted."
+              echo "- Next: npm publication and Cloud promotion are continuing in the **Publish · Promote to Cloud** job of this run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The asynchronous tail. Nothing here changes a repository: it observes the
+  # publication that the merged record started and fails this run if npm
+  # verification or the Cloud promotion fails. To recover from a failure here,
+  # dispatch Full release again; it detects the merged record and re-drives
+  # only the interrupted publication.
+  publication:
+    name: Publish · Promote to Cloud
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The same main-restricted environment as the blocking stage. This job
+    # mints its own read-only tokens; none is passed between jobs.
+    environment: release-control
+    steps:
+      - name: Reject non-main dispatches
+        run: test "$GITHUB_REF" = refs/heads/main
+
+      - name: Mint the publication observer token
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
+        id: publication-observer
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally
+          permission-actions: read
+          permission-contents: read
+
       - name: Wait for npm publication
-        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
         id: publication
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
-          IS_NEW_RELEASE: ${{ steps.stable.outputs.needed }}
-          RECORD_SHA: ${{ steps.active-release.outputs.record_sha }}
-          RELEASE_ID: ${{ steps.active-release.outputs.release_id }}
-          REQUEST_ID: ${{ steps.release.outputs.request_id }}
+          GH_TOKEN: ${{ steps.publication-observer.outputs.token }}
+          IS_NEW_RELEASE: ${{ needs.release.outputs.needed }}
+          RECORD_SHA: ${{ needs.release.outputs.record_sha }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+          REQUEST_ID: ${{ needs.release.outputs.request_id }}
         run: |
           set -euo pipefail
           publish_run=""
@@ -407,7 +699,7 @@ jobs:
       # Installation tokens expire after one hour. Mint this observer only
       # after npm completes so a long baseline build retains a fresh token.
       - name: Mint the Cloud observer token
-        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
         id: cloud-observer
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -419,13 +711,13 @@ jobs:
           permission-contents: read
 
       - name: Wait for exact Cloud production handoff
-        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
         shell: bash
         env:
           COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
           EXPECTED_TITLE: ${{ steps.publication.outputs.expected_cloud_title }}
           GH_TOKEN: ${{ steps.cloud-observer.outputs.token }}
-          RELEASE_ID: ${{ steps.active-release.outputs.release_id }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
         run: |
           set -euo pipefail
           cloud_run=""
@@ -451,11 +743,11 @@ jobs:
       - name: Write release summary
         shell: bash
         env:
-          EXISTING_CLOUD_COMPLETE: ${{ steps.stable.outputs.cloud_complete }}
-          EXISTING_RELEASE_ID: ${{ steps.stable.outputs.release_id }}
-          NEW_RELEASE_ID: ${{ steps.published.outputs.release_id }}
-          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
-          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
+          EXISTING_CLOUD_COMPLETE: ${{ needs.release.outputs.cloud_complete }}
+          EXISTING_RELEASE_ID: ${{ needs.release.outputs.existing_release_id }}
+          NEW_RELEASE_ID: ${{ needs.release.outputs.new_release_id }}
+          RUNTIME_SHA: ${{ needs.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ needs.release.outputs.starter_sha }}
         run: |
           release_id="${NEW_RELEASE_ID:-$EXISTING_RELEASE_ID}"
           {

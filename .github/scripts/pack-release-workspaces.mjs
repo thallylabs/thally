@@ -1,8 +1,10 @@
 /**
  * Build the immutable npm artifact set before any job receives OIDC authority.
  *
- * `npm test` has already built every workspace. This script packs each selected
- * package exactly once with lifecycle scripts disabled, verifies npm's reported
+ * The pack job has already built every workspace with `npm run packages:build`;
+ * the test suite runs in a separate parallel job that both attestation and
+ * publication require. This script packs each selected package exactly once
+ * with lifecycle scripts disabled, verifies npm's reported
  * SRI against the real tarball bytes, and writes the allowlisted manifest the
  * minimal trusted-publishing job consumes.
  */
