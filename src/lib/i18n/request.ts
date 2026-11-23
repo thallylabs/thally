@@ -7,6 +7,9 @@
 import 'server-only'
 
 import { cache } from 'react'
+import { headers } from 'next/headers'
+import { isRemoteContentSource } from '@/lib/content-source'
+import { DOCUMENT_PATH_HEADER, documentLocaleFromPath } from './document-locale'
 import { getI18nConfig } from '@/data/docs'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getRequestCloudSiteConfig } from '@/lib/cloud-link/request'
@@ -59,3 +62,9 @@ export const getEffectiveI18nConfig = cache(async (): Promise<I18nConfig> => {
   const admin = await getAdminSettings()
   return resolveI18nSelection(admin.localization, repository)
 })
+
+/** Read request context only for managed content, preserving unlinked static builds. */
+export async function getDocumentLocale(i18n: I18nConfig): Promise<string> {
+  if (!isRemoteContentSource()) return i18n.defaultLocale
+  return documentLocaleFromPath((await headers()).get(DOCUMENT_PATH_HEADER), i18n)
+}

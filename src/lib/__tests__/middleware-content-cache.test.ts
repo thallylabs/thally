@@ -450,3 +450,17 @@ describe('managed content cache headers', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+
+
+describe('document locale request context', () => {
+  it.each<Record<string, string>>([{}, { rsc: '1' }, { 'next-router-state-tree': '[]' }, { 'next-router-prefetch': '1' }])('overwrites forged context and preserves router navigation %j', async routerHeaders => {
+    const response = await middleware(docRequest('/fr/guide', {
+      accept: 'text/html',
+      'x-thally-document-path': '/ar/forged',
+      ...routerHeaders,
+    }), EVENT)
+    expect(response.headers.get('x-middleware-next')).toBe('1')
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(response.headers.get('x-middleware-request-x-thally-document-path')).toBe('/fr/guide')
+  })
+})

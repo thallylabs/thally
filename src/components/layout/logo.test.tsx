@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { Logo } from './logo'
 
 vi.mock('@/components/theme/reader-theme', () => ({ useReaderTheme: () => ({ resolvedTheme: 'light' }) }))
-vi.mock('./use-site-name', () => ({ useSiteName: () => 'Example', displaySiteName: (name: string) => name }))
+const branding = vi.hoisted(() => ({ hasLogo: false }))
+vi.mock('./use-site-name', () => ({ useSiteName: () => 'Example', useSiteLogo: () => branding.hasLogo, displaySiteName: (name: string) => name }))
 
 describe('logo sizing', () => {
   it('renders a height-led custom image with bounded, proportional width', () => {
+    branding.hasLogo = true
     const html = renderToStaticMarkup(<Logo showText={false} />)
     const custom = html.match(/<img[^>]*data-custom-logo=""[^>]*>/)?.[0]
     expect(custom).toContain('height:28px;width:auto;max-width:min(160px, 100%)')
@@ -19,7 +21,9 @@ describe('logo sizing', () => {
   })
 
   it('retains the readable site-name fallback when requested', () => {
+    branding.hasLogo = false
     const html = renderToStaticMarkup(<Logo />)
+    expect(html).not.toContain('/api/brand/logo')
     expect(html).toContain('>Example</span>')
     expect(html).toContain('width="28" height="28"')
   })

@@ -23,6 +23,7 @@ import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 import { createDailyVisitorKey, externalReferrerDomain } from '@/lib/analytics/identity'
 import { problemResponse } from '@/lib/http/problem'
+import { DOCUMENT_PATH_HEADER } from '@/lib/i18n/document-locale'
 import { isReaderAuthActive } from '@/lib/reader-auth/config'
 
 // Static API paths are known without importing the Node-only content graph.
@@ -501,7 +502,12 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // custom header agents read directly, so it carries an absolute URL. Only
   // potential content pages get the headers, including API-reference pages;
   // known service APIs, admin routes, and Next internals do not.
-  const response = NextResponse.next()
+  // Root layouts cannot receive a nested catch-all locale. Replace any caller
+  // supplied context with the real path so managed HTML can declare its language
+  // before JavaScript runs, without rewriting docs or negotiating RSC payloads.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set(DOCUMENT_PATH_HEADER, pathname)
+  const response = NextResponse.next({ request: { headers: requestHeaders } })
   if (isPotentialDocsPagePath(pathname)) {
     response.headers.append('Link', '</llms.txt>; rel="llms-txt"')
     // Standard relation types agents actually dereference (RFC 8288): the

@@ -2,11 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ translated: vi.fn() }))
-const docs = vi.hoisted(() => ({ sitemap: undefined as 'navigable' | undefined, introductionHref: '/' }))
+const docs = vi.hoisted(() => ({ sitemap: undefined as 'navigable' | undefined, introductionHref: '/', hasChangelog: false }))
 vi.mock('@/data/docs', () => ({
   loadDocEntries: async () => [
     { id: 'guide', slug: ['guide'], href: '/guide', hidden: false, noindex: false, lastUpdated: '2026-01-01' },
     { id: 'introduction', slug: [], href: docs.introductionHref, hidden: false, noindex: false },
+    ...(docs.hasChangelog ? [{ id: 'changelog', slug: ['changelog'], href: '/changelog', hidden: false, noindex: false, lastUpdated: '2026-03-01' }] : []),
     { id: 'orphan', slug: ['orphan'], href: '/orphan', hidden: false, noindex: false },
   ],
   canReaderViewPage: async () => true,
@@ -29,9 +30,19 @@ beforeEach(() => {
   mocks.translated.mockReset()
   docs.sitemap = undefined
   docs.introductionHref = '/'
+  docs.hasChangelog = false
 })
 
 describe('static sitemap entries', () => {
+  it('lists a changelog once and retains its localized document metadata', async () => {
+    docs.hasChangelog = true
+    mocks.translated.mockResolvedValue({ lastUpdated: '2026-03-02' })
+    const urls = await sitemap()
+    const entries = urls.filter(entry => entry.url === 'https://docs.example.com/changelog')
+    expect(entries).toHaveLength(1)
+    expect(entries[0].lastModified).toEqual(new Date('2026-03-01'))
+    expect(entries[0].alternates?.languages).toHaveProperty('fr', 'https://docs.example.com/fr/changelog')
+  })
   it('omits /changelog when the site has no changelog page, since that URL 404s', async () => {
     mocks.translated.mockResolvedValue(null)
     const urls = await sitemap()
