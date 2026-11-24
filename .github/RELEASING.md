@@ -31,8 +31,16 @@ pull request while starter CI is still running. Nothing merges early:
 **Stage 2, `Publish · Promote to Cloud`, is the asynchronous tail.** It starts
 when the record is merged, waits for the scaffold packages to be published and
 verified through npm trusted publishing, then waits for the managed scaffold
-promotion to complete. It takes roughly twenty minutes and changes no
-repository. A failure in this stage fails the workflow run.
+promotion to complete. It usually takes about twenty minutes, and longer
+when the hosted toolchain must first be synchronized and verified. It changes
+no repository itself. A failure in this stage fails the workflow run, including
+a managed promotion that is still running after the stage's wait limit; once
+that promotion finishes, dispatch **Full release** again.
+
+While npm publication runs, stage 2 also starts the hosted toolchain
+synchronization for the release's runtime commit, so it overlaps publication.
+The managed promotion still ensures that synchronization before it promotes,
+so a failed early start is only a warning.
 
 A failed phase stops the controller and leaves its workflow run visible for
 diagnosis. Re-running the controller is safe; already-stable inputs are a

@@ -3,7 +3,10 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -545,26 +548,38 @@ test("splits the controller into a blocking stage and a publication tail", () =>
   assert.equal(tail.name, "Publish · Promote to Cloud");
 
   // A tail failure fails the run: it depends only on the blocking stage, is
-  // never skipped or tolerated, and no step ignores an error.
+  // never skipped or tolerated, and no step ignores an error except the two
+  // warning-only steps that start the hosted toolchain sync early.
   assert.equal(tail.needs, "release");
   assert.equal(tail.if, undefined);
   for (const job of [blocking, tail]) {
     assert.equal(job["continue-on-error"], undefined);
-    assert.ok(job.steps.every((step) => step["continue-on-error"] === undefined));
     assert.equal(job.environment, "release-control");
     assert.match(namedStep(job, "Reject non-main dispatches").run, /refs\/heads\/main/);
   }
+  assert.ok(blocking.steps.every((step) => step["continue-on-error"] === undefined));
+  assert.deepEqual(
+    tail.steps.filter((step) => step["continue-on-error"] !== undefined).map((step) => step.id),
+    ["early-toolchain-token", "early-toolchain"],
+  );
   assert.deepEqual(tail.steps.map((step) => [step.name, step.if]), [
     ["Reject non-main dispatches", undefined],
     ["Mint the publication observer token", tailCondition],
+    ["Mint the early toolchain sync token", tailCondition],
+    ["Start the Cloud toolchain sync early", tailCondition],
     ["Wait for npm publication", tailCondition],
     ["Mint the Cloud observer token", tailCondition],
     ["Wait for exact Cloud production handoff", tailCondition],
+    ["Mint the Cloud observer token (wait 2)", "steps.cloud-wait-1.outputs.concluded == 'false'"],
+    ["Keep waiting for the Cloud production handoff (wait 2)", "steps.cloud-wait-1.outputs.concluded == 'false'"],
+    ["Mint the Cloud observer token (wait 3)", "steps.cloud-wait-2.outputs.concluded == 'false'"],
+    ["Keep waiting for the Cloud production handoff (wait 3)", "steps.cloud-wait-2.outputs.concluded == 'false'"],
     ["Write release summary", undefined],
   ]);
 
-  // Only identifiers cross the job boundary. The tail mints its own
-  // read-only tokens and cannot see a step output of the blocking stage.
+  // Only identifiers cross the job boundary. The tail mints its own tokens
+  // and cannot see a step output of the blocking stage. Its observers are
+  // read-only; the early toolchain token is pinned by its own test.
   assert.deepEqual(blocking.outputs, {
     needed: "${{ steps.stable.outputs.needed }}",
     cloud_complete: "${{ steps.stable.outputs.cloud_complete }}",
@@ -582,6 +597,8 @@ test("splits the controller into a blocking stage and a publication tail", () =>
   for (const [name, repository] of [
     ["Mint the publication observer token", "thally"],
     ["Mint the Cloud observer token", "thally-cloud"],
+    ["Mint the Cloud observer token (wait 2)", "thally-cloud"],
+    ["Mint the Cloud observer token (wait 3)", "thally-cloud"],
   ]) {
     const token = namedStep(tail, name);
     assert.match(token.uses, /actions\/create-github-app-token@[0-9a-f]{40}/);
@@ -604,8 +621,383 @@ test("splits the controller into a blocking stage and a publication tail", () =>
   const cloud = namedStep(tail, "Wait for exact Cloud production handoff");
   assert.equal(cloud.env.GH_TOKEN, "${{ steps.cloud-observer.outputs.token }}");
   assert.equal(cloud.env.EXPECTED_TITLE, "${{ steps.publication.outputs.expected_cloud_title }}");
-  assert.match(cloud.run, /conclusion="\$\(run_conclusion thallylabs\/thally-cloud "\$cloud_run"\)"/);
+  // The staged Cloud wait has its own tests below; a concluded failure
+  // still fails the step.
   assert.match(cloud.run, /if \[\[ "\$conclusion" != "success" \]\]; then\n[^\n]*::error::[^\n]*\n\s+exit 1/);
+});
+
+test("starts the hosted toolchain sync early without gating publication", () => {
+  const tail = fullReleaseWorkflow.jobs.publication;
+  const names = tail.steps.map((step) => step.name);
+  const token = namedStep(tail, "Mint the early toolchain sync token");
+  const start = namedStep(tail, "Start the Cloud toolchain sync early");
+
+  // Started before the npm wait, so it overlaps publication instead of
+  // following it, and only after the main-only guard.
+  assert.ok(names.indexOf("Reject non-main dispatches") < names.indexOf(token.name));
+  assert.equal(names.indexOf(start.name), names.indexOf(token.name) + 1);
+  assert.equal(names.indexOf("Wait for npm publication"), names.indexOf(start.name) + 1);
+
+  // Warning-only: neither step can fail the job, and nothing later reads
+  // either one, so they gate nothing.
+  assert.equal(token["continue-on-error"], true);
+  assert.equal(start["continue-on-error"], true);
+  for (const later of tail.steps.slice(names.indexOf(start.name) + 1)) {
+    assert.doesNotMatch(JSON.stringify(later), /early-toolchain/, later.name);
+  }
+
+  // The narrowest token that can dispatch one Cloud workflow.
+  assert.equal(token.id, "early-toolchain-token");
+  assert.equal(token.uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1");
+  assert.deepEqual(token.with, {
+    "client-id": "${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}",
+    "private-key": "${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}",
+    owner: "${{ github.repository_owner }}",
+    repositories: "thally-cloud",
+    "permission-actions": "write",
+  });
+
+  // The source is the runtime commit the release record pins, the commit
+  // the Cloud promotion verifies. Values arrive only through env.
+  assert.deepEqual(start.env, {
+    GH_TOKEN: "${{ steps.early-toolchain-token.outputs.token }}",
+    RUNTIME_SHA: "${{ needs.release.outputs.runtime_sha }}",
+  });
+  assert.doesNotMatch(start.run, /\$\{\{/);
+  assert.match(start.run, /\[\[ ! "\$RUNTIME_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(start.run, /early_request="early-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}"/);
+  assert.match(start.run, /repos\/thallylabs\/thally-cloud\/actions\/workflows\/sync-public-toolchain\.yml\/dispatches/);
+
+  // Dispatch only: no waiting, polling, or failing exit.
+  assert.doesNotMatch(start.run, /gh run (?:watch|view|list)|\bsleep\b|exit 1|set -e/);
+  assert.match(start.run, /exit 0\n?$/);
+});
+
+test("the early toolchain sync start warns instead of failing", () => {
+  const { run } = namedStep(fullReleaseWorkflow.jobs.publication, "Start the Cloud toolchain sync early");
+  const directory = mkdtempSync(join(tmpdir(), "early-toolchain-"));
+  const calls = join(directory, "calls");
+  // A stand-in `gh` that records its arguments and request body, then
+  // succeeds or fails as the case requires.
+  writeFileSync(
+    join(directory, "gh"),
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\ncat >> "${calls}"\nexit "\${FAKE_GH_STATUS:-0}"\n`,
+    { mode: 0o755 },
+  );
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const execute = (env) => {
+    rmSync(calls, { force: true });
+    const result = spawnSync("bash", ["-c", run], {
+      encoding: "utf8",
+      env: {
+        PATH: `${directory}:${process.env.PATH}`,
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GH_TOKEN: "token",
+        RUNTIME_SHA: sha,
+        ...env,
+      },
+    });
+    const recorded = existsSync(calls) ? readFileSync(calls, "utf8") : "";
+    return { ...result, recorded };
+  };
+
+  try {
+    const started = execute({});
+    assert.equal(started.status, 0);
+    assert.doesNotMatch(started.stdout, /::warning::/);
+    const newline = started.recorded.indexOf("\n");
+    const args = started.recorded.slice(0, newline);
+    const body = started.recorded.slice(newline + 1);
+    assert.equal(args, "api --method POST repos/thallylabs/thally-cloud/actions/workflows/sync-public-toolchain.yml/dispatches --input -");
+    assert.deepEqual(JSON.parse(body), {
+      ref: "main",
+      inputs: { source_sha: sha, request_id: "early-123-2" },
+    });
+
+    const rejected = execute({ FAKE_GH_STATUS: "1" });
+    assert.equal(rejected.status, 0);
+    assert.match(rejected.stdout, /::warning::Could not start the Cloud toolchain sync early/);
+
+    for (const runtime of ["", "main", sha.slice(0, 12), `${sha}\nx`]) {
+      const invalid = execute({ RUNTIME_SHA: runtime });
+      assert.equal(invalid.status, 0, runtime);
+      assert.match(invalid.stdout, /::warning::Did not start the Cloud toolchain sync early/, runtime);
+      assert.equal(invalid.recorded, "", runtime);
+    }
+
+    const untokened = execute({ GH_TOKEN: "" });
+    assert.equal(untokened.status, 0);
+    assert.match(untokened.stdout, /::warning::Could not mint a token/);
+    assert.equal(untokened.recorded, "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** The Cloud wait stages of the publication tail, in step order. */
+const cloudWaitStages = () =>
+  fullReleaseWorkflow.jobs.publication.steps.filter((step) => /^cloud-wait-\d+$/.test(step.id ?? ""));
+/** The part of a stage script shared by every stage. */
+const sharedWait = (run) => run.slice(offsetOf(run, /^# Bounded wait:/m));
+
+test("splits the Cloud wait into bounded stages, each with a fresh read-only token", () => {
+  const tail = fullReleaseWorkflow.jobs.publication;
+  const names = tail.steps.map((step) => step.name);
+  const stages = cloudWaitStages();
+  const count = Number(stages[0].env.WAIT_STAGES);
+  assert.ok(count >= 2);
+  assert.equal(stages.length, count);
+  const firstMint = namedStep(tail, "Mint the Cloud observer token");
+  assert.deepEqual(firstMint.with, {
+    "client-id": "${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}",
+    "private-key": "${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}",
+    owner: "${{ github.repository_owner }}",
+    repositories: "thally-cloud",
+    "permission-actions": "read",
+    "permission-contents": "read",
+  });
+  // The first stage starts only after npm completes, as before.
+  assert.ok(names.indexOf("Wait for npm publication") < names.indexOf(firstMint.name));
+
+  stages.forEach((stage, index) => {
+    const number = index + 1;
+    assert.equal(stage.id, `cloud-wait-${number}`);
+    assert.equal(Number(stage.env.WAIT_STAGE), number);
+    assert.equal(Number(stage.env.WAIT_STAGES), count);
+    assert.doesNotMatch(stage.run, /\$\{\{/);
+
+    // Every stage is preceded by its own mint, with exactly the first
+    // observer's read-only scope from the same pinned action.
+    const mint = tail.steps[tail.steps.indexOf(stage) - 1];
+    assert.equal(mint.uses, firstMint.uses);
+    assert.match(mint.uses, /^actions\/create-github-app-token@[0-9a-f]{40}$/);
+    assert.deepEqual(mint.with, firstMint.with);
+    assert.equal(mint.if, stage.if);
+    assert.equal(stage.env.GH_TOKEN, `\${{ steps.${mint.id}.outputs.token }}`);
+
+    // A later stage runs only when the previous one handed off a run still
+    // in progress, reuses the first stage's run id, and never looks it up.
+    if (number === 1) {
+      assert.equal(stage.name, "Wait for exact Cloud production handoff");
+      assert.equal(mint.id, "cloud-observer");
+      assert.equal(stage.env.EXPECTED_TITLE, "${{ steps.publication.outputs.expected_cloud_title }}");
+      assert.match(stage.run, /promote-scaffold-release\.yml\/runs/);
+      assert.ok(
+        offsetOf(stage.run, /echo "run_id=\$cloud_run" >> "\$GITHUB_OUTPUT"/) < offsetOf(stage.run, /^# Bounded wait:/m),
+      );
+    } else {
+      assert.equal(stage.if, `steps.cloud-wait-${number - 1}.outputs.concluded == 'false'`);
+      assert.equal(stage.env.CLOUD_RUN, "${{ steps.cloud-wait-1.outputs.run_id }}");
+      assert.equal(stage.env.EXPECTED_TITLE, undefined);
+      assert.doesNotMatch(stage.run, /gh api|display_title|\/runs\?/);
+      assert.match(stage.run, /cloud_run="\$CLOUD_RUN"\nif \[\[ ! "\$cloud_run" =~ \^\[0-9\]\+\$ \]\]; then/);
+    }
+    // Each stage runs the same bounded wait.
+    assert.equal(sharedWait(stage.run), sharedWait(stages[0].run));
+  });
+
+  // Each stage's reads fit inside one token's hour: the budget, and the
+  // step's own backstop above it, are both below sixty minutes.
+  const budget = Number(stages[0].env.STAGE_BUDGET_MINUTES);
+  for (const stage of stages) {
+    assert.equal(Number(stage.env.STAGE_BUDGET_MINUTES), budget);
+    assert.ok(budget < stage["timeout-minutes"], stage.name);
+    assert.ok(stage["timeout-minutes"] < 60, stage.name);
+  }
+
+  // The #379 pattern, bounded by the budget: the watch only waits and its
+  // status is ignored, the conclusion is read separately, a good read resets
+  // the failure count, and only ten failed reads in a row give up.
+  const wait = sharedWait(stages[0].run);
+  assert.match(wait, /deadline=\$\(\(started \+ STAGE_BUDGET_MINUTES \* 60\)\)/);
+  assert.match(wait, /timeout "\$remaining" gh run watch "\$cloud_run" --repo thallylabs\/thally-cloud >&2 \|\| true/);
+  assert.match(wait, /if state="\$\(\n\s+gh run view "\$cloud_run" --repo thallylabs\/thally-cloud --json status,conclusion/);
+  assert.match(wait, /\)"; then\n\s+failures=0\n/);
+  assert.match(wait, /if \[\[ "\$failures" -ge 10 \]\]; then\n\s+result="unreadable"/);
+  assert.doesNotMatch(wait, /--exit-status/);
+  // Only the stages read their results; the mints read them only to share
+  // their stage's condition (checked above).
+  for (const step of tail.steps.filter((candidate) => !stages.includes(candidate))) {
+    assert.doesNotMatch(JSON.stringify({ ...step, if: undefined }), /cloud-wait-/, step.name);
+  }
+});
+
+test("the publication job outlasts every step's bound, counting each Cloud stage at its budget", () => {
+  const tail = fullReleaseWorkflow.jobs.publication;
+  const stages = cloudWaitStages();
+  const bounded = [
+    "Mint the early toolchain sync token",
+    "Start the Cloud toolchain sync early",
+    "Wait for npm publication",
+    ...tail.steps.filter((step) => /^cloud-observer/.test(step.id ?? "")).map((step) => step.name),
+    ...stages.map((step) => step.name),
+  ];
+  for (const name of bounded) {
+    assert.ok(Number.isInteger(namedStep(tail, name)["timeout-minutes"]), name);
+  }
+  // A slow but healthy release ends with the final stage's clear error,
+  // not with the job being cancelled.
+  const total = tail.steps.reduce(
+    (sum, step) => sum + (stages.includes(step) ? Number(step.env.STAGE_BUDGET_MINUTES) : step["timeout-minutes"] ?? 0),
+    0,
+  );
+  assert.ok(tail["timeout-minutes"] >= total, `${tail["timeout-minutes"]} < ${total}`);
+  // The npm observer is minted at the start of the job; everything that uses
+  // it finishes inside its hour.
+  const steps = tail.steps.map((step) => step.name);
+  const npmToken = tail.steps
+    .slice(steps.indexOf("Mint the publication observer token") + 1, steps.indexOf("Wait for npm publication") + 1)
+    .reduce((sum, step) => sum + step["timeout-minutes"], 0);
+  assert.ok(npmToken < 60, `${npmToken}`);
+});
+
+test("each Cloud wait stage concludes, hands off, or fails with what it knows", () => {
+  const stages = cloudWaitStages();
+  const budgetSeconds = Number(stages[0].env.STAGE_BUDGET_MINUTES) * 60;
+  const directory = mkdtempSync(join(tmpdir(), "cloud-wait-"));
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  const file = (name) => join(directory, name);
+  const script = (name, body) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+  // A fake clock: `date` reads it, `sleep` advances it, and `timeout`
+  // advances it as if the watch it bounds ran for WATCH_SECONDS (at most
+  // the limit it was given).
+  script("date", `cat "${file("clock")}"`);
+  script("sleep", `echo $(( $(cat "${file("clock")}") + \${1%s} )) > "${file("clock")}"`);
+  script(
+    "timeout",
+    `printf 'timeout %s\\n' "$1" >> "${file("calls")}"
+limit="$1"; shift
+ran="\${WATCH_SECONDS:-$limit}"; [[ "$ran" -gt "$limit" ]] && ran="$limit"
+echo $(( $(cat "${file("clock")}") + ran )) > "${file("clock")}"
+"$@"`,
+  );
+  // `gh` answers run views from a queue whose last answer repeats.
+  script(
+    "gh",
+    `printf '%s\\n' "$*" >> "${file("calls")}"
+case "$1 $2" in
+  "run watch") exit "\${WATCH_STATUS:-0}" ;;
+  "run view")
+    line="$(head -n 1 "${file("views")}")"
+    if [[ "$(wc -l < "${file("views")}")" -gt 1 ]]; then
+      tail -n +2 "${file("views")}" > "${file("views")}.next"
+      mv "${file("views")}.next" "${file("views")}"
+    fi
+    [[ "$line" == fail ]] && exit 1
+    printf '%s\\n' "$line" ;;
+  "api repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=workflow_dispatch&per_page=100")
+    printf '%s' "$RUNS_JSON" ;;
+  *) exit 2 ;;
+esac`,
+  );
+  const title = "scaffold-production · automated · handoff-1-1 · 2026-11-24.a · abc";
+  const runs = JSON.stringify({
+    workflow_runs: [
+      { id: 111, display_title: "another release", actor: { login: "coordinator" } },
+      { id: 555, display_title: title, actor: { login: "someone-else" } },
+      { id: 987, display_title: title, actor: { login: "coordinator" } },
+    ],
+  });
+  const start = 1_000_000;
+  const execute = (stage, views, env = {}) => {
+    writeFileSync(file("clock"), `${start}\n`);
+    writeFileSync(file("views"), `${views.join("\n")}\n`);
+    writeFileSync(file("output"), "");
+    rmSync(file("calls"), { force: true });
+    const result = spawnSync("bash", ["-c", stages[stage - 1].run], {
+      encoding: "utf8",
+      // A stage that never ends fails here instead of hanging the suite.
+      timeout: 20_000,
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        GITHUB_OUTPUT: file("output"),
+        GH_TOKEN: "token",
+        STAGE_BUDGET_MINUTES: stages[stage - 1].env.STAGE_BUDGET_MINUTES,
+        WAIT_STAGE: String(stage),
+        WAIT_STAGES: String(stages.length),
+        ...(stage === 1
+          ? { COORDINATOR_ACTOR: "coordinator", EXPECTED_TITLE: title, RELEASE_ID: "2026-11-24.a", RUNS_JSON: runs }
+          : { CLOUD_RUN: "987" }),
+        ...env,
+      },
+    });
+    const calls = existsSync(file("calls")) ? readFileSync(file("calls"), "utf8").trim().split("\n") : [];
+    return {
+      ...result,
+      calls,
+      views: calls.filter((call) => call.startsWith("run view")).length,
+      elapsed: Number(readFileSync(file("clock"), "utf8")) - start,
+      outputs: Object.fromEntries(
+        readFileSync(file("output"), "utf8").trim().split("\n").filter(Boolean).map((line) => line.split("=")),
+      ),
+    };
+  };
+
+  try {
+    // Stage 1 finds the run and sees it conclude, even when the watch and
+    // one read fail.
+    const concluded = execute(1, ["fail", "completed/success"], { WATCH_STATUS: "1" });
+    assert.equal(concluded.status, 0, concluded.stdout);
+    assert.deepEqual(concluded.outputs, { run_id: "987", concluded: "true" });
+    assert.equal(concluded.views, 2);
+    assert.equal(concluded.calls.filter((call) => call.startsWith("api ")).length, 1);
+    assert.doesNotMatch(concluded.stdout, /::error::/);
+
+    // Its budget runs out while the run is still going: it hands off with the
+    // run id, having never waited past the budget by more than one poll.
+    const handedOff = execute(1, ["in_progress/"], { WATCH_SECONDS: "600" });
+    assert.equal(handedOff.status, 0, handedOff.stdout);
+    assert.deepEqual(handedOff.outputs, { run_id: "987", concluded: "false" });
+    assert.match(handedOff.stdout, /::notice::.*actions\/runs\/987 is still running after wait 1 of 3/);
+    assert.ok(handedOff.views > 1);
+    assert.ok(handedOff.elapsed >= budgetSeconds && handedOff.elapsed <= budgetSeconds + 30, `${handedOff.elapsed}`);
+    for (const call of handedOff.calls.filter((line) => line.startsWith("timeout "))) {
+      assert.ok(Number(call.split(" ")[1]) <= budgetSeconds, call);
+    }
+
+    // The next stage reuses that run id without a lookup and sees it conclude.
+    const resumed = execute(2, ["in_progress/", "completed/success"], {
+      CLOUD_RUN: handedOff.outputs.run_id,
+      WATCH_SECONDS: "60",
+    });
+    assert.equal(resumed.status, 0, resumed.stdout);
+    assert.deepEqual(resumed.outputs, { concluded: "true" });
+    assert.ok(resumed.calls.every((call) => !call.startsWith("api ")));
+    assert.ok(resumed.calls.some((call) => call.startsWith("run watch 987 ")));
+
+    // A concluded failure still fails, as before.
+    const failed = execute(2, ["completed/failure"]);
+    assert.equal(failed.status, 1);
+    assert.match(failed.stdout, /::error::Cloud scaffold promotion run 987 ended with "failure"/);
+    assert.deepEqual(failed.outputs, {});
+
+    // Reads that keep failing are not a timeout: ten in a row give up with
+    // the existing error, even before the budget is spent.
+    const unreadable = execute(2, ["fail"], { WATCH_SECONDS: "1" });
+    assert.equal(unreadable.status, 1);
+    assert.match(unreadable.stdout, /::error::Cloud scaffold promotion run 987 ended with "a result GitHub did not return"/);
+    assert.equal(unreadable.views, 10);
+    assert.ok(unreadable.elapsed < budgetSeconds);
+    assert.deepEqual(unreadable.outputs, {});
+
+    // The final stage running out says where the promotion is still running.
+    const exhausted = execute(stages.length, ["in_progress/"]);
+    assert.equal(exhausted.status, 1);
+    assert.match(
+      exhausted.stdout,
+      new RegExp(`::error::Cloud scaffold promotion run https://github\\.com/thallylabs/thally-cloud/actions/runs/987 is still running after ${stages.length * budgetSeconds / 60} minutes\\. Let it finish, then run Full release again`),
+    );
+    assert.deepEqual(exhausted.outputs, {});
+
+    // A later stage without a run id fails before calling GitHub.
+    const missing = execute(2, ["completed/success"], { CLOUD_RUN: "" });
+    assert.equal(missing.status, 1);
+    assert.deepEqual(missing.calls, []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("accepts a pending starter commit only for the controller's merging dispatch", () => {
@@ -746,7 +1138,6 @@ test("waits on other workflow runs without failing on a transient GitHub error",
   const waits = [
     [fullReleaseWorkflow.jobs.release, "Wait for the merged release record"],
     [fullReleaseWorkflow.jobs.publication, "Wait for npm publication"],
-    [fullReleaseWorkflow.jobs.publication, "Wait for exact Cloud production handoff"],
     [promotionWorkflow.jobs.promote, "Merge after CI succeeds"],
   ];
   for (const [job, name] of waits) {
