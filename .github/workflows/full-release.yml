@@ -645,16 +645,24 @@ jobs:
 
   # The asynchronous tail. Nothing here changes a repository: it observes the
   # publication that the merged record started and fails this run if npm
-  # verification or the Cloud promotion fails. To recover from a failure here,
-  # dispatch Full release again; it detects the merged record and re-drives
-  # only the interrupted publication.
+  # verification or the Cloud promotion fails. Its one side effect is an early,
+  # warning-only start of the hosted toolchain sync. To recover from a failure
+  # here, dispatch Full release again; it detects the merged record and
+  # re-drives only the interrupted publication.
   publication:
     name: Publish · Promote to Cloud
     needs: release
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Covers npm publication plus the managed promotion, which may first wait
+    # for its hosted toolchain synchronization (including that change's CI).
+    # Normal runs finish far sooner; this bounds only a slow but healthy run.
+    # It is at least the sum of every step's own bound, counting each Cloud
+    # wait stage at its budget, so the last stage's clear error comes first.
+    timeout-minutes: 200
     # The same main-restricted environment as the blocking stage. This job
-    # mints its own read-only tokens; none is passed between jobs.
+    # mints its own tokens and none is passed between jobs: a read-only
+    # observer for npm, a fresh read-only observer for each Cloud wait stage,
+    # and one that can only start the hosted toolchain sync.
     environment: release-control
     steps:
       - name: Reject non-main dispatches
@@ -672,9 +680,64 @@ jobs:
           permission-actions: read
           permission-contents: read
 
+      # The Cloud promotion synchronizes the hosted toolchain to this release's
+      # runtime before it promotes, and waits for that itself.
+      # Starting the sync here only lets it overlap npm publication. Both
+      # steps are warning-only: neither can fail or delay this job, and no
+      # later step reads them.
+      - name: Mint the early toolchain sync token
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
+        id: early-toolchain-token
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally-cloud
+          permission-actions: write
+
+      - name: Start the Cloud toolchain sync early
+        if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
+        id: early-toolchain
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.early-toolchain-token.outputs.token }}
+          RUNTIME_SHA: ${{ needs.release.outputs.runtime_sha }}
+        run: |
+          # Dispatch only. Every failure is a warning and the step exits 0.
+          set -uo pipefail
+          early_request="early-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::Could not mint a token to start the Cloud toolchain sync early; the Cloud promotion still synchronizes it."
+            exit 0
+          fi
+          if [[ ! "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::warning::Did not start the Cloud toolchain sync early: the runtime commit \"$RUNTIME_SHA\" is not a full SHA."
+            exit 0
+          fi
+          if jq -n \
+              --arg source_sha "$RUNTIME_SHA" \
+              --arg request_id "$early_request" \
+              '{ref: "main", inputs: {source_sha: $source_sha, request_id: $request_id}}' \
+            | gh api --method POST \
+              repos/thallylabs/thally-cloud/actions/workflows/sync-public-toolchain.yml/dispatches \
+              --input - >/dev/null; then
+            echo "Started the Cloud toolchain sync for $RUNTIME_SHA ($early_request)."
+          else
+            echo "::warning::Could not start the Cloud toolchain sync early for $RUNTIME_SHA; the Cloud promotion still synchronizes it."
+          fi
+          exit 0
+
+      # Its observer token was minted at the start of this job, so this wait
+      # and the steps before it stay well inside the token's one hour.
       - name: Wait for npm publication
         if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
         id: publication
+        timeout-minutes: 40
         shell: bash
         env:
           GH_TOKEN: ${{ steps.publication-observer.outputs.token }}
@@ -760,11 +823,16 @@ jobs:
           handoff_id="handoff-${publish_run}-${publish_attempt}"
           echo "expected_cloud_title=scaffold-production · automated · ${handoff_id} · ${RELEASE_ID} · ${RECORD_SHA}" >> "$GITHUB_OUTPUT"
 
-      # Installation tokens expire after one hour. Mint this observer only
-      # after npm completes so a long baseline build retains a fresh token.
+      # Installation tokens expire after one hour, and the Cloud promotion may
+      # run longer: it can first wait for the hosted toolchain sync to land.
+      # The wait is therefore split into 3 bounded stages. Each mints a fresh
+      # read-only observer just before it, waits at most STAGE_BUDGET_MINUTES,
+      # and runs only if the previous stage handed off a run still in progress.
+      # Each stage's timeout-minutes is a backstop below the token lifetime.
       - name: Mint the Cloud observer token
         if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
         id: cloud-observer
+        timeout-minutes: 5
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
@@ -776,37 +844,20 @@ jobs:
 
       - name: Wait for exact Cloud production handoff
         if: needs.release.outputs.needed == 'true' || needs.release.outputs.cloud_complete != 'true'
+        id: cloud-wait-1
+        timeout-minutes: 55
         shell: bash
         env:
           COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
           EXPECTED_TITLE: ${{ steps.publication.outputs.expected_cloud_title }}
           GH_TOKEN: ${{ steps.cloud-observer.outputs.token }}
           RELEASE_ID: ${{ needs.release.outputs.release_id }}
+          STAGE_BUDGET_MINUTES: 45
+          WAIT_STAGE: 1
+          WAIT_STAGES: 3
         run: |
           set -euo pipefail
-          # Prints the run's conclusion once it has completed, or nothing if
-          # GitHub could not be read for several consecutive attempts.
-          # `gh run watch` only waits: it also exits non-zero on a transient
-          # API error, so the conclusion is read separately and decides alone.
-          run_conclusion() {
-            local repo="$1" run="$2" failures=0 state
-            while [[ "$failures" -lt 10 ]]; do
-              gh run watch "$run" --repo "$repo" >&2 || true
-              if state="$(
-                gh run view "$run" --repo "$repo" --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
-              )"; then
-                failures=0
-                if [[ "$state" == completed/* ]]; then
-                  echo "${state#completed/}"
-                  return 0
-                fi
-              else
-                failures=$((failures + 1))
-              fi
-              sleep 30
-            done
-            return 0
-          }
+          started="$(date +%s)"
           # A failed lookup counts as "not found yet" and is retried.
           cloud_run=""
           for attempt in {1..120}; do
@@ -826,11 +877,255 @@ jobs:
             echo "::error::Cloud scaffold promotion did not start for $RELEASE_ID."
             exit 1
           fi
-          conclusion="$(run_conclusion thallylabs/thally-cloud "$cloud_run")"
-          if [[ "$conclusion" != "success" ]]; then
-            echo "::error::Cloud scaffold promotion run $cloud_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it in thally-cloud, then run Full release again."
+          echo "run_id=$cloud_run" >> "$GITHUB_OUTPUT"
+          # Bounded wait: this stage reads GitHub only with the token minted just
+          # before it, and for at most STAGE_BUDGET_MINUTES, so that token cannot
+          # expire mid-wait. It ends in one of three ways: the run concluded (its
+          # result decides, as before), GitHub reads kept failing, or the budget ran
+          # out while the run was still going. The last hands off to the next stage
+          # or, in the final stage, fails with the run's address.
+          # `gh run watch` only waits, and never past the budget: it also exits
+          # non-zero on a transient API error, so the conclusion is read separately
+          # and decides alone.
+          run_url="https://github.com/thallylabs/thally-cloud/actions/runs/$cloud_run"
+          deadline=$((started + STAGE_BUDGET_MINUTES * 60))
+          failures=0
+          result=""
+          while [[ -z "$result" ]]; do
+            remaining=$((deadline - $(date +%s)))
+            if [[ "$remaining" -gt 0 ]]; then
+              timeout "$remaining" gh run watch "$cloud_run" --repo thallylabs/thally-cloud >&2 || true
+            fi
+            if state="$(
+              gh run view "$cloud_run" --repo thallylabs/thally-cloud --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+            )"; then
+              failures=0
+              if [[ "$state" == completed/* ]]; then
+                result="concluded"
+                conclusion="${state#completed/}"
+              elif [[ "$(date +%s)" -ge "$deadline" ]]; then
+                result="budget"
+              fi
+            else
+              failures=$((failures + 1))
+              if [[ "$failures" -ge 10 ]]; then
+                result="unreadable"
+              fi
+            fi
+            if [[ -z "$result" ]]; then
+              sleep 30
+            fi
+          done
+
+          case "$result" in
+            concluded)
+              if [[ "$conclusion" != "success" ]]; then
+                echo "::error::Cloud scaffold promotion run $cloud_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it in thally-cloud, then run Full release again."
+                exit 1
+              fi
+              echo "concluded=true" >> "$GITHUB_OUTPUT"
+              ;;
+            unreadable)
+              echo "::error::Cloud scaffold promotion run $cloud_run ended with \"a result GitHub did not return\". Inspect it in thally-cloud, then run Full release again."
+              exit 1
+              ;;
+            budget)
+              if [[ "$WAIT_STAGE" -ge "$WAIT_STAGES" ]]; then
+                echo "::error::Cloud scaffold promotion run $run_url is still running after $((WAIT_STAGES * STAGE_BUDGET_MINUTES)) minutes. Let it finish, then run Full release again: it recognizes a completed promotion of this release, and otherwise restarts only the interrupted publication."
+                exit 1
+              fi
+              echo "::notice::Cloud scaffold promotion run $run_url is still running after wait $WAIT_STAGE of $WAIT_STAGES; continuing with a fresh observer token."
+              echo "concluded=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Mint the Cloud observer token (wait 2)
+        if: steps.cloud-wait-1.outputs.concluded == 'false'
+        id: cloud-observer-2
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally-cloud
+          permission-actions: read
+          permission-contents: read
+
+      - name: Keep waiting for the Cloud production handoff (wait 2)
+        if: steps.cloud-wait-1.outputs.concluded == 'false'
+        id: cloud-wait-2
+        timeout-minutes: 55
+        shell: bash
+        env:
+          CLOUD_RUN: ${{ steps.cloud-wait-1.outputs.run_id }}
+          GH_TOKEN: ${{ steps.cloud-observer-2.outputs.token }}
+          STAGE_BUDGET_MINUTES: 45
+          WAIT_STAGE: 2
+          WAIT_STAGES: 3
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          # The run found by the first wait; it is never looked up again.
+          cloud_run="$CLOUD_RUN"
+          if [[ ! "$cloud_run" =~ ^[0-9]+$ ]]; then
+            echo "::error::The Cloud scaffold promotion run to keep waiting on is unknown (\"$cloud_run\"). Run Full release again."
             exit 1
           fi
+          # Bounded wait: this stage reads GitHub only with the token minted just
+          # before it, and for at most STAGE_BUDGET_MINUTES, so that token cannot
+          # expire mid-wait. It ends in one of three ways: the run concluded (its
+          # result decides, as before), GitHub reads kept failing, or the budget ran
+          # out while the run was still going. The last hands off to the next stage
+          # or, in the final stage, fails with the run's address.
+          # `gh run watch` only waits, and never past the budget: it also exits
+          # non-zero on a transient API error, so the conclusion is read separately
+          # and decides alone.
+          run_url="https://github.com/thallylabs/thally-cloud/actions/runs/$cloud_run"
+          deadline=$((started + STAGE_BUDGET_MINUTES * 60))
+          failures=0
+          result=""
+          while [[ -z "$result" ]]; do
+            remaining=$((deadline - $(date +%s)))
+            if [[ "$remaining" -gt 0 ]]; then
+              timeout "$remaining" gh run watch "$cloud_run" --repo thallylabs/thally-cloud >&2 || true
+            fi
+            if state="$(
+              gh run view "$cloud_run" --repo thallylabs/thally-cloud --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+            )"; then
+              failures=0
+              if [[ "$state" == completed/* ]]; then
+                result="concluded"
+                conclusion="${state#completed/}"
+              elif [[ "$(date +%s)" -ge "$deadline" ]]; then
+                result="budget"
+              fi
+            else
+              failures=$((failures + 1))
+              if [[ "$failures" -ge 10 ]]; then
+                result="unreadable"
+              fi
+            fi
+            if [[ -z "$result" ]]; then
+              sleep 30
+            fi
+          done
+
+          case "$result" in
+            concluded)
+              if [[ "$conclusion" != "success" ]]; then
+                echo "::error::Cloud scaffold promotion run $cloud_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it in thally-cloud, then run Full release again."
+                exit 1
+              fi
+              echo "concluded=true" >> "$GITHUB_OUTPUT"
+              ;;
+            unreadable)
+              echo "::error::Cloud scaffold promotion run $cloud_run ended with \"a result GitHub did not return\". Inspect it in thally-cloud, then run Full release again."
+              exit 1
+              ;;
+            budget)
+              if [[ "$WAIT_STAGE" -ge "$WAIT_STAGES" ]]; then
+                echo "::error::Cloud scaffold promotion run $run_url is still running after $((WAIT_STAGES * STAGE_BUDGET_MINUTES)) minutes. Let it finish, then run Full release again: it recognizes a completed promotion of this release, and otherwise restarts only the interrupted publication."
+                exit 1
+              fi
+              echo "::notice::Cloud scaffold promotion run $run_url is still running after wait $WAIT_STAGE of $WAIT_STAGES; continuing with a fresh observer token."
+              echo "concluded=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Mint the Cloud observer token (wait 3)
+        if: steps.cloud-wait-2.outputs.concluded == 'false'
+        id: cloud-observer-3
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally-cloud
+          permission-actions: read
+          permission-contents: read
+
+      - name: Keep waiting for the Cloud production handoff (wait 3)
+        if: steps.cloud-wait-2.outputs.concluded == 'false'
+        id: cloud-wait-3
+        timeout-minutes: 55
+        shell: bash
+        env:
+          CLOUD_RUN: ${{ steps.cloud-wait-1.outputs.run_id }}
+          GH_TOKEN: ${{ steps.cloud-observer-3.outputs.token }}
+          STAGE_BUDGET_MINUTES: 45
+          WAIT_STAGE: 3
+          WAIT_STAGES: 3
+        run: |
+          set -euo pipefail
+          started="$(date +%s)"
+          # The run found by the first wait; it is never looked up again.
+          cloud_run="$CLOUD_RUN"
+          if [[ ! "$cloud_run" =~ ^[0-9]+$ ]]; then
+            echo "::error::The Cloud scaffold promotion run to keep waiting on is unknown (\"$cloud_run\"). Run Full release again."
+            exit 1
+          fi
+          # Bounded wait: this stage reads GitHub only with the token minted just
+          # before it, and for at most STAGE_BUDGET_MINUTES, so that token cannot
+          # expire mid-wait. It ends in one of three ways: the run concluded (its
+          # result decides, as before), GitHub reads kept failing, or the budget ran
+          # out while the run was still going. The last hands off to the next stage
+          # or, in the final stage, fails with the run's address.
+          # `gh run watch` only waits, and never past the budget: it also exits
+          # non-zero on a transient API error, so the conclusion is read separately
+          # and decides alone.
+          run_url="https://github.com/thallylabs/thally-cloud/actions/runs/$cloud_run"
+          deadline=$((started + STAGE_BUDGET_MINUTES * 60))
+          failures=0
+          result=""
+          while [[ -z "$result" ]]; do
+            remaining=$((deadline - $(date +%s)))
+            if [[ "$remaining" -gt 0 ]]; then
+              timeout "$remaining" gh run watch "$cloud_run" --repo thallylabs/thally-cloud >&2 || true
+            fi
+            if state="$(
+              gh run view "$cloud_run" --repo thallylabs/thally-cloud --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+            )"; then
+              failures=0
+              if [[ "$state" == completed/* ]]; then
+                result="concluded"
+                conclusion="${state#completed/}"
+              elif [[ "$(date +%s)" -ge "$deadline" ]]; then
+                result="budget"
+              fi
+            else
+              failures=$((failures + 1))
+              if [[ "$failures" -ge 10 ]]; then
+                result="unreadable"
+              fi
+            fi
+            if [[ -z "$result" ]]; then
+              sleep 30
+            fi
+          done
+
+          case "$result" in
+            concluded)
+              if [[ "$conclusion" != "success" ]]; then
+                echo "::error::Cloud scaffold promotion run $cloud_run ended with \"${conclusion:-a result GitHub did not return}\". Inspect it in thally-cloud, then run Full release again."
+                exit 1
+              fi
+              echo "concluded=true" >> "$GITHUB_OUTPUT"
+              ;;
+            unreadable)
+              echo "::error::Cloud scaffold promotion run $cloud_run ended with \"a result GitHub did not return\". Inspect it in thally-cloud, then run Full release again."
+              exit 1
+              ;;
+            budget)
+              if [[ "$WAIT_STAGE" -ge "$WAIT_STAGES" ]]; then
+                echo "::error::Cloud scaffold promotion run $run_url is still running after $((WAIT_STAGES * STAGE_BUDGET_MINUTES)) minutes. Let it finish, then run Full release again: it recognizes a completed promotion of this release, and otherwise restarts only the interrupted publication."
+                exit 1
+              fi
+              echo "::notice::Cloud scaffold promotion run $run_url is still running after wait $WAIT_STAGE of $WAIT_STAGES; continuing with a fresh observer token."
+              echo "concluded=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - name: Write release summary
         shell: bash
