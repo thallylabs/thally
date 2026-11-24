@@ -275,6 +275,36 @@ describe('documentation visual system', () => {
     expect(markup).toContain('text-sm')
   })
 
+  it('keeps a visible sidebar scrollbar so readers can see more navigation below', async () => {
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Guides',
+        sections: [
+          {
+            title: 'Getting started',
+            items: [{ id: 'quickstart', title: 'Quickstart', href: '/guides/quickstart' }],
+          },
+        ],
+      }),
+    )
+
+    expect(markup).toContain('thally-docs-sidebar-scroll')
+    expect(markup).not.toContain('scrollbar-hide')
+
+    const { readFile } = await import('node:fs/promises')
+    const [css, mobileNav] = await Promise.all([
+      readFile('src/styles/docs-handoff.css', 'utf8'),
+      readFile('src/components/navigation/mobile-nav.tsx', 'utf8'),
+    ])
+
+    // The global reset hides scrollbars; the sidebar must opt back in so the
+    // reader can see that the navigation continues below the fold.
+    expect(css).toMatch(/\.thally-docs-sidebar-scroll \{\s*scrollbar-width: thin;/)
+    expect(css).toMatch(/\.thally-docs-sidebar-scroll::-webkit-scrollbar \{\s*display: block;\s*width: 8px;/)
+    expect(css).toMatch(/\.thally-docs-sidebar-scroll::-webkit-scrollbar-thumb \{[^}]*border-radius: 999px;/)
+    expect(mobileNav).toContain('thally-docs-sidebar-scroll')
+  })
+
   it('renders nested groups recursively instead of flattening duplicate headings', () => {
     const triggering = { id: 'triggering', title: 'Triggering', href: '/triggering' }
     const overview = { id: 'tasks-overview', title: 'Overview', href: '/tasks/overview' }
