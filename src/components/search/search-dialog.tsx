@@ -4,10 +4,11 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { Sparkles } from 'lucide-react'
+import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
 import {
   Command,
   CommandDialog,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
@@ -29,6 +30,7 @@ interface SearchResult {
 
 interface SearchResponse {
   results?: Array<SearchResult>
+  related?: Array<SearchResult>
 }
 
 interface SearchDialogProps {
@@ -64,20 +66,45 @@ function toLocalHref(value: string) {
   }
 }
 
+function SearchResultRow({ result, onSelect }: { result: SearchResult; onSelect: () => void }) {
+  return (
+    <CommandItem value={result.page_id} onSelect={onSelect}>
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium">
+          {result.method ? <span className="mr-2 font-mono text-xs uppercase text-foreground/60">{result.method}</span> : null}
+          {result.title}
+        </span>
+        <span className="truncate text-xs text-foreground/60">
+          {result.description || result.snippet}
+        </span>
+      </div>
+    </CommandItem>
+  )
+}
+
 export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) {
   const router = useRouter()
+  const { hasAssistantEntryPoint, assistantLabel, openAssistant, openAssistantWithPrompt } = useDocsCodeActions()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<SearchResult>>([])
+  const [related, setRelated] = useState<Array<SearchResult>>([])
   const [loading, setLoading] = useState(false)
   const lastTrackedRef = useRef('')
 
   useEffect(() => {
     const normalized = query.trim()
-    if (normalized.length < 2) return
+    if (normalized.length < 2) {
+      setLoading(false)
+      setResults([])
+      setRelated([])
+      return
+    }
 
+    setLoading(true)
+    setResults([])
+    setRelated([])
     const controller = new AbortController()
     const timeout = window.setTimeout(async () => {
-      setLoading(true)
       try {
         const response = await fetch(
           `/api/search?q=${encodeURIComponent(normalized)}&limit=8&mode=fulltext${locale ? `&locale=${encodeURIComponent(locale)}` : ''}`,
@@ -86,8 +113,12 @@ export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) 
         if (!response.ok) throw new Error(`Search failed with ${response.status}`)
         const data = (await response.json()) as SearchResponse
         setResults(data.results ?? [])
+        setRelated(data.related ?? [])
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) setResults([])
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setResults([])
+          setRelated([])
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false)
       }
@@ -99,35 +130,42 @@ export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) 
     }
   }, [query, locale])
 
-  const visibleResults = query.trim().length >= 2 ? results : []
+  const normalizedQuery = query.trim()
+  const isSearchable = normalizedQuery.length >= 2
+  const visibleResults = isSearchable ? results : []
+  const visibleRelated = isSearchable && visibleResults.length === 0 ? related : []
+  const assistantName = assistantLabel.trim() || 'AI'
+  const askLabel = /^ask\b/i.test(assistantName) ? assistantName : `Ask ${assistantName}`
+  const assistantActionLabel = normalizedQuery ? `${askLabel} about "${normalizedQuery}"` : askLabel
+  const showAssistant = hasAssistantEntryPoint
+    && (!isSearchable || (!loading && visibleResults.length === 0))
+  const showNoResults = isSearchable && !loading && visibleResults.length === 0 && visibleRelated.length === 0
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) {
-      const normalized = query.trim()
-      if (normalized.length >= 2 && normalized !== lastTrackedRef.current) {
-        lastTrackedRef.current = normalized
-        trackSearch({ query: normalized, resultCount: visibleResults.length })
-      }
+    if (!nextOpen && isSearchable && normalizedQuery !== lastTrackedRef.current) {
+      lastTrackedRef.current = normalizedQuery
+      trackSearch({ query: normalizedQuery, resultCount: visibleResults.length })
     }
     onOpenChange(nextOpen)
   }
 
   function handleSelect(result: SearchResult) {
-    const normalized = query.trim()
-    if (normalized) {
-      trackSearch({ query: normalized, clickedSlug: result.page_id })
-      lastTrackedRef.current = normalized
+    if (normalizedQuery) {
+      trackSearch({ query: normalizedQuery, clickedSlug: result.page_id })
+      lastTrackedRef.current = normalizedQuery
     }
     router.push(toLocalHref(result.section_url ?? result.url))
     onOpenChange(false)
   }
 
-  const emptyMessage =
-    query.trim().length < 2
-      ? 'Type at least 2 characters to search.'
-      : loading
-        ? 'Searching…'
-        : 'No matches found.'
+  function handleAskAssistant() {
+    if (normalizedQuery) {
+      openAssistantWithPrompt(normalizedQuery)
+    } else {
+      openAssistant()
+    }
+    handleOpenChange(false)
+  }
 
   return (
     <CommandDialog open={open} onOpenChange={handleOpenChange}>
@@ -138,26 +176,47 @@ export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) 
           placeholder="Search pages, concepts, or content..."
         />
         <CommandList>
-          <CommandEmpty>{emptyMessage}</CommandEmpty>
+          {!isSearchable && !hasAssistantEntryPoint ? (
+            <div className="py-6 text-center text-sm text-foreground/60">
+              Type at least 2 characters to search.
+            </div>
+          ) : null}
+          {isSearchable && loading ? (
+            <div className="py-6 text-center text-sm text-foreground/60">Searching…</div>
+          ) : null}
           {visibleResults.length > 0 ? (
             <CommandGroup heading="Documents">
               {visibleResults.map((result) => (
-                <CommandItem
+                <SearchResultRow
                   key={result.page_id}
-                  value={result.page_id}
+                  result={result}
                   onSelect={() => handleSelect(result)}
-                >
-                  <div className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium">
-                      {result.method ? <span className="mr-2 font-mono text-xs uppercase text-foreground/60">{result.method}</span> : null}
-                      {result.title}
-                    </span>
-                    <span className="truncate text-xs text-foreground/60">
-                      {result.description || result.snippet}
-                    </span>
-                  </div>
-                </CommandItem>
+                />
               ))}
+            </CommandGroup>
+          ) : null}
+          {visibleRelated.length > 0 ? (
+            <CommandGroup heading="Related">
+              {visibleRelated.map((result) => (
+                <SearchResultRow
+                  key={result.page_id}
+                  result={result}
+                  onSelect={() => handleSelect(result)}
+                />
+              ))}
+            </CommandGroup>
+          ) : null}
+          {showNoResults ? (
+            <div className="py-6 text-center text-sm text-foreground/60">
+              {`No results for "${normalizedQuery}".`}
+            </div>
+          ) : null}
+          {showAssistant ? (
+            <CommandGroup>
+              <CommandItem value="ask-assistant" onSelect={handleAskAssistant} className="items-start">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-foreground/60" aria-hidden="true" />
+                <span className="min-w-0 text-sm font-medium">{assistantActionLabel}</span>
+              </CommandItem>
             </CommandGroup>
           ) : null}
         </CommandList>

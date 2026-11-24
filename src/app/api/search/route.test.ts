@@ -41,6 +41,7 @@ import { GET } from './route'
 beforeEach(() => {
   vi.stubEnv('THALLY_CONTENT_SOURCE', 'filesystem')
   mocks.providerReads = 0
+  mocks.searchDocs.mockClear()
 })
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -151,5 +152,29 @@ describe('GET /api/search', () => {
     })
     expect(body.results[1]).toMatchObject({ type: 'api_operation', method: 'POST', path: '/users' })
     expect(body.results[1].api_url).toBeUndefined()
+  })
+
+  it('returns one normalized fallback as related when the first query finds nothing', async () => {
+    mocks.searchDocs
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { type: 'page', pageId: 'guides/self-hosting', title: 'Self-host', description: '', href: '/guides/self-hosting', score: 1, snippet: 's' },
+      ])
+    const body = await (await GET(new NextRequest('https://docs.example.com/api/search?q=selfhost'))).json()
+    expect(mocks.searchDocs).toHaveBeenCalledWith('selfhost', { limit: 8, mode: 'fulltext', locale: undefined })
+    expect(mocks.searchDocs).toHaveBeenLastCalledWith('self host', { limit: 8, mode: 'fulltext', locale: undefined })
+    expect(body.total).toBe(0)
+    expect(body.related).toHaveLength(1)
+    expect(body.related[0]).toMatchObject({
+      page_id: 'guides/self-hosting',
+      url: 'https://docs.example.com/guides/self-hosting',
+    })
+  })
+
+  it('does not run a fallback when normalization would not change the query', async () => {
+    mocks.searchDocs.mockResolvedValueOnce([])
+    const body = await (await GET(new NextRequest('https://docs.example.com/api/search?q=authentication'))).json()
+    expect(mocks.searchDocs).toHaveBeenCalledTimes(1)
+    expect(body.related).toEqual([])
   })
 })

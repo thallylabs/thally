@@ -104,4 +104,13 @@ describe('assistant availability', () => {
     cleanup?.()
     expect(document.removeEventListener).toHaveBeenCalledWith('keydown', listener)
   })
+
+  it('opens the assistant with a search prompt', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ show: true, label: 'ThallyAI' }) })))
+    render()
+    hooks.effects[0]()
+    await vi.waitFor(() => expect(render()).toContain('ThallyAI'))
+    actions.openAssistantWithPrompt('selfhost')
+    expect(render()).toContain('selfhost')
+  })
 })
