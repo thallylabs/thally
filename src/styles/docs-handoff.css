@@ -80,11 +80,12 @@ body {
   display: none;
 }
 
-/* The docs sidebar keeps a visible scrollbar so readers can see that more
-   navigation continues below the fold. Every other scroll area stays hidden. */
+/* The docs sidebar keeps a quiet scrollbar so readers can see that more
+   navigation continues below the fold. The track stays invisible and the thumb
+   is a muted wash; hover strengthens it. Every other scroll area stays hidden. */
 .thally-docs-sidebar-scroll {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--docs-mute) 70%, transparent) var(--docs-line);
+  scrollbar-color: color-mix(in oklab, var(--docs-mute) 45%, transparent) transparent;
   scrollbar-gutter: stable;
 }
 
@@ -94,19 +95,18 @@ body {
 }
 
 .thally-docs-sidebar-scroll::-webkit-scrollbar-track {
-  border-radius: 999px;
-  background: var(--docs-line);
+  background: transparent;
 }
 
 .thally-docs-sidebar-scroll::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background-color: color-mix(in oklab, var(--docs-mute) 70%, transparent);
+  background-color: color-mix(in oklab, var(--docs-mute) 45%, transparent);
   background-clip: content-box;
 }
 
 .thally-docs-sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in oklab, var(--docs-mute) 95%, transparent);
+  background-color: color-mix(in oklab, var(--docs-mute) 75%, transparent);
 }
 
 .thally-docs-root a,
