@@ -66,7 +66,7 @@ export function MobileNav({
               <X className="h-4 w-4" />
             </Dialog.Close>
           </div>
-          <nav aria-label="Mobile documentation" className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 py-6">
+          <nav aria-label="Mobile documentation" className="thally-docs-sidebar-scroll flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 py-6">
             {navigationPresentation.display === 'tabs' ? (
               <div className="thally-mobile-section-links">
                 <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={(id) => { onCollectionChange(id); setOpen(false) }} />

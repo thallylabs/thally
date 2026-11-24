@@ -70,7 +70,7 @@ export function Sidebar({
             )}
           </div>
         ) : null}
-        <nav ref={navRef} className={cn('scrollbar-hide min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5', hasCollectionHeader && 'mt-2.5')}>
+        <nav ref={navRef} className={cn('thally-docs-sidebar-scroll min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5', hasCollectionHeader && 'mt-2.5')}>
           {shortcuts.length > 0 ? (
             <div className="space-y-px border-b border-border/60 pb-4">
               {shortcuts.map((shortcut) => (
