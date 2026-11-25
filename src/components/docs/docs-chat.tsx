@@ -426,9 +426,6 @@ export function DocsChat({
             <div className="flex items-center gap-2.5">
               <SiteBrandMark size={20} className="thally-docs-chat-brand h-5 w-5" />
               <span className="text-sm font-semibold">{liveLabel}</span>
-              <span className="text-[10px] font-medium text-muted-foreground">
-                Beta
-              </span>
             </div>
             <div className="flex items-center gap-1">
               <button
