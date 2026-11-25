@@ -2,9 +2,10 @@
 
 /** Configurable page context actions, with explicit clipboard feedback and roving menu focus. */
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Copy, ExternalLink, FileText, Plug, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Copy, ExternalLink, FileText, Plug } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { ChatGptIcon, ClaudeIcon, PerplexityIcon } from '@/components/docs/provider-icons'
 import { agentServerName } from '@/lib/agent-identity'
 import { DEFAULT_PAGE_ACTIONS, MCP_PAGE_ACTIONS, PAGE_ACTIONS, mcpPageActions, pageMarkdownPath, type PageActionsConfig } from '@/lib/page-actions'
 import { cn } from '@/lib/utils'
@@ -142,9 +143,9 @@ export function CopyPageButton({ options = DEFAULT_PAGE_ACTIONS, serverName = ag
     { id: 'mcp', label: 'Copy MCP install command', description: 'Copy npx command to install MCP server', icon: <Plug />, copy: 'mcp' },
     { id: 'cursor', label: 'Connect to Cursor', description: 'Install MCP Server on Cursor', icon: <ExternalLink />, href: installs?.cursor },
     { id: 'vscode', label: 'Connect to VS Code', description: 'Install MCP Server on VS Code', icon: <ExternalLink />, href: installs?.vscode },
-    { id: 'chatgpt', label: 'Open in ChatGPT', icon: <Sparkles />, href: `https://chatgpt.com/?q=${prompt}` },
-    { id: 'claude', label: 'Open in Claude', icon: <Sparkles />, href: `https://claude.ai/new?q=${prompt}` },
-    { id: 'perplexity', label: 'Open in Perplexity', icon: <Sparkles />, href: `https://www.perplexity.ai/search?q=${prompt}` },
+    { id: 'chatgpt', label: 'Open in ChatGPT', icon: <ChatGptIcon />, href: `https://chatgpt.com/?q=${prompt}` },
+    { id: 'claude', label: 'Open in Claude', icon: <ClaudeIcon />, href: `https://claude.ai/new?q=${prompt}` },
+    { id: 'perplexity', label: 'Open in Perplexity', icon: <PerplexityIcon />, href: `https://www.perplexity.ai/search?q=${prompt}` },
   ]
   const items = configured.flatMap((id) => {
     if (MCP_PAGE_ACTIONS.some((known) => known === id) && mcpEnabled !== true) return []
