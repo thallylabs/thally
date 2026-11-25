@@ -147,6 +147,22 @@ describe('Thally Cloud service adapters', () => {
     })
   })
 
+  it('forwards streaming negotiation and aborts the upstream body on disconnect', async () => {
+    mocks.getRelevantChunks.mockResolvedValue([])
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('data: {}\n\n', { headers: { 'content-type': 'text/event-stream' } }))
+    const controller = new AbortController()
+    const response = await handleCloudAiChat(new Request('https://docs.example.com/api/chat', {
+      method: 'POST', headers: { accept: 'text/event-stream' }, signal: controller.signal,
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'How?' }] }),
+    }))
+    const options = fetchMock.mock.calls[0][1]!
+    expect(options.headers).toMatchObject({ accept: 'text/event-stream', authorization: 'Bearer release-grant' })
+    expect(response.headers.get('content-type')).toBe('text/event-stream')
+    expect(options.signal?.aborted).toBe(false)
+    controller.abort()
+    expect(options.signal?.aborted).toBe(true)
+  })
+
   it('re-normalizes model-written follow-ups before relaying them to the browser', async () => {
     vi.stubEnv('THALLY_CLOUD_URL', 'https://cloud.example.com')
     mocks.getRelevantChunks.mockResolvedValue([])

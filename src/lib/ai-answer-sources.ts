@@ -16,8 +16,11 @@ export interface AiAnswerSource {
 }
 
 /** Keep only bounded, same-site documentation links and deduplicate by page. */
-export function normalizeAiAnswerSources(value: unknown): Array<AiAnswerSource> {
-  if (!Array.isArray(value)) return []
+export function normalizeAiAnswerSources(value: unknown, maxCount = MAX_SOURCE_COUNT): Array<AiAnswerSource> {
+  // Source drawers stay compact by default; a response can cite a larger
+  // bounded subset of an entire corpus without changing the read disclosure.
+  const limit = Math.min(64, Math.max(0, Math.floor(Number.isFinite(maxCount) ? maxCount : MAX_SOURCE_COUNT)))
+  if (!Array.isArray(value) || limit === 0) return []
 
   const sources: Array<AiAnswerSource> = []
   const pageUrls = new Set<string>()
@@ -34,6 +37,9 @@ export function normalizeAiAnswerSources(value: unknown): Array<AiAnswerSource> 
       !normalizedUrl.startsWith('/') ||
       normalizedUrl.startsWith('//') ||
       normalizedUrl.includes('\\') ||
+      // Browsers remove embedded control whitespace while parsing URLs;
+      // /\n/host must never become a protocol-relative disclosure link.
+      /[\s\u0000-\u001f\u007f]/u.test(normalizedUrl) ||
       normalizedUrl.length > MAX_SOURCE_URL_CHARS
     ) {
       continue
@@ -43,7 +49,7 @@ export function normalizeAiAnswerSources(value: unknown): Array<AiAnswerSource> 
     if (pageUrls.has(pageUrl)) continue
     pageUrls.add(pageUrl)
     sources.push({ title: normalizedTitle, url: normalizedUrl })
-    if (sources.length === MAX_SOURCE_COUNT) break
+    if (sources.length === limit) break
   }
 
   return sources
