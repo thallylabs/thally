@@ -20,7 +20,7 @@ import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { parseMdxTree } from '@thallylabs/core/markdown'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, plainLinkedTitle, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -430,7 +430,7 @@ function readPageIds(content: string, parsed: MdxPage): PageIds {
         const stepId = constantAttribute(node, 'id')
         if (title && size && STEP_HEADING_SIZES.includes(size) && stepId !== null) {
           const given = stepId?.trim()
-          page.headings.push({ base: given || slugify(plainInlineText(title)), explicit: !!given })
+          page.headings.push({ base: given || slugify(plainLinkedTitle(title)), explicit: !!given })
         }
       }
       if (node.name === 'ParamField' || node.name === 'ResponseField') {

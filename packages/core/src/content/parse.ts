@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import { toString as mdastToString } from 'mdast-util-to-string'
 import type { Root, RootContent } from 'mdast'
-import { constantString, plainInlineText, slugify, updateAnchorId } from '../slugify.js'
+import { constantString, linkedTitleLinks, plainLinkedTitle, slugify, updateAnchorId } from '../slugify.js'
 import type {
   ContentCodeBlock,
   ContentUpdate,
@@ -179,7 +179,10 @@ function jsxProseAttributes(node: RootContent): Array<string> {
     if (attribute.type !== 'mdxJsxAttribute') continue
     if (!PROSE_JSX_ATTRIBUTES.has(attribute.name)) continue
     // Only literal strings — expression values are code, not prose.
-    if (typeof attribute.value === 'string' && attribute.value.trim()) values.push(attribute.value.trim())
+    if (typeof attribute.value !== 'string' || !attribute.value.trim()) continue
+    // A Step title may hold Markdown links: prose reads each link's label, as it does for a link in the body.
+    const isStepTitle = node.name === 'Step' && attribute.name === 'title'
+    values.push(isStepTitle ? plainLinkedTitle(attribute.value.trim()) : attribute.value.trim())
   }
   return values
 }
@@ -294,7 +297,7 @@ function walk(state: WalkState, nodes: Array<RootContent>, stepSize?: string) {
         const id = stepIdOf(node)
         // fall through after: the title still reads as prose, and the body belongs to the new section.
         // An id that is not a constant is only known when the page renders: with no anchor to give, the step stays in the section before it.
-        if (title && depth && id !== null) startSection(state, depth, plainInlineText(title), id?.trim() || undefined)
+        if (title && depth && id !== null) startSection(state, depth, plainLinkedTitle(title), id?.trim() || undefined)
       }
     }
     if (node.type === 'heading') {
@@ -315,6 +318,11 @@ function walk(state: WalkState, nodes: Array<RootContent>, stepSize?: string) {
       continue
     }
     if ('children' in node && Array.isArray(node.children)) {
+      // A link in a Step title is a link of the page, recorded like one in the body.
+      if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && node.name === 'Step') {
+        const title = stringAttribute(node, 'title')
+        if (title) state.links.push(...linkedTitleLinks(title))
+      }
       // Surface prose attributes ahead of the element's children so a card
       // title reads before its body, the same order a reader sees.
       for (const value of jsxProseAttributes(node)) {

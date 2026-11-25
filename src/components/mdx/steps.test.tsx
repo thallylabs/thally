@@ -116,3 +116,40 @@ describe('Step without a title', () => {
     expect(html.match(/thally-step-number/g)).toHaveLength(2)
   })
 })
+
+describe('Step title with a link', () => {
+  it('renders a Markdown link in the title as a link, at every title size', () => {
+    for (const titleSize of ['p', 'h2', 'h3', 'h4'] as const) {
+      const html = renderToStaticMarkup(<Steps titleSize={titleSize}><Step title="Install the [Thally CLI](/cli/overview) first" /></Steps>)
+      expect(html).toMatch(new RegExp(`<${titleSize} [^>]*>Install the <a href="/cli/overview"[^>]*>Thally CLI</a> first</${titleSize}>`))
+    }
+  })
+
+  it('keeps the link reachable by keyboard and outside any other link', () => {
+    const html = renderToStaticMarkup(<Steps titleSize="h3"><Step title="[Create a project](https://example.com/new)" id="create-a-project">Body.</Step></Steps>)
+    expect(html.match(/<a\b/g)).toHaveLength(1)
+    expect(html).not.toMatch(/<a\b[^>]*\btabindex="-1"/)
+    expect(html).not.toMatch(/<a\b[^>]*>(?:(?!<\/a>).)*<a\b/)
+  })
+
+  it('renders a code span inside the link, and one beside it', () => {
+    const html = renderToStaticMarkup(<Steps><Step title="Run [`thally check`](/cli/check) and `fix`" /></Steps>)
+    expect(html).toMatch(/Run <a href="\/cli\/check"[^>]*><code>thally check<\/code><\/a> and <code>fix<\/code><\/h3>/)
+  })
+
+  it('labels a registered heading with the title text, without the link markup', () => {
+    const html = renderToStaticMarkup(<Steps titleSize="h3"><Step title="Install the [Thally CLI](/cli/overview)" id="install-the-thally-cli" /></Steps>)
+    expect(html).toContain('data-heading="Install the Thally CLI"')
+    expect(html).toMatch(/<h3 [^>]*\bid="install-the-thally-cli"/)
+  })
+
+  it('leaves a link to a script as the text the author typed', () => {
+    const html = renderToStaticMarkup(<Steps><Step title="[Run](javascript:alert)" /></Steps>)
+    expect(html).not.toContain('<a')
+    expect(html).toContain('[Run](javascript:alert)')
+  })
+
+  it('renders a title with brackets and no link as it always has', () => {
+    expect(renderToStaticMarkup(<Steps><Step title="Read items[0] (optional)" /></Steps>)).toMatch(/<h3 [^>]*>Read items\[0\] \(optional\)<\/h3>/)
+  })
+})

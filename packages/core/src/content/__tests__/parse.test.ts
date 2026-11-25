@@ -297,3 +297,39 @@ describe('parseMdxTree', () => {
     expect(kinds(tree)).not.toContain('mdxJsxFlowElement')
   })
 })
+
+describe('links in step titles', () => {
+  const source = [
+    '<Steps titleSize="h3">',
+    '<Step title="Install the [Thally CLI](/cli/overview)">', 'Run the installer.', '</Step>',
+    '<Step title="Open [`docs.json`](https://example.com/config) and `save`">', 'Edit it.', '</Step>',
+    '</Steps>', '',
+    '<Steps>',
+    '<Step title="Read the [guide](/guides/start)">', 'Plain title.', '</Step>',
+    '</Steps>',
+  ].join('\n')
+  const parsed = parseMdxContent(source)
+
+  it('reads each link as its label in the outline, the sections and the prose', () => {
+    expect(parsed.headings.map(({ id, text }) => ({ id, text }))).toEqual([
+      { id: 'install-the-thally-cli', text: 'Install the Thally CLI' },
+      { id: 'open-docs-json-and-save', text: 'Open docs.json and save' },
+    ])
+    expect(parsed.sections.map((section) => section.title)).toEqual(expect.arrayContaining(['Install the Thally CLI', 'Open docs.json and save']))
+    expect(parsed.text).toContain('Install the Thally CLI')
+    expect(parsed.text).toContain('Read the guide')
+    expect(parsed.text).not.toMatch(/\]\(|\/cli\/overview|example\.com/)
+  })
+
+  it('records the links with the page links, whatever the title size', () => {
+    expect(parsed.links).toEqual([
+      { url: '/cli/overview', text: 'Thally CLI' },
+      { url: 'https://example.com/config', text: 'docs.json' },
+      { url: '/guides/start', text: 'guide' },
+    ])
+  })
+
+  it('leaves the title of any other component as written', () => {
+    expect(parseMdxContent('<Card title="See [x](/y)">Body.</Card>').text).toContain('See [x](/y)')
+  })
+})

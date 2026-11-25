@@ -128,3 +128,13 @@ it('lists a step title with a code span by its plain text, under the id its word
   const { content } = await interpretMDX({ source, components: builtinMdxComponents })
   expect(headings(page(content))).toEqual(expected)
 })
+
+it('lists a linked step title by its text, and keeps the link out of the entry, on both compilation paths', async () => {
+  const source = '<Steps titleSize="h3">\n<Step title="Install the [Thally CLI](/cli/overview)">x</Step>\n</Steps>'
+  const expected = [{ id: 'install-the-thally-cli', text: 'Install the Thally CLI', level: 3 }]
+  expect(await toc(source)).toEqual(expected)
+  expect(parseMdxContent(source).headings.map(({ id, text, depth }) => ({ id, text, level: depth }))).toEqual(expected)
+  const { content } = await interpretMDX({ source, components: builtinMdxComponents })
+  expect(headings(page(content))).toEqual(expected)
+  expect(page(content)).toContain('<a href="/cli/overview"')
+})
