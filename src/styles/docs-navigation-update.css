@@ -50,6 +50,8 @@
 .thally-mobile-nav-drawer :focus-visible { outline: 1px solid hsl(var(--thally-foreground) / 0.5); outline-offset: 2px; }
 .thally-mobile-section-links .thally-docs-tabs { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
 .thally-mobile-section-links .thally-nav-tab-item { padding: 8px 10px; border: 0; }
+/* The drawer marks the current section with a filled row, not the header-rule marker. */
+.thally-mobile-section-links .thally-docs-tabs .thally-nav-tab-item[aria-current='page']::after { content: none; }
 .thally-mobile-section-links [aria-current='page'] { background: hsl(var(--thally-accent) / 0.1); color: hsl(var(--thally-accent)); }
 @media (min-width: 881px) and (max-width: 1040px) {
   .thally-docs-topbar-inner, .thally-docs-collection-row { padding-inline: 20px; }
