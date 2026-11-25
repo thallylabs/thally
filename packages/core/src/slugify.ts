@@ -170,9 +170,11 @@ export type LinkedTitlePart = { text: string; code: boolean } | { href: string; 
  * A `code` span or a Markdown link (`[label](url)`) in a title string. A code
  * span is read first, so a link written inside backticks stays code. The `!` or
  * `\` an image or an escaped bracket starts with is matched too, so neither is
- * read as a link. No lookbehind: this also runs in browsers that lack it.
+ * read as a link. No lookbehind: this also runs in browsers that lack it. A
+ * label holds no `[` outside a code span, so a run of brackets is read once
+ * and a long title cannot slow the page down.
  */
-const LINKED_TITLE_TOKEN = /`([^`\n]+)`|[!\\]?\[((?:`[^`\n]+`|[^\]`\n])+)\]\(([^()\s]+)\)/g
+const LINKED_TITLE_TOKEN = /`([^`\n]+)`|[!\\]?\[((?:`[^`\n]+`|[^[\]`\n])+)\]\(([^()\s]+)\)/g
 
 /** Schemes a title link may open; a URL with no scheme is a path, a fragment or a host. */
 const TITLE_LINK_SCHEMES = new Set(['http', 'https', 'mailto', 'tel'])

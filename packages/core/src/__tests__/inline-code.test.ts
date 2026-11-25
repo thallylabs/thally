@@ -102,6 +102,21 @@ describe('linkedTitleParts', () => {
   )
 })
 
+describe('linkedTitleParts on unusual brackets', () => {
+  it('links the innermost bracket pair and leaves an outer bracket as text', () => {
+    expect(linkedTitleParts('[a [b](/c)')).toEqual([
+      { text: '[a ', code: false },
+      { href: '/c', parts: [{ text: 'b', code: false }] },
+    ])
+  })
+
+  it.each(['['.repeat(50_000), '[`_`'.repeat(20_000), '[\\'.repeat(30_000), '[a]('.repeat(20_000)])('reads a long run of brackets in linear time', (title) => {
+    const started = performance.now()
+    expect(plainLinkedTitle(title)).toBe(plainInlineText(title))
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+})
+
 describe('plainLinkedTitle', () => {
   it('reads each link as its label and each code span without its backticks', () => {
     expect(plainLinkedTitle('Install the [Thally CLI](/cli/overview)')).toBe('Install the Thally CLI')
