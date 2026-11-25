@@ -82,3 +82,11 @@ describe('mdxToMarkdown', () => {
     expect(out).toContain('[thallylabs/thally](https://github.com/thallylabs/thally)')
   })
 })
+
+describe('step titles with links', () => {
+  it('keeps the link in the heading the title becomes', () => {
+    const out = mdxToMarkdown('<Steps>\n<Step title="Install the [Thally CLI](/cli/overview)">\nRun it.\n</Step>\n</Steps>')
+    expect(out).toContain('#### Install the [Thally CLI](/cli/overview)')
+    expect(out).toContain('Run it.')
+  })
+})

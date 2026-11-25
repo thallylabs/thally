@@ -54,7 +54,7 @@ import { visit } from 'unist-util-visit'
 import bamlGrammar from './grammars/baml.tmLanguage.json'
 import bamlJinjaGrammar from './grammars/baml-jinja.tmLanguage.json'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
-import { plainInlineText } from '../lib/inline-code'
+import { plainInlineText, plainLinkedTitle } from '../lib/inline-code'
 import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, numberTabIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
@@ -1070,7 +1070,7 @@ function rehypeUniqueHeadingIds() {
           const stepId = jsxConstantAttribute(jsx, 'id')
           if (title && size && STEP_HEADING_SIZES.has(size) && stepId !== null) {
             targets.push({
-              text: plainInlineText(title),
+              text: plainLinkedTitle(title),
               given: stepId?.trim() || undefined,
               assign: (id) => setJsxId(jsx, id),
             })

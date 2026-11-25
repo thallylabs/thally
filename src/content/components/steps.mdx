@@ -42,11 +42,37 @@ Use `<Steps>` and `<Step>` to structure sequential instructions. Each step rende
 </Steps>
 ```
 
+## Links in titles
+
+Write a Markdown link in a step's `title` to make part of the title clickable. Backticks still render as inline code, inside or outside the link.
+
+<Steps>
+  <Step title="Read [Writing content](/guides/writing-content)">
+    The link opens the page it points to. The rest of the title stays plain text.
+  </Step>
+  <Step title="Add a [`<Tabs>`](/components/tabs) block">
+    A link label can hold inline code.
+  </Step>
+</Steps>
+
+```mdx
+<Steps>
+  <Step title="Read [Writing content](/guides/writing-content)">
+    The link opens the page it points to.
+  </Step>
+  <Step title="Add a [`<Tabs>`](/components/tabs) block">
+    A link label can hold inline code.
+  </Step>
+</Steps>
+```
+
+A link can point to a page (`/guides/writing-content`), an anchor (`#props`), or an `http`, `https`, `mailto` or `tel` address. The table of contents, the step's anchor, search and the plain-text views read the link's label, and the Markdown view of the page keeps the link.
+
 ## Props
 
 ### `<Step>`
 
 | Prop | Type | Description |
 |---|---|---|
-| `title` | `string` | Step heading displayed next to the number |
+| `title` | `string` | Step heading displayed next to the number. Backticks render inline code and `[label](url)` renders a link |
 | `id` | `string` | Anchor to link to the step. A heading title uses it as the heading id; a plain-text title (`titleSize="p"`) puts it on the step itself |

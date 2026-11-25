@@ -136,3 +136,17 @@ describe('step titles with inline code', () => {
     expect(parseMdxContent(source).headings.map((heading) => heading.text)).toEqual([title.replaceAll('`', '')])
   })
 })
+
+describe('step titles with links', () => {
+  it.each([
+    ['Install the [Thally CLI](/cli/overview)', 'install-the-thally-cli', 'Install the Thally CLI'],
+    ['[Create a project](https://example.com/new) first', 'create-a-project-first', 'Create a project first'],
+    ['Run [`thally check`](#run) now', 'run-thally-check-now', 'Run thally check now'],
+  ])('gives the title %s the id of its plain text in thally check, the renderer and the content parser', async (title, id, text) => {
+    const source = `## Run\n\n<Steps titleSize="h3">\n<Step title="${title}">\nBody.\n</Step>\n</Steps>`
+    expect(await renderedIds(source)).toEqual(['run', id])
+    expect(parseMdxContent(source).headings.map((heading) => heading.id)).toEqual(['run', id])
+    expect(await brokenAnchorOutput(source, id)).not.toContain('Broken anchor')
+    expect(parseMdxContent(source).headings.map((heading) => heading.text)).toEqual(['Run', text])
+  })
+})
