@@ -501,8 +501,9 @@ describe('documentation visual system', () => {
 
   it('never ships a fixed list of assistant suggestions', async () => {
     const { readFile } = await import('node:fs/promises')
-    const [chat, provider, statusRoute, css] = await Promise.all([
+    const [chat, stream, provider, statusRoute, css] = await Promise.all([
       readFile('src/components/docs/docs-chat.tsx', 'utf8'),
+      readFile('src/lib/ai-chat-stream.ts', 'utf8'),
       readFile('src/components/docs/code-actions-provider.tsx', 'utf8'),
       readFile('src/app/api/chat-status/route.ts', 'utf8'),
       readFile('src/styles/docs-handoff.css', 'utf8'),
@@ -514,7 +515,12 @@ describe('documentation visual system', () => {
     expect(chat).not.toContain('How do I add an API reference?')
     expect(statusRoute).toContain('deriveStarterSuggestions')
     expect(provider).toContain('starterSuggestions={chatStatus.suggestions}')
-    expect(chat).toContain('AI_FOLLOW_UPS_HEADER')
+    // The response reader now owns both terminal SSE metadata and the older
+    // response-header fallback; the panel consumes the normalized result.
+    expect(stream).toContain('AI_FOLLOW_UPS_HEADER')
+    expect(stream).toContain('normalizeAiSuggestions(record.followUps)')
+    expect(chat).toContain('readAiChatResponse')
+    expect(chat).toContain('followUps: event.followUps')
     expect(chat).toContain('deriveFollowUpSuggestions')
     // Focus is a soft halo on the composer, not a saturated accent outline.
     const composerFocus = css.slice(css.indexOf('.thally-docs-chat-composer:focus-within'))

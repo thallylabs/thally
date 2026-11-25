@@ -26,6 +26,7 @@ import {
   parseAiFollowUps,
   serializeAiFollowUps,
 } from '@/lib/ai-chat-suggestions'
+import { acceptsAiChatStream, AI_CHAT_STREAM_CONTENT_TYPE } from '@/lib/ai-chat-stream'
 import type { AnalyticsEvent } from '@/lib/analytics/types'
 import { getCloudServiceGrant, getCloudSiteConfig } from './client'
 
@@ -130,6 +131,7 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
       headers: {
         authorization: `Bearer ${grant}`,
         'content-type': 'application/json',
+        ...(acceptsAiChatStream(request.headers) ? { accept: AI_CHAT_STREAM_CONTENT_TYPE } : {}),
       },
       body: JSON.stringify({
         siteName: cloud.siteConfig.portable.details?.name ?? siteConfig.name,
@@ -140,7 +142,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         followUps: true,
       }),
       cache: 'no-store',
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      // Fetch's signal owns both headers and the returned body. Keep the
+      // timeout active while streaming, and propagate a reader disconnect.
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
     })
   } catch {
     return new Response('Thally AI is temporarily unavailable.', { status: 503 })

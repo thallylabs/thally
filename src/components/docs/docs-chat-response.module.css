@@ -1,0 +1,13 @@
+/* Newly created Markdown blocks settle once; arriving tokens stay immediate. */
+.prose > :last-child {
+  animation: arrive 160ms ease-out;
+}
+
+@keyframes arrive {
+  from { opacity: 0.65; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prose > :last-child { animation: none; }
+}

@@ -5,8 +5,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import NextImage from 'next/image'
 import { SiteBrandMark } from '@/components/layout/site-brand-mark'
-import { X, ArrowUp, Square, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip, Copy, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import { X, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip } from 'lucide-react'
+import { ChatComposer } from './docs-chat-composer'
+import { ChatResponse, type ChatResponseStatus } from './docs-chat-response'
+import { AI_CHAT_INTERRUPTED_MESSAGE, AI_CHAT_STREAM_CONTENT_TYPE, readAiChatResponse } from '@/lib/ai-chat-stream'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
 import {
   MAX_AI_CHAT_IMAGES,
@@ -21,16 +23,18 @@ import {
   type AiAnswerSource,
 } from '@/lib/ai-answer-sources'
 import {
-  AI_FOLLOW_UPS_HEADER,
   deriveFollowUpSuggestions,
   normalizeAiSuggestions,
-  parseAiFollowUps,
 } from '@/lib/ai-chat-suggestions'
 
 interface Message {
+  id: string
+  status?: ChatResponseStatus
+  error?: string
   role: 'user' | 'assistant'
   content: string
   sources?: Array<AiAnswerSource>
+  citations?: Array<AiAnswerSource>
   /** Model-written next questions supplied with this answer, when available. */
   followUps?: Array<string>
   images?: Array<ChatImage>
@@ -80,20 +84,6 @@ function readScreenshot(file: File): Promise<ChatImage> {
     }
     reader.readAsDataURL(file)
   })
-}
-
-function TypingDots() {
-  return (
-    <span className="inline-flex items-center gap-1 py-1">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce"
-          style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.9s' }}
-        />
-      ))}
-    </span>
-  )
 }
 
 /**
@@ -203,24 +193,24 @@ export function DocsChat({
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<Array<ChatImage>>([])
   const [attachmentError, setAttachmentError] = useState('')
-  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<number, 'up' | 'down'>>({})
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, 'up' | 'down' | null>>({})
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  // Auto-resize textarea
-  useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    ta.style.height = 'auto'
-    ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`
-  }, [input])
+  const activeRequestRef = useRef<{ id: string; controller: AbortController } | null>(null)
+  const followsLatestRef = useRef(true)
 
   useEffect(() => {
-    if (open) setTimeout(() => textareaRef.current?.focus(), 60)
+    if (!open) return
+    const timer = setTimeout(() => textareaRef.current?.focus(), 60)
+    return () => clearTimeout(timer)
   }, [open])
+
+  useEffect(() => () => {
+    activeRequestRef.current?.controller.abort()
+    activeRequestRef.current = null
+  }, [])
 
   useEffect(() => {
     const root = document.documentElement
@@ -247,11 +237,15 @@ export function DocsChat({
   }, [initialPrompt, openRequestId])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (followsLatestRef.current) bottomRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [messages, loading])
 
   const stop = useCallback(() => {
-    abortRef.current?.abort()
+    const active = activeRequestRef.current
+    if (!active) return
+    activeRequestRef.current = null
+    active.controller.abort()
+    setMessages((current) => current.map((message) => message.id === active.id ? { ...message, status: 'stopped' } : message))
     setLoading(false)
   }, [])
 
@@ -311,88 +305,63 @@ export function DocsChat({
     }
   }, [skipStatusCheck])
 
-  const send = useCallback(async (text?: string) => {
-    const typedContent = (text ?? input).trim()
-    if (!enabled || !chatShown || (!typedContent && pendingImages.length === 0) || loading) return
+  const send = useCallback(async (text?: string, retry?: { question: Message; history: Array<Message> }) => {
+    const typedContent = (retry?.question.content ?? text ?? input).trim()
+    const images = retry?.question.images ?? pendingImages
+    if (!enabled || !chatShown || (!typedContent && images.length === 0) || activeRequestRef.current) return
 
-    const images = pendingImages
-    const content = typedContent || (
-      images.length === 1
-        ? 'What should I know about this screenshot?'
-        : 'What should I know about these screenshots?'
-    )
-
-    const userMsg: Message = { role: 'user', content, images }
-    setMessages((prev) => [...prev, userMsg])
-    setInput('')
-    setPendingImages([])
-    setAttachmentError('')
-    setLoading(true)
-
-    const assistantMsg: Message = { role: 'assistant', content: '', sources: [] }
-    setMessages((prev) => [...prev, assistantMsg])
-
+    const content = typedContent || (images.length === 1 ? 'What should I know about this screenshot?' : 'What should I know about these screenshots?')
+    const userMsg: Message = { id: screenshotId(), role: 'user', content, images }
+    const assistantMsg: Message = { id: screenshotId(), role: 'assistant', content: '', sources: [], status: 'streaming' }
     const controller = new AbortController()
-    abortRef.current = controller
+    const active = { id: assistantMsg.id, controller }
+    activeRequestRef.current = active
+    followsLatestRef.current = true
+    setMessages((current) => [...current, userMsg, assistantMsg])
+    // Regeneration owns the original question and screenshots. A separately
+    // drafted next question must never be consumed by the retry action.
+    if (!retry) {
+      setInput('')
+      setPendingImages([])
+      setAttachmentError('')
+    }
+    setLoading(true)
+    const updateAnswer = (change: Partial<Message>) => {
+      if (activeRequestRef.current !== active) return
+      setMessages((current) => current.map((message) => message.id === active.id ? { ...message, ...change } : message))
+    }
 
     try {
+      const history = (retry?.history ?? messages).filter((message) => message.role === 'user' || !message.status || message.status === 'done')
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: createAiChatRequestMessages([...messages, userMsg]),
-        }),
+        headers: { 'Content-Type': 'application/json', Accept: AI_CHAT_STREAM_CONTENT_TYPE },
+        body: JSON.stringify({ messages: createAiChatRequestMessages([...history, userMsg]) }),
         signal: controller.signal,
       })
-
       if (!res.ok || !res.body) {
-        const errText = await res.text()
-        setMessages((prev) => {
-          const next = [...prev]
-          next[next.length - 1] = { role: 'assistant', content: errText || 'Something went wrong.' }
-          return next
-        })
+        const error = (await res.text()).trim().slice(0, 500)
+        updateAnswer({ status: 'error', error: error || 'Something went wrong. Please try again.' })
         return
       }
-
-      const sources = parseAiAnswerSources(
-        res.headers.get(AI_ANSWER_SOURCES_HEADER),
-      )
-      const followUps = parseAiFollowUps(res.headers.get(AI_FOLLOW_UPS_HEADER))
-      setMessages((prev) => {
-        const next = [...prev]
-        next[next.length - 1] = { ...next[next.length - 1], sources, followUps }
-        return next
-      })
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        setMessages((prev) => {
-          const next = [...prev]
-          next[next.length - 1] = {
-            ...next[next.length - 1],
-            content: next[next.length - 1].content + chunk,
-          }
-          return next
-        })
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return
-      setMessages((prev) => {
-        const next = [...prev]
-        next[next.length - 1] = { role: 'assistant', content: 'Failed to connect. Please try again.' }
-        return next
-      })
+      updateAnswer({ sources: parseAiAnswerSources(res.headers.get(AI_ANSWER_SOURCES_HEADER)) })
+      await readAiChatResponse(res, (event) => {
+        if (event.type === 'answer') updateAnswer({ content: event.text, citations: event.citations })
+        else if (event.type === 'done') updateAnswer({ content: event.text, citations: event.citations, followUps: event.followUps, status: 'done' })
+        else updateAnswer({ status: 'error', error: event.message })
+      }, controller.signal)
+    } catch (error) {
+      if (activeRequestRef.current !== active) return
+      updateAnswer({ status: controller.signal.aborted ? 'stopped' : 'error', error: error instanceof Error && error.message === AI_CHAT_INTERRUPTED_MESSAGE ? error.message : 'Failed to connect. Please try again.' })
     } finally {
-      setLoading(false)
-      abortRef.current = null
+      // The stopped request can finish after a new question has begun. It may
+      // neither clear that request's controller nor change its loading state.
+      if (activeRequestRef.current === active) {
+        activeRequestRef.current = null
+        setLoading(false)
+      }
     }
-  }, [chatShown, enabled, input, loading, messages, pendingImages])
+  }, [chatShown, enabled, input, messages, pendingImages])
 
   if (!chatShown) return null
 
@@ -401,7 +370,7 @@ export function DocsChat({
   // answer service wrote for this conversation; otherwise derive them from the
   // pages retrieved for the latest question, which already track the topic.
   const latest = messages[messages.length - 1]
-  const followUps = !loading && latest?.role === 'assistant' && latest.content
+  const followUps = !loading && latest?.role === 'assistant' && latest.status === 'done' && latest.content
     ? latest.followUps?.length
       ? latest.followUps
       : deriveFollowUpSuggestions({
@@ -414,7 +383,7 @@ export function DocsChat({
     <>
       {/* The dock starts below the shared top bar so navigation stays usable. */}
       <aside
-          className="thally-docs-chat-panel fixed bottom-0 right-0 top-[var(--docs-header-height,60px)] z-[60] flex flex-col overflow-hidden border-l border-border"
+          className="thally-docs-chat-panel fixed bottom-0 right-0 top-[var(--docs-header-height,60px)] z-[60] flex flex-col overflow-hidden border-l border-border motion-reduce:!transition-none"
           aria-label={liveLabel}
           style={{
             width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)',
@@ -451,7 +420,13 @@ export function DocsChat({
           ) : null}
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pb-2 pt-6">
+          <div
+            className="flex-1 overflow-y-auto overflow-x-hidden px-5 pb-2 pt-6"
+            onScroll={(event) => {
+              const element = event.currentTarget
+              followsLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 72
+            }}
+          >
             {messages.length === 0 ? (
               /* Welcome state */
               <div className="flex h-full flex-col items-center justify-center gap-6 pb-4">
@@ -469,7 +444,7 @@ export function DocsChat({
             ) : (
               <div className="flex flex-col gap-[22px]">
                 {messages.map((msg, i) => (
-                  <div key={i} className={`flex min-w-0 gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div key={msg.id} className={`flex min-w-0 gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {msg.role === 'assistant' && (
                       <SiteBrandMark className="thally-docs-chat-brand mt-0.5 h-6 w-6 shrink-0" />
                     )}
@@ -500,34 +475,19 @@ export function DocsChat({
                       /* Assistant — no bubble, full prose */
                       <div className="min-w-0 flex-1 text-sm leading-relaxed">
                         <AnswerSources sources={msg.sources ?? []} />
-                        {msg.content ? (
-                          <>
-                          <div className="prose prose-sm dark:prose-invert max-w-none break-words
-                            [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
-                            prose-p:leading-relaxed prose-p:my-2 first:prose-p:mt-0
-                            prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-1
-                            prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
-                            prose-code:rounded prose-code:bg-zinc-100 prose-code:dark:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
-                            prose-pre:rounded-xl prose-pre:bg-zinc-100 prose-pre:dark:bg-zinc-800 prose-pre:text-zinc-800 prose-pre:dark:text-zinc-100 prose-pre:text-xs prose-pre:p-4
-                            [&_pre]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:border-0 [&_pre_code]:text-inherit [&_pre_code]:rounded-none [&_pre_*]:!no-underline [&_pre_*]:!border-0 [&_pre_*]:!decoration-transparent [&_pre_*]:!shadow-none
-                            prose-blockquote:border-l-accent/40 prose-blockquote:text-muted-foreground
-                            [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                          >
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
-                          </div>
-                          <div className="thally-docs-chat-feedback mt-2 flex items-center gap-0.5" aria-label="Answer actions">
-                            <button type="button" onClick={() => void navigator.clipboard?.writeText(msg.content)} aria-label="Copy response" title="Copy response" className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
-                            <button type="button" onClick={() => setFeedbackByMessage((current) => ({ ...current, [i]: 'up' }))} aria-label="Helpful response" title="Helpful response" aria-pressed={feedbackByMessage[i] === 'up'} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" /></button>
-                            <button type="button" onClick={() => setFeedbackByMessage((current) => ({ ...current, [i]: 'down' }))} aria-label="Unhelpful response" title="Unhelpful response" aria-pressed={feedbackByMessage[i] === 'down'} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
-                            <button type="button" onClick={() => {
-                              const previousQuestion = messages.slice(0, i).reverse().find((message) => message.role === 'user')
-                              if (previousQuestion) void send(previousQuestion.content)
-                            }} disabled={loading} aria-label="Regenerate response" title="Regenerate response" className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-35"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>
-                          </div>
-                          </>
-                        ) : loading && i === messages.length - 1 ? (
-                          <TypingDots />
-                        ) : null}
+                        <ChatResponse
+                          text={msg.content}
+                          status={msg.status ?? 'done'}
+                          error={msg.error}
+                          sources={msg.citations ?? msg.sources ?? []}
+                          feedback={feedbackByMessage[msg.id] ?? null}
+                          onFeedback={(feedback) => setFeedbackByMessage((current) => ({ ...current, [msg.id]: feedback }))}
+                          isRetryDisabled={loading || !enabled}
+                          onRetry={() => {
+                            const questionIndex = messages.slice(0, i).findLastIndex((message) => message.role === 'user')
+                            if (questionIndex >= 0) void send(undefined, { question: messages[questionIndex], history: messages.slice(0, questionIndex) })
+                          }}
+                        />
                       </div>
                     )}
                   </div>
@@ -545,9 +505,23 @@ export function DocsChat({
                 {unavailableMessage}
               </p>
             ) : null}
-            {/* The question sits on its own full-width line; attach and send share
-                the row beneath it, so a long draft never crowds the controls. */}
-            <div className="thally-docs-chat-composer rounded-[18px] border px-3 pb-2.5 pt-3">
+            <ChatComposer
+              value={input}
+              onValueChange={setInput}
+              onSubmit={(value) => void send(value)}
+              onStop={stop}
+              isLoading={loading}
+              isEnabled={enabled}
+              hasAttachments={pendingImages.length > 0}
+              label={liveLabel}
+              inputRef={textareaRef}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.items)
+                  .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+                  .flatMap((item) => { const file = item.getAsFile(); return file ? [file] : [] })
+                if (files.length > 0) void addScreenshots(files)
+              }}
+              attachments={<>
               {pendingImages.length > 0 ? (
                 <div className="mb-1.5">
                   <div className="flex gap-2 overflow-x-auto px-1 pt-1">
@@ -597,57 +571,18 @@ export function DocsChat({
                   event.target.value = ''
                 }}
               />
-              <textarea
-                  ref={textareaRef}
-                  value={input}
-                  rows={2}
-                  aria-label={`Message ${liveLabel}`}
-                  onChange={(e) => setInput(e.target.value)}
-                  onPaste={(event) => {
-                    const files = Array.from(event.clipboardData.items)
-                      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-                      .flatMap((item) => {
-                        const file = item.getAsFile()
-                        return file ? [file] : []
-                      })
-                    if (files.length > 0) void addScreenshots(files)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (enabled) void send()
-                    }
-                  }}
-                  placeholder={enabled ? 'Ask a question…' : 'AI chat is unavailable.'}
-                  disabled={loading || !enabled}
-                  className="block w-full resize-none bg-transparent px-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
-                  style={{ maxHeight: '160px' }}
-                />
-              <div className="mt-2 flex items-center justify-between">
+              </>}
+              attachmentAction={
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading || !enabled || pendingImages.length >= MAX_AI_CHAT_IMAGES}
                   aria-label="Attach screenshots"
                   title="Attach or paste screenshots"
-                  className="thally-docs-chat-attach -ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35"
-                >
-                  <Paperclip className="h-4 w-4" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  onClick={loading ? stop : () => void send()}
-                  disabled={!loading && (!enabled || (!input.trim() && pendingImages.length === 0))}
-                  aria-label={loading ? 'Stop' : 'Send'}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
-                >
-                  {loading
-                    ? <Square className="h-3 w-3 fill-current" />
-                    : <ArrowUp className="h-4 w-4" />
-                  }
-                </button>
-              </div>
-            </div>
+                  className="thally-docs-chat-attach -ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                ><Paperclip className="h-4 w-4" aria-hidden="true" /></button>
+              }
+            />
           </div>
       </aside>
     </>

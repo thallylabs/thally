@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   parseAiAnswerSources,
+  normalizeAiAnswerSources,
   serializeAiAnswerSources,
 } from '@/lib/ai-answer-sources'
 
@@ -27,6 +28,9 @@ describe('AI answer sources', () => {
         { title: 'External', url: 'https://example.com/phishing' },
         { title: 'Protocol relative', url: '//example.com/phishing' },
         { title: 'Backslash', url: '/\\example.com/phishing' },
+        { title: 'Newline', url: '/\n/example.com/phishing' },
+        { title: 'Tab', url: '/\t/example.com/phishing' },
+        { title: 'Control', url: '/\u0000example.com/phishing' },
         { title: 'Oversized', url: `/${'x'.repeat(513)}` },
         { title: 'Safe', url: '/guides/safe' },
       ]),
@@ -45,5 +49,7 @@ describe('AI answer sources', () => {
     }))
 
     expect(parseAiAnswerSources(serializeAiAnswerSources(sources))).toHaveLength(8)
+    expect(normalizeAiAnswerSources(sources, 64)).toHaveLength(12)
+    expect(normalizeAiAnswerSources(Array.from({ length: 100 }, (_, i) => ({ title: `Page ${i}`, url: `/page-${i}` })), 1000)).toHaveLength(64)
   })
 })
