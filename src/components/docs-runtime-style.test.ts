@@ -45,9 +45,13 @@ describe('documentation visual system', () => {
   it('brands only the active collection underline, not its neutral label', async () => {
     const { readFile } = await import('node:fs/promises')
     const css = await readFile('src/styles/docs-handoff.css', 'utf8')
-    const rule = css.match(/\.thally-docs-tabs \.thally-nav-tab-item\[aria-current='page'\] \{([^}]+)\}/)?.[1]
-    expect(rule).toContain('border-bottom-color: var(--docs-accent)')
-    expect(rule).not.toMatch(/(?:^|[;\n])\s*color\s*:/)
+    // The marker is a pseudo-element laid over the header rule, so the accent
+    // never has to touch the tab's own text color.
+    const marker = css.match(/\.thally-docs-tabs \.thally-nav-tab-item\[aria-current='page'\]::after \{([^}]+)\}/)?.[1]
+    expect(marker).toContain('background: var(--docs-accent)')
+    expect(marker).not.toMatch(/(?:^|[;\n])\s*color\s*:/)
+    const label = css.match(/\.thally-docs-tabs \.thally-nav-tab-item\[aria-current='page'\] \{([^}]+)\}/)?.[1] ?? ''
+    expect(label).not.toMatch(/(?:^|[;\n])\s*color\s*:/)
   })
 
   it('brands the active page-outline label and indicator with the live theme accent', async () => {
