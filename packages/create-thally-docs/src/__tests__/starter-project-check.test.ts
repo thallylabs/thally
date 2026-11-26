@@ -1,10 +1,11 @@
 /** Offline checks distinguish unknown provenance from unsafe inputs. */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { checkStarterProject } from '../starter-project-check.js'
+import { appendStarterProvenanceIssues, checkStarterProject } from '../starter-project-check.js'
 import { runCheck, type LintIssue } from '../check.js'
 import { STABLE_SCAFFOLD_RELEASE } from '../release.js'
 import { starterManifestSha256 } from '../starter-sync.js'
@@ -35,12 +36,24 @@ describe('starter project check', () => {
     const root = project()
     write(root, 'starter-release.json', JSON.stringify(manifest))
     const issues: LintIssue[] = []
-    expect(await runCheck(root, { fix: false, ci: true, silent: true, onIssues: result => issues.push(...result) })).toBe(0)
+    expect(await runCheck(root, { fix: false, ci: true, silent: true, checkStarterProvenance: appendStarterProvenanceIssues, onIssues: result => issues.push(...result) })).toBe(0)
     const provenance = issues.filter(issue => issue.file === 'starter-release.json')
     expect(provenance).toHaveLength(1)
     expect(provenance[0].severity).toBe('warning')
     expect(provenance[0].message).toContain('Cannot verify')
     expect(provenance[0].message).not.toMatch(/tamper|edited|fraud/i)
+  })
+
+  it('keeps exact release-catalog diagnostics wired into the real CLI', () => {
+    const root = project()
+    write(root, 'starter-release.json', JSON.stringify(manifest))
+    const result = spawnSync(process.execPath, [
+      '--import', import.meta.resolve('tsx'), fileURLToPath(new URL('../index.ts', import.meta.url)),
+      'check', root, '--ci',
+    ], { encoding: 'utf8', timeout: 15_000, maxBuffer: 256 * 1024 })
+    expect(result.status).toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toContain('Cannot verify starter-release.json')
+    expect(`${result.stdout}${result.stderr}`.match(/Cannot verify starter-release.json/g)).toHaveLength(1)
   })
 
   it('reports malformed provenance without echoing its source', async () => {

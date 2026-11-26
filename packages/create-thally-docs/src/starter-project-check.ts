@@ -14,7 +14,15 @@ export function checkStarterProject(
   projectDir: string,
   releases: readonly ScaffoldRelease[] = SUPPORTED_SCAFFOLD_RELEASES,
 ): StarterIntegrityIssue[] {
-  const issues = checkStarterIntegrity(projectDir)
+  return appendStarterProvenanceIssues(projectDir, checkStarterIntegrity(projectDir), releases)
+}
+
+/** Apply trusted CLI release policy after the shared offline checks, without running them twice. */
+export function appendStarterProvenanceIssues(
+  projectDir: string,
+  issues: StarterIntegrityIssue[],
+  releases: readonly ScaffoldRelease[] = SUPPORTED_SCAFFOLD_RELEASES,
+): StarterIntegrityIssue[] {
   const file = 'starter-release.json', path = join(projectDir, file)
   if (!existsSync(path) || issues.some(issue => issue.file === file && issue.severity === 'error')) return issues
   try {
