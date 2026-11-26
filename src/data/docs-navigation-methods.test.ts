@@ -11,7 +11,7 @@ const content: Record<string, string> = {
   guide: '---\ntitle: GET started\n---\nDescription',
   webhook: '---\ntitle: Page event\nopenapi: webhook pageUpdated\n---\nDescription',
 }
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => Object.keys(content).map((id) => `src/content/${id}.mdx`),
   readRuntimeSource: (path: string) => content[path.split('/').pop()!.replace('.mdx', '')],
   runtimeSourceExists: () => true,

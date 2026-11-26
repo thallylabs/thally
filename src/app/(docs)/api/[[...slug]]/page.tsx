@@ -1,3 +1,4 @@
+import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 /** Authored API documents share the docs renderer; generated operations use the API shell. */
 
 import type { Metadata } from 'next'
@@ -144,6 +145,7 @@ async function renderApiReferencePage({ params }: PageProps) {
       siteName: effectiveSite.name,
       pageUrl,
       title: node.operation.title,
+      pageUpdate: node.pageUpdate,
       description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
       specUrl: specUrl ?? undefined,
       method: node.operation.method,
@@ -162,7 +164,7 @@ async function renderApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle pageUpdate={node.pageUpdate} showLastUpdated={getBuildContentControls().showLastUpdated} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }

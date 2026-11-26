@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { getContentIndex, isIndexedContentPath } from '@/lib/content-index'
+import { normalizePageUpdateMetadata, type PageUpdateMetadata } from '@/lib/page-update'
 import { runtimeSources } from '@/generated/runtime-sources'
 
 function normalizedProjectPath(filePath: string): string {
@@ -102,4 +103,14 @@ export function listRuntimeSources(prefix: string): Array<string> {
     return Object.keys(index.pages).filter((key) => key.startsWith(normalizedPrefix))
   }
   return Object.keys(runtimeSources).filter((key) => key.startsWith(normalizedPrefix))
+}
+
+
+/** Read source provenance without treating checkout mtimes as page dates. */
+export function runtimeSourcePageUpdate(filePath: string): PageUpdateMetadata | undefined {
+  const key = normalizedProjectPath(filePath)
+  const index = getContentIndex()
+  if (index && isIndexedContentPath(key)) return normalizePageUpdateMetadata(index.pages[key]?.pageUpdate)
+  const entry = runtimeSources[key] as { pageUpdate?: unknown } | undefined
+  return normalizePageUpdateMetadata(entry?.pageUpdate)
 }

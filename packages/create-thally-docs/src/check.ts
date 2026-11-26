@@ -23,6 +23,7 @@ import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, plainLinkedTitle, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
+import { checkStarterProject } from './starter-project-check.js'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -860,7 +861,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   const contentDir = join(projectDir, 'src', 'content')
-  const issues: LintIssue[] = []
+  const issues: LintIssue[] = checkStarterProject(projectDir)
   const config = readDocsJson(projectDir)
   const secondaryLocales = new Set(
     (config.i18n?.locales ?? [])

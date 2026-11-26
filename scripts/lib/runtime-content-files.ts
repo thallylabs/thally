@@ -18,6 +18,8 @@ import {
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
+import { attachPageUpdates } from './page-updates'
+import type { PageUpdateMetadata } from '../../src/lib/page-update'
 import { createHash } from 'node:crypto'
 import { parseFrontmatter } from '../../src/lib/frontmatter'
 import { MAX_SEARCH_SHARD_BYTES, MAX_SEARCH_SHARDS, PREPARED_SEARCH_FORMAT, type PreparedSearchDescriptor, type PreparedSearchRecord } from '../../src/lib/search/prepared-content-contract'
@@ -32,13 +34,16 @@ import type { ApiSpecConfig, OpenAPIDocument, OperationOverride } from '../../sr
 export interface RuntimeSourceEntry {
   content: string
   modifiedAtMs: number
+  pageUpdate?: PageUpdateMetadata
+  /** Physical authored bytes; sha256 in assets measures the sanitized publication instead. */
+  rawSha256?: string
 }
 
 export type RuntimeSourceMap = Record<string, RuntimeSourceEntry>
 
 export interface ContentAssetManifest {
   version: 1
-  files: Record<string, { modifiedAtMs: number; sha256: string; searchShard?: number }>
+  files: Record<string, { modifiedAtMs: number; sha256: string; searchShard?: number; pageUpdate?: PageUpdateMetadata; rawSha256?: string }>
   search?: PreparedSearchDescriptor
 }
 
@@ -57,8 +62,11 @@ function addTextFile(
   if (!existsSync(filePath)) return
   const stats = lstatSync(filePath)
   if (!stats.isFile()) return
+  const bytes = readFileSync(filePath)
+  const content = bytes.toString('utf8')
   sources[projectPath(projectRoot, filePath)] = {
-    content: readFileSync(filePath, 'utf8'),
+    content,
+    rawSha256: createHash('sha256').update(bytes).digest('hex'),
     modifiedAtMs: stats.mtimeMs,
   }
 }
@@ -395,6 +403,7 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
   }
   addTextFile(projectRoot, sources, path.join(projectRoot, 'docs.json'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'AGENTS.md'))
+  attachPageUpdates(projectRoot, sources)
   return sources
 }
 
@@ -429,7 +438,7 @@ export async function writeManagedContentAssets(
     const outputPath = path.join(outputRoot, ...filePath.split('/'))
     mkdirSync(path.dirname(outputPath), { recursive: true })
     writeFileSync(outputPath, entry.content, 'utf8')
-    manifest.files[filePath] = { modifiedAtMs: entry.modifiedAtMs, sha256: rawSha256(entry.content) }
+    manifest.files[filePath] = { modifiedAtMs: entry.modifiedAtMs, sha256: rawSha256(entry.content), ...(entry.pageUpdate ? { pageUpdate: entry.pageUpdate } : {}), ...(entry.rawSha256 ? { rawSha256: entry.rawSha256 } : {}) }
   }
 
   await writePreparedSearchAssets(outputRoot, sources, manifest)

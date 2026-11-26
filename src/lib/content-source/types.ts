@@ -18,6 +18,7 @@
  */
 
 import type { SearchContentProjection } from '@thallylabs/core/search'
+import type { PageUpdateMetadata } from '@/lib/page-update'
 import type { PreparedRetrievalContent } from '@/lib/search/prepared-content-contract'
 
 export type ContentSourceKind = 'filesystem' | 'assets'
@@ -29,6 +30,8 @@ export interface ContentSourceFile {
    * comparisons (translation staleness), never as a wall-clock timestamp.
    */
   modifiedAtMs: number
+  /** Hash-bound source/publication provenance, independent of observation mtimes. */
+  pageUpdate?: PageUpdateMetadata
 }
 
 export interface ContentSource {

@@ -3,7 +3,7 @@ import type { NormalizedOperation } from '@/lib/openapi/types'
 import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/manual-operation'
 import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
-import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
+import { listRuntimeSources, readRuntimeSource, runtimeSourceExists, runtimeSourcePageUpdate } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
 import { resolveIconLibrary, type IconLibrary, type IconStyle } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
@@ -26,6 +26,7 @@ import {
   type PageAccess,
   type ReaderContext,
 } from '@/lib/reader-auth/access'
+import { resolvePageUpdate, type PageUpdateMetadata } from '@/lib/page-update'
 
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,8 @@ export interface DocEntry {
   component: ComponentType<Record<string, unknown>>
   timeEstimate: string
   lastUpdated: string
+  /** Canonical date plus truthful update/publication provenance. */
+  pageUpdate?: PageUpdateMetadata
   /** Public provenance: ISO date a human last confirmed this page is accurate. */
   lastVerified?: string
   /** Public provenance: product version this page was verified against. */
@@ -312,6 +315,8 @@ export type ContentIconTone = 'neutral' | 'accent'
 
 export interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  /** Reader date visibility; metadata is retained when the label is hidden. */
+  content?: { showLastUpdated?: boolean }
   /** Local, customer-owned stylesheets served from public/. */
   stylesheets?: Array<string>
   /** Page breadcrumb trail above each title. Defaults to true; `false` hides it. */
@@ -484,6 +489,7 @@ interface FrontmatterData {
   keywords?: Array<string>
   timeEstimate?: string
   lastUpdated?: string
+  last_updated?: string
   lastVerified?: string
   verifiedVersion?: string
   openapi?: unknown
@@ -788,7 +794,10 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   const href = slug.length ? `/${slug.join('/')}` : servedRootHref('/')
   const title = fm.title ?? deriveTitleFromSlug(pageId)
   const api = pageApiMetadata(fm)
-  return {
+  const index = getContentIndex()
+  const filePath = frontmatterCandidates(pageId).find((candidate) => index ? Boolean(index.pages[candidate]) : runtimeSourceExists(candidate))
+  const automatic = filePath ? runtimeSourcePageUpdate(filePath) : undefined
+  return withPageUpdate({
     id: pageId,
     title,
     headingTitle: typeof fm.headingTitle === 'string' && fm.headingTitle.trim() ? fm.headingTitle.trim() : undefined,
@@ -809,7 +818,13 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     access: parsePageAccess(fm as Record<string, unknown>),
     ...(api.openapi ? { openapi: api.openapi } : {}),
     ...(api.manual ? { manualTarget: api.manual } : {}),
-  }
+  }, fm, automatic)
+}
+
+/** Preserve a customer-provided legacy date fallback while unifying metadata. */
+function withPageUpdate(entry: DocEntry, frontmatter: FrontmatterData, automatic?: PageUpdateMetadata): DocEntry {
+  const pageUpdate = resolvePageUpdate({ ...frontmatter, lastUpdated: entry.lastUpdated }, automatic)
+  return pageUpdate ? { ...entry, lastUpdated: pageUpdate.date, pageUpdate } : entry
 }
 
 // ---------------------------------------------------------------------------
@@ -1832,4 +1847,11 @@ export function getContentIconTone(): ContentIconTone {
  */
 export function getIconLibrary(): IconLibrary {
   return resolveIconLibrary(docsConfig().icons?.library)
+}
+
+
+
+/** Internal, bounded per-page date lookup shared by reader and machine projections. */
+export function getDocPageUpdate(pageId: string): PageUpdateMetadata | undefined {
+  return isSafePageId(pageId) ? buildDocEntryFromPageId(pageId).pageUpdate : undefined
 }

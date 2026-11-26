@@ -30,6 +30,7 @@ export function formatStarterUpdateResult(result: StarterUpdateResult): string {
     '',
     ...(result.recoveredProvenance ? ['  Verified published framework baseline; canonical provenance will advance.', ''] : []),
     ...formatPaths('Copy/update', result.plan.copyPaths),
+    ...formatPaths('Merged source', Object.keys(result.plan.mergedContents ?? {}).sort()),
     ...formatPaths('Merged configuration', result.resolvedManualPaths ?? []),
     ...(result.manualConflicts ?? []).flatMap((conflict) => conflict.fields.map((field) => `    - ${conflict.path}${field}`)),
     ...formatPaths('Delete', result.plan.deletePaths),

@@ -1,3 +1,4 @@
+import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 /** Localized API navigation, with request-policy rendering for managed assets. */
 
 import type { Metadata } from 'next'
@@ -171,6 +172,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
     siteName: effectiveSite.name,
     pageUrl,
     title: node.operation.title,
+    pageUpdate: node.pageUpdate,
     description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
     specUrl: specUrl ?? undefined,
     method: node.operation.method,
@@ -191,7 +193,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle pageUpdate={node.pageUpdate} showLastUpdated={getBuildContentControls().showLastUpdated} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     </div>
   )

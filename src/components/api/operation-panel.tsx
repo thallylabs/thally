@@ -20,6 +20,8 @@ import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
 import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
 import { authDescription } from '@/lib/openapi/auth'
 import { isPacked, unpackValue, type PackedValue } from '@/lib/openapi/pack-operation'
+import { PageUpdated } from '@/components/docs/page-updated'
+import type { PageUpdateMetadata } from '@/lib/page-update'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
 import { Prose } from '@/components/mdx/prose'
@@ -38,6 +40,8 @@ interface OperationPanelProps {
   showDescription?: boolean
   /** Renders the operation title as the page h1 (spec-only pages have no MDX header). */
   showTitle?: boolean
+  pageUpdate?: PageUpdateMetadata
+  showLastUpdated?: boolean
   /** Mintlify `playground` display; `simple` has no Try it, `none` hides the endpoint bar too. */
   playground?: PlaygroundDisplay
   /** Locale of the page, for the panel's own labels. */
@@ -58,7 +62,7 @@ export function OperationPanel({ operation: wire, ...props }: OperationPanelProp
   return <ParameterLinkProvider key={`${operation.specId}:${operation.id}:${operation.key}`}><OperationPanelContent {...props} operation={operation} /></ParameterLinkProvider>
 }
 
-function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale, pageActions }: OperationPanelProps & { operation: NormalizedOperation }) {
+function OperationPanelContent({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale, pageActions, pageUpdate, showLastUpdated = true }: OperationPanelProps & { operation: NormalizedOperation }) {
   const t = (key: ApiLabelKey, n?: number) => apiLabel(locale, key, n)
   const controller = useTryItController(operation)
   const interactive = playground === 'interactive' && !operation.isWebhook
@@ -102,6 +106,7 @@ function OperationPanelContent({ operation, children, showDescription = true, sh
               {operation.title}
             </h1><CopyPageButton {...pageActions} /></div>
           ) : null}
+          {showTitle && showLastUpdated ? <PageUpdated pageUpdate={pageUpdate} locale={locale} /> : null}
           {showTitle ? description : null}
           <EndpointBar operation={operation} display={playground} onTryIt={() => setDialogOpen(true)} />
           {showTitle ? null : description}

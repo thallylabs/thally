@@ -21,6 +21,7 @@
  *   operations and page-only specs.
  */
 
+import type { PageUpdateMetadata } from '@/lib/page-update'
 import type { ApiOperationNode } from '@/data/api-reference'
 import { buildCurlCommand } from '@/lib/openapi/code-samples'
 import { formatExample, responseExamples } from '@/lib/openapi/response-examples'
@@ -42,6 +43,8 @@ export interface ApiOperationSummary {
   /** Absolute URL of the human reference page. */
   url: string
   is_webhook: boolean
+  last_updated?: string
+  page_update?: PageUpdateMetadata
 }
 
 export interface ApiOperationParameter {
@@ -171,6 +174,7 @@ export function summarizeApiOperation(node: ApiOperationNode, origin: string): A
   const { operation } = node
   return {
     id: apiOperationId(node),
+    ...(node.pageUpdate ? { last_updated: node.pageUpdate.date, page_update: node.pageUpdate } : {}),
     title: operation.title,
     method: operation.method,
     path: operation.path,
@@ -288,6 +292,7 @@ function topLevelFields(schema: Record<string, unknown> | undefined): Array<stri
  */
 export function apiOperationMarkdown(detail: ApiOperationDetail): string {
   const lines: Array<string> = [`## ${detail.method} ${detail.path} — ${detail.title}`, '', `URL: ${detail.url}`, '']
+  if (detail.last_updated) lines.push(`last_updated: ${detail.last_updated}`, `last_updated_source: ${detail.page_update?.source ?? 'git'}`, '')
   if (detail.description && detail.description !== `${detail.method} ${detail.path}`) lines.push(detail.description, '')
   if (detail.auth.schemes.length) {
     const schemes = detail.auth.schemes.map((scheme) => `${scheme.kind} (${scheme.in} \`${scheme.param_name}\`)`).join(' or ')

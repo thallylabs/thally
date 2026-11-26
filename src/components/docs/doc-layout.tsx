@@ -3,6 +3,8 @@
 import type { DocEntry, NavContext } from '@/data/docs'
 import { getBreadcrumbs, getBreadcrumbsEnabled, getEyebrowMode, getNavCategory, getNavGroupPath, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
+import { PageUpdated } from '@/components/docs/page-updated'
+import { resolvePageUpdate } from '@/lib/page-update'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
 import { EditOnGithub } from '@/components/docs/edit-on-github'
@@ -44,6 +46,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
   const cloud = getManagedSiteConfigSnapshot()
   const contentControls = getBuildContentControls()
   const showBreadcrumbs = contentControls.showBreadcrumbs && getBreadcrumbsEnabled()
+  const pageDate = contentControls.showLastUpdated ? <PageUpdated pageUpdate={doc.pageUpdate ?? resolvePageUpdate({ lastUpdated: doc.lastUpdated })} locale={locale} /> : null
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
@@ -92,6 +95,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
     return (
       <div lang={locale} dir={localeDirection(locale)} data-doc-mode="custom">
         {children}
+        {pageDate}
       </div>
     )
   }
@@ -105,6 +109,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
         <div className="space-y-16">
           <Prose className="thally-docs-hero max-w-none">{children}</Prose>
           <div className="not-prose">
+            {pageDate}
             <DocPagination prev={prev} next={next} />
           </div>
         </div>

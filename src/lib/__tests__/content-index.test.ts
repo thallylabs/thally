@@ -6,6 +6,7 @@
  * build.
  */
 
+import { getDocPageUpdate } from '@/data/docs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -16,6 +17,7 @@ import {
 import {
   listRuntimeSources,
   runtimeSourceModifiedAt,
+  runtimeSourcePageUpdate,
 } from '../runtime-sources'
 
 const VALID_INDEX = JSON.stringify({
@@ -153,4 +155,22 @@ describe('ASSETS content index loading', () => {
     }
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
+})
+
+
+describe('page-date index authority', () => {
+  afterEach(() => { vi.unstubAllEnvs(); resetContentIndexForTests() })
+  it('reads canonical source metadata independently of the observation timestamp', () => {
+    resetContentIndexForTests()
+    vi.stubEnv('THALLY_CONTENT_INDEX', JSON.stringify({ version: 1, pages: { 'src/content/dated.mdx': { data: {}, modifiedAtMs: 9_999_999_999_999, pageUpdate: { date: '2020-01-01', source: 'git' } } } }))
+    expect(runtimeSourcePageUpdate('src/content/dated.mdx')).toEqual({ date: '2020-01-01', source: 'git' })
+  })
+})
+
+
+it('uses the indexed physical variant even when an older compiled sibling exists', () => {
+  resetContentIndexForTests()
+  vi.stubEnv('THALLY_CONTENT_INDEX', JSON.stringify({ version: 1, pages: { 'src/content/quickstart/index.mdx': { data: { title: 'Current Quickstart' }, modifiedAtMs: 1, pageUpdate: { date: '2020-01-01', source: 'git' } } } }))
+  try { expect(getDocPageUpdate('quickstart')).toEqual({ date: '2020-01-01', source: 'git' }) }
+  finally { vi.unstubAllEnvs(); resetContentIndexForTests() }
 })

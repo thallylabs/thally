@@ -188,6 +188,25 @@ describe('retained release catalog', () => {
 })
 
 describe('immutable starter update orchestration', () => {
+  it('applies a clean source merge and advances exact provenance together', async () => {
+    const old = releaseFixture(1, oldOwnership), next = releaseFixture(2, newOwnership)
+    write(old.tree, 'framework/runtime.ts', 'first\nmiddle\nlast\n')
+    write(next.tree, 'framework/runtime.ts', 'first\nmiddle\nupstream\n')
+    const target = directory('thally-custom-source-update-')
+    copyTree(old.tree, target)
+    write(target, 'framework/runtime.ts', 'local\nmiddle\nlast\n')
+    const result = await updateStarterProject({
+      targetDir: target, releases: [old.release, next.release], targetRelease: next.release,
+      download: fixtureDownload(new Map([[old.release.source.commitSha, old.tree], [next.release.source.commitSha, next.tree]])),
+      apply: true, confirmed: true,
+    })
+    expect(result.applied).toBe(true)
+    expect(result.plan.copyPaths).toEqual(['framework/runtime.ts'])
+    expect(result.plan.mergedContents).toEqual({ 'framework/runtime.ts': 'local\nmiddle\nupstream\n' })
+    expect(readFileSync(join(target, 'framework/runtime.ts'), 'utf8')).toBe('local\nmiddle\nupstream\n')
+    expect(readFileSync(join(target, 'starter-release.json'), 'utf8')).toBe(next.manifestSource)
+  })
+
   it('resolves a direct GitHub-template copy from manifest-only provenance', async () => {
     const old = releaseFixture(1, oldOwnership)
     const next = releaseFixture(2, newOwnership)

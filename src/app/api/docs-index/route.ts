@@ -62,6 +62,7 @@ export async function GET(request: NextRequest) {
       // A translation may restrict its page further than the primary file.
       if (locale !== i18n.defaultLocale && !(await canReaderViewPage(e.id, reader, locale))) return null
       const nav = hrefToNav.get(e.href)
+      const pageUpdate = locale === i18n.defaultLocale ? e.pageUpdate : translated?.pageUpdate
       return {
         type: 'doc' as const,
         id: e.id,
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
         json_ld_url: `${baseUrl}${localizedPath(e.href, locale, i18n.defaultLocale)}?format=ldjson`,
         tab: nav?.tab ?? '',
         group: nav?.group ?? '',
+        ...(pageUpdate ? { last_updated: pageUpdate.date, page_update: pageUpdate } : {}),
         ...(e.badge ? { badge: e.badge } : {}),
         ...((translated?.keywords ?? e.keywords).length ? { keywords: translated?.keywords ?? e.keywords } : {}),
         ...(e.lastVerified ? { last_verified: e.lastVerified } : {}),
@@ -85,6 +87,7 @@ export async function GET(request: NextRequest) {
     title: node.operation.title,
     description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
     url: `${baseUrl}${node.href}`,
+    ...(node.pageUpdate ? { last_updated: node.pageUpdate.date, page_update: node.pageUpdate } : {}),
     method: node.operation.method,
     path: node.operation.path,
     openapi_url: `${baseUrl}/openapi.yaml`,

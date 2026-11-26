@@ -11,7 +11,7 @@ import { ReportAnIssue } from '@/components/docs/report-an-issue'
 
 const contentSourceState = vi.hoisted(() => ({ kind: 'filesystem' as 'filesystem' | 'assets' }))
 
-vi.mock('@/data/docs', () => ({
+vi.mock('@/data/docs', () => ({ getDocPageUpdate: () => undefined,
   deriveTitleFromSlug: (slug: string) => slug,
   getI18nConfig: () => ({ defaultLocale: 'en' }),
 }))
@@ -21,7 +21,7 @@ vi.mock('@/mdx/remark', () => ({ remarkPlugins: [] }))
 vi.mock('@/mdx/rehype', () => ({ rehypePlugins: [] }))
 vi.mock('@/components/mdx/mdx-components', () => ({ useMDXComponents: () => ({}) }))
 vi.mock('@/mdx/snippet-registry', () => ({ resolveSnippetComponent: vi.fn() }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   runtimeSourceExists: () => true,
   readRuntimeSource: () => '# Content',
 }))

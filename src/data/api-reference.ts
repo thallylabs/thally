@@ -1,3 +1,8 @@
+/** API operation inventory with provenance from each configured specification input. */
+
+import path from 'node:path'
+import { getContentSource } from '@/lib/content-source'
+import { normalizePageUpdateMetadata, type PageUpdateMetadata } from '@/lib/page-update'
 import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadAuthoredSpecDocument, loadSpec } from '@/lib/openapi/fetch'
@@ -28,6 +33,7 @@ export interface ApiNavigationGroup {
 
 export interface ApiOperationNode {
   operation: NormalizedOperation
+  pageUpdate?: PageUpdateMetadata
   slug: Array<string>
   href: string
 }
@@ -62,9 +68,13 @@ const getNormalizedSpec = cache(async (specId?: string): Promise<NormalizedSpec>
 /** Every operation of one spec, including a page-only spec's, for frontmatter and Try It lookups. */
 const getSpecOperationNodes = cache(async (specId?: string): Promise<Array<ApiOperationNode>> => {
   const spec = await getNormalizedSpec(specId)
+  const input = spec.config.source.type === 'file' ? spec.config.source.path : 'docs.json'
+  const sourcePath = input.startsWith('/') ? path.posix.join('public', input.slice(1)) : input
+  const source = await getContentSource().read(sourcePath)
+  const pageUpdate = normalizePageUpdateMetadata(source?.pageUpdate)
   return spec.operations
     .filter((operation) => !operation.hidden)
-    .map(toOperationNode)
+    .map((operation) => ({ ...toOperationNode(operation), ...(pageUpdate ? { pageUpdate } : {}) }))
 })
 
 function toOperationNode(operation: NormalizedOperation): ApiOperationNode {

@@ -97,6 +97,7 @@ export interface CloudPortableConfig {
     showBreadcrumbs?: boolean
     showTableOfContents?: boolean
     showCopyPage?: boolean
+    showLastUpdated?: boolean
   }
   /** Public Markdown mirrors exposed at each documentation page's `.md` URL. */
   markdown?: {

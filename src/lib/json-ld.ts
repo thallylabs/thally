@@ -1,3 +1,5 @@
+/** Structured-data projections share the runtime's canonical page provenance. */
+import { resolvePageUpdate, type PageUpdateMetadata } from '@/lib/page-update'
 import { siteConfig } from '@/data/site'
 
 const SCHEMA_CONTEXT = 'https://schema.org'
@@ -24,6 +26,7 @@ export interface DocJsonLdOptions {
   description?: string
   keywords?: Array<string>
   lastUpdated?: string
+  pageUpdate?: PageUpdateMetadata
   locale?: string
   breadcrumb?: Array<BreadcrumbJsonLdItem>
 }
@@ -35,6 +38,7 @@ export interface ApiOperationJsonLdOptions {
   title: string
   description?: string
   specUrl?: string
+  pageUpdate?: PageUpdateMetadata
   method?: string
   path?: string
   locale?: string
@@ -119,6 +123,7 @@ export function buildDocPageJsonLd({
   description,
   keywords,
   lastUpdated,
+  pageUpdate,
   locale = 'en',
   breadcrumb,
 }: DocJsonLdOptions) {
@@ -139,7 +144,9 @@ export function buildDocPageJsonLd({
   }
 
   if (description) article.description = description
-  if (lastUpdated) article.dateModified = lastUpdated
+  const update = resolvePageUpdate({}, pageUpdate) ?? resolvePageUpdate({ lastUpdated })
+  if (update) article[update.source === 'first-published' ? 'datePublished' : 'dateModified'] = update.date
+  else if (lastUpdated) article.dateModified = lastUpdated // Legacy validator callers retain malformed input for diagnostics.
   if (keywords?.length) article.keywords = keywords.join(', ')
 
   const graph: Array<Record<string, unknown>> = [article]
@@ -158,6 +165,7 @@ export function buildApiOperationJsonLd({
   title,
   description,
   specUrl,
+  pageUpdate,
   method,
   path,
   locale = 'en',
@@ -181,6 +189,8 @@ export function buildApiOperationJsonLd({
 
   if (description) article.description = description
   if (specUrl) article.isBasedOn = specUrl
+  const update = resolvePageUpdate({}, pageUpdate)
+  if (update) article[update.source === 'first-published' ? 'datePublished' : 'dateModified'] = update.date
 
   const graph: Array<Record<string, unknown>> = [article]
   const breadcrumbList = breadcrumb ? buildBreadcrumbListJsonLd(breadcrumb, siteUrl, pageUrl) : null

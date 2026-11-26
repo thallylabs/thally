@@ -375,3 +375,13 @@ describe('bounded managed content retention', () => {
     expect(second).toEqual(first)
   })
 })
+
+
+describe('immutable page-date provenance', () => {
+  it('carries canonical dates separately from release-observed mtimes', async () => {
+    const pageUpdate = { date: '2020-01-01', source: 'git' as const }
+    const data = fakeAssets({ version: 1, files: { 'src/content/dated.mdx': { modifiedAtMs: 9_999_999_999_999, pageUpdate } } }, { 'src/content/dated.mdx': 'Published bytes.' })
+    const source = createAssetsContentSource(stubFallback(), () => data.fetcher)
+    expect(await source.read('src/content/dated.mdx')).toMatchObject({ pageUpdate, modifiedAtMs: 9_999_999_999_999 })
+  })
+})

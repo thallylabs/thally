@@ -17,7 +17,7 @@ vi.mock('@/lib/docs-json-config', () => ({
   getDocsJsonConfig: () => config,
   getDocsJsonConfigRevision: () => 1,
 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => ['src/content/quickstart.mdx', 'src/content/es/quickstart.mdx', 'src/content/secret.mdx'],
   readRuntimeSource: (path: string) => path.endsWith('secret.mdx')
     ? '---\ntitle: Secret\nhidden: true\n---\nDirect links only'

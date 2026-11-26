@@ -3,12 +3,15 @@
  *
  * The ownership contract comes from the pinned starter archive's
  * `starter-release.json`. Automatic updates touch only framework-eligible files
- * that still match the recorded old starter. Owner paths are never mutated;
- * manual-review files join the transaction only after a separate safe merge.
+ * that still match the recorded old starter or have disjoint exact source edits.
+ * Owner paths are never mutated; manual-review files join the transaction only
+ * after a separate safe merge. Merged bytes stay inside the apply transaction.
  */
 
 import { createHash } from 'node:crypto'
 import { areStarterFileContentsEquivalent } from './starter-file-comparison.js'
+import { isStarterSourceMergePath, mergeStarterSourceContents, STARTER_SOURCE_MERGE_LIMITS } from './starter-source-merge.js'
+export { isStarterSourceMergePath, mergeStarterSourceContents, STARTER_SOURCE_MERGE_LIMITS } from './starter-source-merge.js'
 import {
   copyFileSync,
   existsSync,
@@ -41,6 +44,8 @@ export type StarterPathOwnership =
 
 export interface StarterRuntimeSyncPlan {
   copyPaths: string[]
+  /** Internal source payload: expose only its paths/counts in user-facing output. */
+  mergedContents?: Record<string, string>
   deletePaths: string[]
   conflictPaths: string[]
   manualReviewPaths: string[]
@@ -444,6 +449,10 @@ export function planStarterRuntimeSync(
   const conflictPaths: string[] = []
   const preservedPaths: string[] = []
   const unchangedPaths: string[] = []
+  const mergedContents: Record<string, string> = Object.create(null)
+  const mergedPreconditions: Record<string, StarterTargetPrecondition> = Object.create(null)
+  let mergeAttempts = 0
+  let mergeDeadline: number | undefined
   const paths = new Set([
     ...oldFiles.keys(),
     ...newFiles.keys(),
@@ -474,7 +483,30 @@ export function planStarterRuntimeSync(
     if (newMatchesOld || targetMatchesNew || (!targetPath && !newPath)) {
       preservedPaths.push(path)
     } else {
-      conflictPaths.push(path)
+      let merged: string | undefined
+      if (newPath && targetPath && isStarterSourceMergePath(path) &&
+          [oldPath, newPath, targetPath].every(file => {
+            const entry = lstatSync(file)
+            return entry.isFile() && !entry.isSymbolicLink() && entry.size <= STARTER_SOURCE_MERGE_LIMITS.bytes
+          }) &&
+          mergeAttempts < STARTER_SOURCE_MERGE_LIMITS.planAttempts &&
+          (mergeDeadline === undefined || Date.now() < mergeDeadline)) {
+        mergeDeadline ??= Date.now() + STARTER_SOURCE_MERGE_LIMITS.planMilliseconds
+        mergeAttempts += 1
+        // Hash the exact local bytes supplied to the merger. A later read could
+        // otherwise bless a concurrent edit as the precondition for stale output.
+        const local = readFileSync(targetPath)
+        merged = mergeStarterSourceContents(path, readFileSync(oldPath), local, readFileSync(newPath))
+        if (Date.now() > mergeDeadline) merged = undefined
+        if (merged !== undefined) mergedPreconditions[path] = {
+          kind: 'file', sha256: createHash('sha256').update(local).digest('hex'),
+        }
+      }
+      if (merged === undefined) conflictPaths.push(path)
+      else {
+        copyPaths.push(path)
+        mergedContents[path] = merged
+      }
     }
   }
 
@@ -483,7 +515,7 @@ export function planStarterRuntimeSync(
   const targetPreconditions = Object.fromEntries(
     [...sortedCopyPaths, ...sortedDeletePaths].map((path) => [
       path,
-      captureTargetPrecondition(ensureContained(targetDir, path)),
+      mergedPreconditions[path] ?? captureTargetPrecondition(ensureContained(targetDir, path)),
     ]),
   )
 
@@ -495,6 +527,7 @@ export function planStarterRuntimeSync(
     preservedPaths: preservedPaths.sort(),
     unchangedPaths: unchangedPaths.sort(),
     targetPreconditions,
+    ...(Object.keys(mergedContents).length ? { mergedContents } : {}),
   }
 }
 
@@ -546,6 +579,14 @@ export function applyStarterRuntimeSyncPlan(
   const uniqueMutations = new Set([...copyPaths, ...deletePaths])
   if (uniqueMutations.size !== copyPaths.length + deletePaths.length) {
     throw new Error('Starter synchronization plan contains conflicting mutations.')
+  }
+  for (const [path, contents] of Object.entries(plan.mergedContents ?? {})) {
+    if (!plan.copyPaths.includes(path) || !isStarterSourceMergePath(path) ||
+        typeof contents !== 'string' || contents.includes('\0') ||
+        Buffer.from(contents, 'utf8').toString('utf8') !== contents ||
+        Buffer.byteLength(contents, 'utf8') > STARTER_SOURCE_MERGE_LIMITS.bytes) {
+      throw new Error('Starter synchronization received an invalid source merge.')
+    }
   }
   for (const path of uniqueMutations) {
     const isManualMutation = manual?.writeFiles.has(path) || manual?.deletePaths.includes(path)
@@ -632,10 +673,17 @@ export function applyStarterRuntimeSyncPlan(
         continue
       }
       const sourcePath = ensureContained(newStarterDir, path)
-      if (!existsSync(sourcePath) || !lstatSync(sourcePath).isFile()) {
+      assertSafeTargetParents(newStarterDir, sourcePath)
+      if (!existsSync(sourcePath) || !lstatSync(sourcePath).isFile() || lstatSync(sourcePath).isSymbolicLink()) {
         throw new Error(`Starter synchronization source is missing ${path}.`)
       }
-      copyFileSync(sourcePath, stagePath(path))
+      const stagedPath = stagePath(path)
+      copyFileSync(sourcePath, stagedPath)
+      if (Object.hasOwn(plan.mergedContents ?? {}, path)) {
+        // Copy first so merged writes retain the same upstream mode semantics
+        // as normal updates; rollback still restores the original local mode.
+        writeFileSync(stagedPath, plan.mergedContents![path], 'utf8')
+      }
     }
     let provenanceStagePath: string | undefined
     if (options.provenance) {

@@ -242,6 +242,7 @@ export default async function DocsPage({ params }: PageProps) {
     description: await tagDescription(doc),
     keywords: doc.keywords,
     lastUpdated: doc.lastUpdated,
+    pageUpdate: doc.pageUpdate,
     locale: contentLocale,
     breadcrumb: nav.breadcrumb,
   })

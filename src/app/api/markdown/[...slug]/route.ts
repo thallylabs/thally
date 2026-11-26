@@ -1,3 +1,7 @@
+/** Public Markdown mirrors retain canonical provenance without internal authoring metadata. */
+
+import { stringify as stringifyYaml } from 'yaml'
+import { resolvePageUpdate } from '@/lib/page-update'
 import { NextResponse } from 'next/server'
 import { canReaderViewPage, ensureDocPublication, isDocPublished, isLocaleDirectory } from '@/data/docs'
 import path from 'node:path'
@@ -81,8 +85,11 @@ export async function GET(
       // clean the MDX body to real Markdown (JSX components → Markdown) while
       // preserving the public frontmatter block.
       const stripped = stripInternalFrontmatter(file.content)
-      const frontmatter = stripped.match(/^\s*---\n[\s\S]*?\n---\n?/)?.[0] ?? ''
+      let frontmatter = stripped.match(/^\s*---\n[\s\S]*?\n---\n?/)?.[0] ?? ''
       const body = mdxToMarkdown(stripped.slice(frontmatter.length))
+      const data = parseFrontmatter(stripped).data
+      const pageUpdate = resolvePageUpdate(data, file.pageUpdate)
+      if (pageUpdate) frontmatter = `---\n${stringifyYaml({ ...data, last_updated: pageUpdate.date, last_updated_source: pageUpdate.source }).trimEnd()}\n---\n`
       return new NextResponse(frontmatter + body, {
         status: 200,
         headers: {
