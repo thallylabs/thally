@@ -68,6 +68,7 @@ export interface UpdateStarterProjectOptions {
 export interface StarterUpdateResult {
   previousRelease: ScaffoldRelease
   targetRelease: ScaffoldRelease
+  /** Trusted apply payload; render path summaries rather than source contents. */
   plan: StarterRuntimeSyncPlan
   isUpToDate: boolean
   applied: boolean

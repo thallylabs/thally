@@ -10,7 +10,7 @@ const pages = vi.hoisted(() => ({
   config: { servers: ['https://httpbin.org'] as Array<string>, auth: { method: 'bearer' } as { method: string } | undefined },
 }))
 
-vi.mock('@/data/docs', () => ({
+vi.mock('@/data/docs', () => ({ getDocPageUpdate: () => undefined,
   deriveTitleFromSlug: (slug: string) => slug,
   getI18nConfig: () => ({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'French' }, { code: 'de', label: 'German' }] }),
   getApiMdxConfig: () => pages.config,
@@ -21,7 +21,7 @@ vi.mock('@/mdx/remark', () => ({ remarkPlugins: [] }))
 vi.mock('@/mdx/rehype', () => ({ rehypePlugins: [] }))
 vi.mock('@/components/mdx/mdx-components', () => ({ useMDXComponents: () => ({}) }))
 vi.mock('@/mdx/snippet-registry', () => ({ resolveSnippetComponent: vi.fn() }))
-vi.mock('@/lib/runtime-sources', () => ({ runtimeSourceExists: () => true, readRuntimeSource: () => '' }))
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined, runtimeSourceExists: () => true, readRuntimeSource: () => '' }))
 vi.mock('@/lib/content-source', () => ({
   getContentSource: () => ({
     kind: 'filesystem',

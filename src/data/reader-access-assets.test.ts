@@ -17,7 +17,7 @@ const config = vi.hoisted(() => ({
 
 vi.mock('@/lib/docs-json-config', () => ({ getDocsJsonConfig: () => config, getDocsJsonConfigRevision: () => 1 }))
 // Assets builds embed no authored sources.
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => [],
   readRuntimeSource: () => { throw new Error('ENOENT') },
   runtimeSourceExists: () => false,

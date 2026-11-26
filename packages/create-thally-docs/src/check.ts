@@ -23,6 +23,7 @@ import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, plainLinkedTitle, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
+import { checkStarterIntegrity } from '@thallylabs/core/starter-integrity'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -44,6 +45,8 @@ export interface CheckOptions {
   onIssues?: (issues: Array<LintIssue>) => void
   /** Migration's terminal renderer owns diagnostics when running an inline step. */
   silent?: boolean
+  /** CLI-owned release policy; content/rendering consumers need no release catalog. */
+  checkStarterProvenance?: (projectDir: string, issues: Array<LintIssue>) => Array<LintIssue>
 }
 
 /** Run a git command in the project, returning success + trimmed stdout. */
@@ -860,7 +863,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   const contentDir = join(projectDir, 'src', 'content')
-  const issues: LintIssue[] = []
+  const offlineIssues = checkStarterIntegrity(projectDir)
+  const issues: LintIssue[] = options.checkStarterProvenance?.(projectDir, offlineIssues) ?? offlineIssues
   const config = readDocsJson(projectDir)
   const secondaryLocales = new Set(
     (config.i18n?.locales ?? [])

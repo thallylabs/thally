@@ -132,3 +132,18 @@ describe('serializeJsonLd', () => {
     expect(JSON.parse(serialized)).toEqual({ name: 'a\u2028b\u2029c' })
   })
 })
+
+
+describe('canonical page publication and update provenance', () => {
+  const page = { siteUrl, pageUrl: `${siteUrl}/guide`, id: 'guide', title: 'Guide' }
+  it('describes an initial import as datePublished, not a fabricated update', () => {
+    const article = buildDocPageJsonLd({ ...page, lastUpdated: '2026-11-27', pageUpdate: { date: '2026-11-27', source: 'first-published' } })['@graph'][0]
+    expect(article).toMatchObject({ datePublished: '2026-11-27' })
+    expect(article).not.toHaveProperty('dateModified')
+  })
+  it('uses the same actual update for generated API structured data', () => {
+    const article = buildApiOperationJsonLd({ ...page, pageUpdate: { date: '2026-11-27', source: 'git' } })['@graph'][0]
+    expect(article).toMatchObject({ dateModified: '2026-11-27' })
+    expect(article).not.toHaveProperty('datePublished')
+  })
+})

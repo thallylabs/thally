@@ -1,3 +1,4 @@
+import { getEffectivePageDateVisibility } from '@/lib/cloud-link/page-date-visibility'
 /** Localized API navigation, with request-policy rendering for managed assets. */
 
 import type { Metadata } from 'next'
@@ -165,12 +166,14 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   }
 
   if (!canReaderSeeUnmarkedContent(reader)) denyDocumentAccess(reader, `/${resolved.locale}/api/${resolved.slug.join('/')}`)
+  const showLastUpdated = await getEffectivePageDateVisibility()
   const pageUrl = `${siteUrl}${node.href}`
   const jsonLd = buildApiOperationJsonLd({
     siteUrl,
     siteName: effectiveSite.name,
     pageUrl,
     title: node.operation.title,
+    pageUpdate: node.pageUpdate,
     description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
     specUrl: specUrl ?? undefined,
     method: node.operation.method,
@@ -191,7 +194,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle pageUpdate={node.pageUpdate} showLastUpdated={showLastUpdated} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     </div>
   )

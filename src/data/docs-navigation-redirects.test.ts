@@ -13,7 +13,7 @@ vi.mock('@/lib/docs-json-config', () => ({
   getDocsJsonConfig: () => state.config,
   getDocsJsonConfigRevision: () => 1,
 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => Object.keys(state.sources),
   readRuntimeSource: (path: string) => state.sources[path] ?? '',
   runtimeSourceExists: (path: string) => path in state.sources,

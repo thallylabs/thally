@@ -169,7 +169,10 @@ export async function readAgentPage(pageId: string, locale: ResolvedLocale, orig
     description,
     url: `${origin}${localizedPath(entry.href, servedLocale, locale.defaultLocale)}`,
     locale: servedLocale,
-    markdown: document.content.markdown,
+    ...(document.pageUpdate ? { last_updated: document.pageUpdate.date, page_update: document.pageUpdate } : {}),
+    markdown: document.pageUpdate
+      ? `---\nlast_updated: ${document.pageUpdate.date}\nlast_updated_source: ${document.pageUpdate.source}\n---\n\n${document.content.markdown}`
+      : document.content.markdown,
     headings: document.content.headings.map(({ depth, text, id }) => ({ depth, text, id })),
   }
 }

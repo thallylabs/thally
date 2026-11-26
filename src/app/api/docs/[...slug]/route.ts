@@ -1,3 +1,4 @@
+import { resolvePageUpdate } from '@/lib/page-update'
 import { type NextRequest } from 'next/server'
 import { canReaderViewPage, getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
@@ -147,7 +148,8 @@ export async function GET(
   const keywords = Array.isArray(frontmatter.keywords) && frontmatter.keywords.every((item) => typeof item === 'string')
     ? frontmatter.keywords as Array<string>
     : entry.keywords
-  const lastUpdated = typeof frontmatter.lastUpdated === 'string' ? frontmatter.lastUpdated : entry.lastUpdated
+  const pageUpdate = resolvePageUpdate(frontmatter, document.pageUpdate ?? (locale === i18n.defaultLocale ? entry.pageUpdate ?? resolvePageUpdate({ lastUpdated: entry.lastUpdated }) : undefined))
+  const lastUpdated = pageUpdate?.date ?? ''
   const jsonLd = buildDocPageJsonLd({
     siteUrl: baseUrl,
     siteName: effectiveSite.name,
@@ -157,6 +159,7 @@ export async function GET(
     description,
     keywords,
     lastUpdated,
+    pageUpdate,
     locale,
     breadcrumb: nav.breadcrumb,
   })
@@ -223,6 +226,8 @@ export async function GET(
         mode: entry.mode ?? undefined,
         noindex: frontmatter.noindex === true || entry.noindex || undefined,
         lastUpdated: lastUpdated || undefined,
+        last_updated: lastUpdated || undefined,
+        page_update: pageUpdate,
         lastVerified: entry.lastVerified || undefined,
         verifiedVersion: entry.verifiedVersion || undefined,
         timeEstimate: entry.timeEstimate || undefined,
@@ -255,7 +260,10 @@ export async function GET(
   lines.push(`title: ${title}`)
   if (description) lines.push(`description: ${description}`)
   lines.push(`url: ${canonicalUrl}`)
-  if (lastUpdated) lines.push(`lastUpdated: ${lastUpdated}`)
+  if (lastUpdated) {
+    lines.push(`lastUpdated: ${lastUpdated}`, `last_updated: ${lastUpdated}`)
+    if (pageUpdate) lines.push(`last_updated_source: ${pageUpdate.source}`)
+  }
   if (entry.lastVerified) lines.push(`lastVerified: ${entry.lastVerified}`)
   if (entry.verifiedVersion) lines.push(`verifiedVersion: ${entry.verifiedVersion}`)
   lines.push('---')

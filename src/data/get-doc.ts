@@ -1,10 +1,11 @@
 /** Load authored MDX while keeping route identity independent of display metadata. */
 
+import { resolvePageUpdate } from '@/lib/page-update'
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
 import type { DocEntry, DocPageMode } from '@/data/docs'
-import { deriveTitleFromSlug, getApiMdxConfig } from '@/data/docs'
+import { deriveTitleFromSlug, getApiMdxConfig, getDocPageUpdate } from '@/data/docs'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
 import { buildManualOperation, resolveTranslatedManualApi } from '@/lib/openapi/manual-operation'
 import { remarkPlugins } from '@/mdx/remark'
@@ -30,6 +31,7 @@ interface DocFrontmatter {
   keywords?: Array<string>
   timeEstimate?: string
   lastUpdated?: string
+  last_updated?: string
   openapi?: unknown
   api?: unknown
   authMethod?: unknown
@@ -245,6 +247,10 @@ async function compileDocEntry(
       }) ?? undefined
     : undefined
 
+  const slugId = slugPath || 'introduction'
+  const isPrimaryFile = filePath === `src/content/${slugId}.mdx` || filePath === `src/content/${slugId}/index.mdx`
+  const override = isPrimaryFile ? getDocPageUpdate(slugId) : undefined
+  const pageUpdate = resolvePageUpdate(frontmatter, override?.source === 'frontmatter' ? override : sourceFile.pageUpdate)
   const document: DocEntry & { isFallback: boolean; isStale: boolean } = {
     // The empty route resolves introduction.mdx; titles are display metadata,
     // not source identifiers used by navigation, feedback, and GitHub edit links.
@@ -260,7 +266,8 @@ async function compileDocEntry(
     keywords: frontmatter?.keywords ?? [],
     component: GeneratedDoc,
     timeEstimate: frontmatter?.timeEstimate ?? '5 min',
-    lastUpdated: frontmatter?.lastUpdated ?? new Date().toISOString().slice(0, 10),
+    lastUpdated: pageUpdate?.date ?? '',
+    ...(pageUpdate ? { pageUpdate } : {}),
     openapi: openapi ?? undefined,
     manualApi,
     playground: typeof frontmatter?.playground === 'string' ? frontmatter.playground : undefined,

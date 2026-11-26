@@ -11,6 +11,7 @@ import { defineConfig } from 'tsup'
  *  - `navigation` — pure route expectations shared by runtime and tools.
  *  - `slugify` — dependency-free IDs for server routes that do not need the barrel.
  *  - `theme`   — pure brand-token helpers, client-safe (no Node/MDX/search deps).
+ *  - `starter-integrity` — offline Node preflight before generated output writes.
  *
  * Entries share code via tsup's ESM chunk splitting, so `content` and the
  * barrel resolve to the same modules rather than duplicated copies.
@@ -29,6 +30,7 @@ export default defineConfig({
     search: 'src/search/index.ts',
     slugify: 'src/slugify.ts',
     theme: 'src/theme/index.ts',
+    'starter-integrity': 'src/starter-integrity.ts',
   },
   format: ['esm'],
   platform: 'node',

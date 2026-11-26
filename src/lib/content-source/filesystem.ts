@@ -12,6 +12,7 @@ import {
   readRuntimeSource,
   runtimeSourceExists,
   runtimeSourceModifiedAt,
+  runtimeSourcePageUpdate,
 } from '@/lib/runtime-sources'
 import type { ContentSource, ContentSourceFile } from './types'
 
@@ -27,6 +28,7 @@ export const filesystemContentSource: ContentSource = {
     return {
       content: readRuntimeSource(projectPath),
       modifiedAtMs: runtimeSourceModifiedAt(projectPath),
+      pageUpdate: runtimeSourcePageUpdate(projectPath),
     }
   },
 

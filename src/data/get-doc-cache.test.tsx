@@ -6,14 +6,14 @@ import { getDocFromParams } from './get-doc'
 import { interpretMDX } from '@/lib/mdx-interpret'
 
 const state = vi.hoisted(() => ({ missing: new Set<string>() }))
-vi.mock('@/data/docs', () => ({ deriveTitleFromSlug: (slug: string) => slug, getI18nConfig: () => ({ defaultLocale: 'en' }) }))
+vi.mock('@/data/docs', () => ({ getDocPageUpdate: () => undefined, deriveTitleFromSlug: (slug: string) => slug, getI18nConfig: () => ({ defaultLocale: 'en' }) }))
 vi.mock('next-mdx-remote/rsc', () => ({ compileMDX: vi.fn() }))
 vi.mock('@/lib/mdx-interpret', () => ({ interpretMDX: vi.fn() }))
 vi.mock('@/mdx/remark', () => ({ remarkPlugins: [] }))
 vi.mock('@/mdx/rehype', () => ({ rehypePlugins: [] }))
 vi.mock('@/components/mdx/mdx-components', () => ({ useMDXComponents: () => ({}) }))
 vi.mock('@/mdx/snippet-registry', () => ({ resolveSnippetComponent: vi.fn() }))
-vi.mock('@/lib/runtime-sources', () => ({ runtimeSourceExists: () => false, readRuntimeSource: () => '' }))
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined, runtimeSourceExists: () => false, readRuntimeSource: () => '' }))
 vi.mock('@/generated/runtime-docs', () => ({ runtimeDocs: {} }))
 vi.mock('@/lib/content-source', () => ({ getContentSource: () => ({
   kind: 'assets',

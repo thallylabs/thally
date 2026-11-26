@@ -5,6 +5,7 @@
  */
 
 import { ensureDocPublication, getI18nConfig, isDocPublished } from '@/data/docs'
+import { resolvePageUpdate, type PageUpdateMetadata } from '@/lib/page-update'
 import { getContentSource, type ContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 
@@ -48,6 +49,7 @@ export async function getIndexableDocTranslation(
   locale: string,
 ): Promise<{
   lastUpdated?: string
+  pageUpdate?: PageUpdateMetadata
   title?: string
   description?: string
   keywords?: Array<string>
@@ -64,8 +66,9 @@ export async function getIndexableDocTranslation(
   const sourceFile = candidate.sourcePath ? await source.read(candidate.sourcePath) : null
   const sourceData = sourceFile ? parseFrontmatter(sourceFile.content).data : {}
   if (data.noindex === true || data.hidden === true || sourceData.noindex === true || sourceData.hidden === true) return null
+  const pageUpdate = resolvePageUpdate(data, file.pageUpdate)
   return {
-    ...(typeof data.lastUpdated === 'string' ? { lastUpdated: data.lastUpdated } : {}),
+    ...(pageUpdate ? { lastUpdated: pageUpdate.date, pageUpdate } : {}),
     ...(typeof data.title === 'string' ? { title: data.title } : {}),
     ...(typeof data.description === 'string' ? { description: data.description } : {}),
     ...(Array.isArray(data.keywords) && data.keywords.every((word) => typeof word === 'string')

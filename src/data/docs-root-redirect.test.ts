@@ -11,7 +11,7 @@ vi.mock('@/lib/docs-json-config', () => ({
   }),
   getDocsJsonConfigRevision: () => state.redirects.length,
 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => ['src/content/introduction.mdx', 'src/content/guide.mdx'],
   readRuntimeSource: () => '---\ntitle: Page\n---\nBody',
   runtimeSourceExists: () => true,

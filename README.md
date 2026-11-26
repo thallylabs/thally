@@ -189,6 +189,25 @@ Edit `src/data/site.ts` to change the site name, description, links, and brand p
 
 Edit `src/config/layout.ts` for padding, column widths, and panel styles.
 
+### Automatic page dates
+
+Page dates follow the latest Git commit that changes each page. No manual date
+maintenance is required. Translations use their own source history; generated API
+pages use their specification's source history. For a remote specification, the
+repository's configuration supplies the Git provenance.
+
+When history is unavailable, Thally retains a date with the page's content hash.
+Its first publication is labeled **Published**; a subsequent content change is
+labeled **Updated**. An unrelated commit or rebuild leaves that date alone.
+Self-hosted builds should fetch Git history or retain `.thally/page-updates.json`
+in their build cache so imports without history keep that state between builds.
+
+Page dates are visible by default. Hide them in **Site settings → Content → Page
+dates**, or set `"content": { "showLastUpdated": false }` in `docs.json` for a
+self-hosted site. This hides the reader display while retaining date metadata for
+search engines and other tools. An optional `last_updated` frontmatter value
+(or the legacy `lastUpdated` spelling) overrides the automatic date when needed.
+
 ### Environment Variables
 
 Copy `.env.example` to `.env.local`:
@@ -205,6 +224,7 @@ cp .env.example .env.local
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting release snapshot injected by Thally Cloud. Self-hosted sites should leave this unset and use `THALLY_CLOUD_SITE_TOKEN` |
 | `THALLY_CONTENT_SOURCE` | Optional — where doc content is read from: `filesystem` (default; build-embedded, SSG) or `assets` (managed hosting; content served from static assets and rendered per request). Asset-backed sites answer hybrid search requests with full-text results and `mode_degraded_reason: "runtime_capacity"` to avoid unbounded vector allocation. Self-hosted sites should leave this unset |
 | `THALLY_DOCS_CONFIG` | Optional managed-hosting snapshot of `docs.json`, used to publish presentation and navigation settings without recompiling the Worker. Self-hosted sites should leave this unset and edit `docs.json` |
+| `THALLY_PAGE_UPDATE_OBSERVED_AT` | Optional ISO publication timestamp for build-time page-date fallback; managed hosting sets it from the immutable release. Git history and retained page dates take precedence. Legacy `DOX_PAGE_UPDATE_OBSERVED_AT` is accepted. |
 | `THALLY_ADMIN_PASSWORD` / `THALLY_ADMIN_SECRET` | Optional break-glass admin password plus its required high-entropy production session-signing secret |
 | `THALLY_ACCESS_PASSWORD` / `THALLY_ACCESS_SECRET` | Optional docs-access password plus its required high-entropy production session-signing secret; the access secret may fall back to `THALLY_ADMIN_SECRET` |
 | `THALLY_READER_SESSION_SECRET` | Reader-auth session-signing secret (32+ chars, distinct from admin/access secrets); required in production when docs.json `auth.mode` is `jwt` or `oidc` |

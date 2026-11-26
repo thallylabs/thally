@@ -1,10 +1,12 @@
 /** Locale indexing and freshness must follow actual source and translation bytes. */
+import { loadContentDocument } from '@/lib/content'
+import type { PageUpdateMetadata } from '@/lib/page-update'
 import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fixture = vi.hoisted(() => ({ files: new Map<string, { content: string; modifiedAtMs: number }>() }))
+const fixture = vi.hoisted(() => ({ files: new Map<string, { content: string; modifiedAtMs: number; pageUpdate?: PageUpdateMetadata }>(), override: undefined as PageUpdateMetadata | undefined }))
 
-vi.mock('@/data/docs', () => ({
+vi.mock('@/data/docs', () => ({ getDocPageUpdate: () => fixture.override,
   deriveTitleFromSlug: (slug: string) => slug,
   getI18nConfig: () => ({ defaultLocale: 'en' }),
   ensureDocPublication: async () => {},
@@ -25,6 +27,8 @@ vi.mock('@/lib/content-source', () => ({
 }))
 vi.mock('@/generated/runtime-docs', () => ({
   runtimeDocs: {
+    'src/content/custom-dates.mdx': { component: () => null, frontmatter: { title: 'Custom dates' } },
+    'src/content/fr/custom-dates.mdx': { component: () => null, frontmatter: { title: 'Dates françaises' } },
     'src/content/fr/guide.mdx': {
       component: () => null,
       frontmatter: { title: 'Guide français' },
@@ -46,6 +50,7 @@ const translationPath = 'src/content/fr/guide.mdx'
 
 beforeEach(() => {
   fixture.files.clear()
+  fixture.override = undefined
   fixture.files.set(primaryPath, { content: primary, modifiedAtMs: 100 })
 })
 
@@ -127,5 +132,27 @@ describe('translated document eligibility', () => {
     const doc = await getDocFromParams(['broken']).catch(() => null)
     // Either the page fails to load, or it loads with access nobody satisfies.
     expect(doc === null || doc.access?.isMalformed === true).toBe(true)
+  })
+})
+
+
+describe('primary customer date compatibility', () => {
+  it('uses a validated customer fallback consistently in reader and structured projections', async () => {
+    fixture.override = { date: '2020-01-01', source: 'frontmatter' }
+    fixture.files.set('src/content/custom-dates.mdx', { content: '---\ntitle: Custom dates\n---\nBody', modifiedAtMs: 1, pageUpdate: { date: '2026-11-27', source: 'git' } })
+    const rendered = await getDocFromParams(['custom-dates'])
+    const machine = await loadContentDocument('custom-dates')
+    expect(rendered).toMatchObject({ lastUpdated: '2020-01-01', pageUpdate: fixture.override })
+    expect(machine?.pageUpdate).toEqual(fixture.override)
+  })
+  it('keeps the actual translated file date independent of its primary override', async () => {
+    fixture.override = { date: '2020-01-01', source: 'frontmatter' }
+    fixture.files.set('src/content/custom-dates.mdx', { content: '---\ntitle: Custom dates\n---\nBody', modifiedAtMs: 1, pageUpdate: { date: '2026-11-27', source: 'git' } })
+    fixture.files.set('src/content/fr/custom-dates.mdx', { content: '---\ntitle: Dates françaises\n---\nTexte', modifiedAtMs: 2, pageUpdate: { date: '2026-10-21', source: 'git' } })
+    const rendered = await getDocFromParams(['custom-dates'], 'fr')
+    const machine = await loadContentDocument('custom-dates', 'fr')
+    expect(rendered?.pageUpdate).toEqual({ date: '2026-10-21', source: 'git' })
+    expect(machine?.pageUpdate).toEqual(rendered?.pageUpdate)
+    expect((await getIndexableDocTranslation(['custom-dates'], 'fr'))?.pageUpdate).toEqual(rendered?.pageUpdate)
   })
 })

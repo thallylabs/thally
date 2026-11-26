@@ -41,3 +41,22 @@ describe('mode: custom', () => {
     expect(css).toMatch(/:has\(\[data-doc-mode='custom'\]\)\s+\.thally-docs-sidebar\s*\{\s*display:\s*none/)
   })
 })
+
+
+it('accepts a route-resolved date preference without making layout composition async', () => {
+  const doc = { id: 'welcome', href: '/welcome', title: 'Welcome', mode: 'custom', pageUpdate: { date: '2026-11-27', source: 'git' } } as DocEntry
+  const hidden = renderToStaticMarkup(<DocLayout doc={doc} showLastUpdated={false}>body</DocLayout>)
+  const visible = renderToStaticMarkup(<DocLayout doc={doc} showLastUpdated>body</DocLayout>)
+  expect(hidden).not.toContain('thally-page-updated')
+  expect(visible).toContain('thally-page-updated')
+  expect(visible).toContain('Nov 27, 2026')
+})
+
+
+it.each(['default', 'home', 'custom', 'wide', 'center'] as const)('forwards resolved date visibility through the %s page variant', (mode) => {
+  const doc = { id: 'welcome', href: '/welcome', title: 'Welcome', mode: mode === 'default' ? undefined : mode, pageUpdate: { date: '2026-11-27', source: 'git' } } as DocEntry
+  const hidden = renderToStaticMarkup(<DocLayout doc={doc} showLastUpdated={false}>body</DocLayout>)
+  const shown = renderToStaticMarkup(<DocLayout doc={doc} showLastUpdated>body</DocLayout>)
+  expect(hidden).not.toContain('thally-page-updated')
+  expect(shown.match(/thally-page-updated/g)).toHaveLength(1)
+})

@@ -24,7 +24,7 @@ vi.mock('@/lib/docs-json-config', () => ({
   getDocsJsonConfig: () => ({ tabs: [{ tab: 'Docs', groups: [{ group: 'G', pages: Object.keys(PAGES) }] }] }),
   getDocsJsonConfigRevision: () => 1,
 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => Object.keys(sources()),
   readRuntimeSource: (file: string) => sources()[file],
   runtimeSourceExists: (file: string) => file in sources(),

@@ -4,6 +4,9 @@ import { getContextualOptions, type DocEntry } from '@/data/docs'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
 import { InlineCodeText } from '@/components/mdx/inline-code-text'
 import { agentServerName } from '@/lib/agent-identity'
+import { resolvePageUpdate } from '@/lib/page-update'
+import { PageUpdated } from '@/components/docs/page-updated'
+import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 
 interface DocHeaderProps {
@@ -13,9 +16,10 @@ interface DocHeaderProps {
   showCopyPage?: boolean
   /** Hide a metadata-only summary when another surface renders the full description. */
   showDescription?: boolean
+  showLastUpdated?: boolean
 }
 
-export function DocHeader({ doc, eyebrow, showCopyPage = true, showDescription = true }: DocHeaderProps) {
+export function DocHeader({ doc, eyebrow, showCopyPage = true, showDescription = true, showLastUpdated = getBuildContentControls().showLastUpdated }: DocHeaderProps) {
   return (
     <header className="thally-docs-header">
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
@@ -41,6 +45,7 @@ export function DocHeader({ doc, eyebrow, showCopyPage = true, showDescription =
           <h1 className="[overflow-wrap:anywhere] font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
             {doc.headingTitle ?? doc.title}
           </h1>
+          {showLastUpdated ? <PageUpdated pageUpdate={doc.pageUpdate ?? resolvePageUpdate({ lastUpdated: doc.lastUpdated })} /> : null}
           {showDescription && doc.description && doc.descriptionPlacement !== 'body' ? (
             <p className="mt-2 max-w-[58ch] text-lg leading-7 text-foreground/80"><InlineCodeText>{doc.description}</InlineCodeText></p>
           ) : null}

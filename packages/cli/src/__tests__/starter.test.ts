@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ScaffoldRelease } from 'create-thally-docs/release'
 import type { StarterUpdateResult } from 'create-thally-docs/starter-update'
 
-import { runStarterCommand } from '../commands/starter.js'
+import { formatStarterUpdateResult, runStarterCommand } from '../commands/starter.js'
 import { parseArgs } from '../router.js'
 
 const updateStarterProject = vi.hoisted(() => vi.fn())
@@ -47,6 +47,16 @@ afterEach(() => {
 })
 
 describe('thally starter update', () => {
+  it('reports merged source paths without exposing source payloads', () => {
+    const sentinel = 'private-source-content-sentinel'
+    const output = formatStarterUpdateResult({
+      ...result,
+      plan: { ...result.plan, mergedContents: { 'framework/runtime.ts': sentinel } },
+    })
+    expect(output).toContain('Merged source:')
+    expect(output).toContain('framework/runtime.ts')
+    expect(output).not.toContain(sentinel)
+  })
   it('ships an unpublished-version-safe exact toolchain dependency chain', () => {
     const readPackage = (name: string) => JSON.parse(
       readFileSync(join(process.cwd(), 'packages', name, 'package.json'), 'utf8'),

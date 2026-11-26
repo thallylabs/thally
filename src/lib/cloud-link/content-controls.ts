@@ -2,6 +2,7 @@
 
 import 'server-only'
 
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
 import { getManagedSiteConfigSnapshot, type CloudPortableConfig } from './client'
 
 export interface ContentControls {
@@ -9,6 +10,7 @@ export interface ContentControls {
   showBreadcrumbs: boolean
   showTableOfContents: boolean
   showCopyPage: boolean
+  showLastUpdated: boolean
 }
 
 export const DEFAULT_CONTENT_CONTROLS: ContentControls = {
@@ -16,6 +18,7 @@ export const DEFAULT_CONTENT_CONTROLS: ContentControls = {
   showBreadcrumbs: true,
   showTableOfContents: true,
   showCopyPage: true,
+  showLastUpdated: true,
 }
 
 /** Preserve established site chrome unless a setting explicitly disables it. */
@@ -27,12 +30,16 @@ export function resolveContentControls(
     showBreadcrumbs: content?.showBreadcrumbs ?? true,
     showTableOfContents: content?.showTableOfContents ?? true,
     showCopyPage: content?.showCopyPage ?? true,
+    showLastUpdated: content?.showLastUpdated ?? true,
   }
 }
 
 /** Read controls from the immutable managed-release snapshot. */
 export function getBuildContentControls(): ContentControls {
-  return resolveContentControls(
-    getManagedSiteConfigSnapshot()?.siteConfig.portable.content,
-  )
+  const content = getManagedSiteConfigSnapshot()?.siteConfig.portable.content
+  const local = getDocsJsonConfig<{ content?: { showLastUpdated?: boolean } }>()
+  return {
+    ...resolveContentControls(content),
+    showLastUpdated: content?.showLastUpdated ?? local.content?.showLastUpdated ?? true,
+  }
 }

@@ -8,18 +8,27 @@
  * source map on the legacy sync path.
  */
 
-import { isSafeContentIdentifier, type ContentDocument } from '@thallylabs/core/content'
+import { isSafeContentIdentifier, type ContentDocument as CoreContentDocument } from '@thallylabs/core/content'
 import { parseMdxContent } from '@thallylabs/core/markdown'
+import { resolvePageUpdate, type PageUpdateMetadata } from '@/lib/page-update'
+import { getDocPageUpdate } from '@/data/docs'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import {
   readRuntimeSource,
   runtimeSourceExists,
   runtimeSourceModifiedAt,
+  runtimeSourcePageUpdate,
 } from '@/lib/runtime-sources'
 import { getContentSource } from '@/lib/content-source'
 import { createBoundedCache, estimateRetainedPayloadBytes } from '@/lib/bounded-cache'
 import { createHash } from 'node:crypto'
 import { publishedContentUnavailable } from '@/lib/content-source/errors'
+
+export interface RuntimeContentDocument extends CoreContentDocument {
+  pageUpdate?: PageUpdateMetadata
+}
+
+type ContentDocument = RuntimeContentDocument
 
 const CONTENT_ROOT = 'src/content'
 
@@ -59,20 +68,24 @@ function parseDocument(
   filePath: string,
   raw: string,
   modifiedAtMs: number,
+  automatic?: PageUpdateMetadata,
 ): ContentDocument {
   // Strict AI reads must not reuse an earlier embedded fallback merely because
   // its mtime matches. Raw identity also separates immutable source releases.
   const cacheKey = origin === 'published-assets'
     ? `${origin}:${pageId}:${filePath}:${createHash('sha256').update(raw).digest('hex')}`
     : `${origin}:${filePath}`
+  const metadataKey = `${cacheKey}:${automatic?.source ?? ''}:${automatic?.date ?? ''}`
   const isAssetOrigin = origin === 'assets' || origin === 'published-assets'
-  const cached = isAssetOrigin ? assetDocuments.get(cacheKey) : documentCache.get(cacheKey)
+  const cached = isAssetOrigin ? assetDocuments.get(metadataKey) : documentCache.get(metadataKey)
   if (cached?.modifiedAtMs === modifiedAtMs) return cached.document
 
   const { data, content } = parseFrontmatter(raw)
+  const override = contentFileCandidates(pageId).includes(filePath) ? getDocPageUpdate(pageId) : undefined
   const document: ContentDocument = {
     pageId,
     frontmatter: data,
+    pageUpdate: resolvePageUpdate(data, override?.source === 'frontmatter' ? override : automatic),
     rawBody: content,
     // All structured consumers share the agent projection while the browser
     // continues to render authored MDX with the human Visibility components.
@@ -80,8 +93,8 @@ function parseDocument(
   }
 
   const entry = { modifiedAtMs, document }
-  if (isAssetOrigin) assetDocuments.set(cacheKey, entry, estimateRetainedPayloadBytes(entry, 4 * 1024 * 1024))
-  else documentCache.set(cacheKey, entry)
+  if (isAssetOrigin) assetDocuments.set(metadataKey, entry, estimateRetainedPayloadBytes(entry, 4 * 1024 * 1024))
+  else documentCache.set(metadataKey, entry)
   return document
 }
 
@@ -97,7 +110,7 @@ function parseDocument(
 export function getContentDocument(pageId: string, locale?: string): ContentDocument | null {
   const filePath = resolveContentFile(pageId, locale)
   if (!filePath) return null
-  return parseDocument('embedded', pageId, filePath, readRuntimeSource(filePath), runtimeSourceModifiedAt(filePath))
+  return parseDocument('embedded', pageId, filePath, readRuntimeSource(filePath), runtimeSourceModifiedAt(filePath), runtimeSourcePageUpdate(filePath))
 }
 
 /**
@@ -115,7 +128,7 @@ export async function loadContentDocument(
   if (publishedOnly && !source.readPublished) throw publishedContentUnavailable()
   for (const filePath of contentFileCandidates(pageId, locale)) {
     const file = publishedOnly ? await source.readPublished!(filePath) : await source.read(filePath)
-    if (file) return parseDocument(publishedOnly ? 'published-assets' : source.kind, pageId, filePath, file.content, file.modifiedAtMs)
+    if (file) return parseDocument(publishedOnly ? 'published-assets' : source.kind, pageId, filePath, file.content, file.modifiedAtMs, file.pageUpdate)
   }
   return null
 }

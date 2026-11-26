@@ -14,7 +14,7 @@ const config = vi.hoisted(() => ({
   i18n: { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] },
 }))
 vi.mock('@/lib/docs-json-config', () => ({ getDocsJsonConfig: () => config, getDocsJsonConfigRevision: () => 1 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: (prefix: string) => Object.keys(state.embedded).filter((name) => name.startsWith(prefix)),
   runtimeSourceExists: (name: string) => Object.hasOwn(state.embedded, name),
   readRuntimeSource: (name: string) => state.embedded[name],

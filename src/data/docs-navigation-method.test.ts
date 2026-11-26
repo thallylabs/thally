@@ -12,7 +12,7 @@ vi.mock('@/lib/docs-json-config', () => ({
   }),
   getDocsJsonConfigRevision: () => 1,
 }))
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => ['src/content/api/scrape.mdx', 'src/content/api/hook.mdx', 'src/content/api/errors.mdx'],
   readRuntimeSource: (path: string) =>
     path.endsWith('scrape.mdx')

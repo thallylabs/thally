@@ -13,6 +13,7 @@ import { scaffold } from './scaffold.js'
 import { parseGitHubRepositoryUrl, parseSourceRefFlags, type SourceRefMapping } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
+import { appendStarterProvenanceIssues } from './starter-project-check.js'
 import { runTranslateCommand } from './translate.js'
 import { formatHelp, terminal } from './terminal.js'
 
@@ -344,6 +345,7 @@ async function runScaffoldCommand(): Promise<void> {
 async function runCheckCommand(): Promise<void> {
   const projectDir = resolve(positional[1] ?? '.')
   const exitCode = await runCheck(projectDir, {
+    checkStarterProvenance: appendStarterProvenanceIssues,
     fix: flags.includes('--fix'),
     ci: flags.includes('--ci'),
     external: flags.includes('--external'),

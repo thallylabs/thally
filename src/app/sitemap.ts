@@ -39,8 +39,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           const translation = locale.code === i18n.defaultLocale
             ? null
             : await getIndexableDocTranslation(doc.slug, locale.code)
-          // Build/check-out mtimes do not prove when prose changed. Only an
-          // authored date can safely become a crawler-visible lastmod value.
+          // Canonical provenance comes from authored overrides or hash-bound
+          // source history/publication metadata, never checkout mtimes.
           const updated = locale.code === i18n.defaultLocale
             ? doc.lastUpdated
             : translation?.lastUpdated
@@ -60,6 +60,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const apiPages: MetadataRoute.Sitemap = apiNodes.map((node) => ({
     url: `${baseUrl}${node.href}`,
+    ...(node.pageUpdate ? { lastModified: new Date(node.pageUpdate.date) } : {}),
     changeFrequency: 'weekly',
     priority: 0.6,
   }))

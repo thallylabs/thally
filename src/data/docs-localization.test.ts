@@ -6,7 +6,7 @@ const files = vi.hoisted(() => new Map([
   ['src/content/fr/guide.mdx', '---\ntitle: Guide français\n---\nTraduction'],
 ]))
 
-vi.mock('@/lib/runtime-sources', () => ({
+vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefined,
   listRuntimeSources: () => [...files.keys()],
   readRuntimeSource: (path: string) => files.get(path),
   runtimeSourceExists: (path: string) => files.has(path),

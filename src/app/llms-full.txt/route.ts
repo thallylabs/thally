@@ -131,7 +131,9 @@ export async function GET(request: NextRequest) {
       if (!document) continue
       const page = [`# ${entry.title}`, '']
       if (entry.description) page.push(`> ${entry.description}`, '')
-      page.push(`URL: ${baseUrl}${entry.href}`, '', document.content.markdown, '', '---', '')
+      page.push(`URL: ${baseUrl}${entry.href}`)
+      if (document.pageUpdate) page.push(`last_updated: ${document.pageUpdate.date}`, `last_updated_source: ${document.pageUpdate.source}`)
+      page.push('', document.content.markdown, '', '---', '')
       yield `\n${page.join('\n')}`
     }
     if (operationOrder.length) {

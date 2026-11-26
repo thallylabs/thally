@@ -5,10 +5,13 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest'
 import {
   mkdirSync,
   mkdtempSync,
+  chmodSync,
+  statSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -178,6 +181,105 @@ describe('ownership precedence', () => {
 })
 
 describe('three-way starter runtime planning', () => {
+  function mergeFixture() {
+    const old = directory('thally-merge-old-'), next = directory('thally-merge-next-'), target = directory('thally-merge-local-')
+    write(old, 'src/components/runtime.tsx', 'first\nmiddle\nlast\n')
+    write(target, 'src/components/runtime.tsx', 'local\nmiddle\nlast\n')
+    write(next, 'src/components/runtime.tsx', 'first\nmiddle\nupstream\n')
+    return { old, next, target }
+  }
+
+  it('plans merged bytes as copy paths and preserves upstream modes on apply', () => {
+    const { old, next, target } = mergeFixture()
+    chmodSync(join(next, 'src/components/runtime.tsx'), 0o755)
+    const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+    expect(plan.copyPaths).toEqual(['src/components/runtime.tsx'])
+    expect(plan.conflictPaths).toEqual([])
+    expect(plan.mergedContents).toEqual({ 'src/components/runtime.tsx': 'local\nmiddle\nupstream\n' })
+    // Plans cross the CLI/managed boundary as ordinary JSON, not hidden state.
+    applyStarterRuntimeSyncPlan(next, target, JSON.parse(JSON.stringify(plan)), OWNERSHIP, { confirmed: true })
+    expect(readFileSync(join(target, 'src/components/runtime.tsx'), 'utf8')).toBe('local\nmiddle\nupstream\n')
+    expect(statSync(join(target, 'src/components/runtime.tsx')).mode & 0o777).toBe(0o755)
+  })
+
+  it('restores merged source, deletions, modes and provenance after mid-apply failure', () => {
+    const { old, next, target } = mergeFixture()
+    for (const root of [old, target]) write(root, 'src/components/delete.ts', 'delete me\n')
+    write(target, 'starter-release.json', 'old provenance\n')
+    write(next, 'starter-release.json', 'new provenance\n')
+    chmodSync(join(target, 'src/components/runtime.tsx'), 0o740)
+    const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+    expect(() => applyStarterRuntimeSyncPlan(next, target, plan, OWNERSHIP, {
+      confirmed: true,
+      provenance: { sourcePath: join(next, 'starter-release.json'), targetPath: join(target, 'starter-release.json'), expectedSha256: starterManifestSha256('old provenance\n') },
+      onMutationApplied(path) { if (path === 'starter-release.json') throw new Error('injected rollback') },
+    })).toThrow('injected rollback')
+    expect(readFileSync(join(target, 'src/components/runtime.tsx'), 'utf8')).toBe('local\nmiddle\nlast\n')
+    expect(statSync(join(target, 'src/components/runtime.tsx')).mode & 0o777).toBe(0o740)
+    expect(readFileSync(join(target, 'src/components/delete.ts'), 'utf8')).toBe('delete me\n')
+    expect(readFileSync(join(target, 'starter-release.json'), 'utf8')).toBe('old provenance\n')
+  })
+
+  it('rejects even a line-ending-only local race without applying other work', () => {
+    const { old, next, target } = mergeFixture()
+    write(next, 'src/components/add.ts', 'new file\n')
+    const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+    write(target, 'src/components/runtime.tsx', 'local\r\nmiddle\r\nlast\r\n')
+    let mutations = 0
+    expect(() => applyStarterRuntimeSyncPlan(next, target, plan, OWNERSHIP, { confirmed: true, onMutationApplied() { mutations += 1 } })).toThrow('changed')
+    expect(mutations).toBe(0)
+    expect(plan.mergedContents?.['src/components/runtime.tsx']).toBe('local\nmiddle\nupstream\n')
+  })
+
+  it('binds merged preconditions to the input snapshot during planning', () => {
+    const { old, next, target } = mergeFixture()
+    let calls = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => {
+      calls += 1
+      if (calls === 2) write(target, 'src/components/runtime.tsx', 'concurrent local edit\n')
+      return 0
+    })
+    try {
+      const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+      expect(plan.mergedContents?.['src/components/runtime.tsx']).toBe('local\nmiddle\nupstream\n')
+      expect(() => applyStarterRuntimeSyncPlan(next, target, plan, OWNERSHIP, { confirmed: true })).toThrow('changed')
+      expect(readFileSync(join(target, 'src/components/runtime.tsx'), 'utf8')).toBe('concurrent local edit\n')
+    } finally { clock.mockRestore() }
+  })
+
+  it('keeps deletion/change and new-file collisions in conflict', () => {
+    const { old, next, target } = mergeFixture()
+    rmSync(join(next, 'src/components/runtime.tsx'))
+    write(target, 'src/components/add.ts', 'local addition\n')
+    write(next, 'src/components/add.ts', 'upstream addition\n')
+    const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+    expect(plan.conflictPaths).toEqual(['src/components/add.ts', 'src/components/runtime.tsx'])
+    expect(plan.mergedContents).toBeUndefined()
+  })
+
+  it('limits aggregate source merge attempts per plan', () => {
+    const old = directory('thally-bounded-old-'), next = directory('thally-bounded-next-'), target = directory('thally-bounded-local-')
+    for (let i = 0; i < 9; i++) {
+      const path = `src/components/file${i}.ts`
+      write(old, path, 'a\nb\nc\n'); write(target, path, 'A\nb\nc\n'); write(next, path, 'a\nb\nC\n')
+    }
+    const plan = planStarterRuntimeSync(old, next, target, OWNERSHIP)
+    expect(Object.keys(plan.mergedContents ?? {})).toHaveLength(8)
+    expect(plan.conflictPaths).toEqual(['src/components/file8.ts'])
+    expect(() => applyStarterRuntimeSyncPlan(next, target, plan, OWNERSHIP, { confirmed: true })).toThrow('conflicts')
+  })
+
+  it('does not let broadened ownership merge reserved output or metadata', () => {
+    const old = directory('thally-reserved-old-'), next = directory('thally-reserved-next-'), target = directory('thally-reserved-local-')
+    const reserved = ['.thally/output.ts', 'src/generated/output.ts', 'src/lib/agent-identity.ts', 'src/metadata.json', 'starter-release.json', 'src/data/site.ts', 'next.config.ts']
+    for (const path of reserved) {
+      write(old, path, 'a\nb\nc\n'); write(target, path, 'A\nb\nc\n'); write(next, path, 'a\nb\nC\n')
+    }
+    const plan = planStarterRuntimeSync(old, next, target, { frameworkSyncEligible: reserved, userOwnedNeverOverwrite: ['owner/**'], manualReview: [] })
+    expect(plan.conflictPaths).toEqual([...reserved].sort())
+    expect(plan.mergedContents).toBeUndefined()
+  })
+
   it('upgrades unchanged files, adds new files, and preserves customer additions', () => {
     const oldStarter = directory('thally-old-starter-')
     const newStarter = directory('thally-new-starter-')

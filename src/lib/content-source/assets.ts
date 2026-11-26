@@ -1,3 +1,4 @@
+import { normalizePageUpdateMetadata, type PageUpdateMetadata } from '@/lib/page-update'
 /**
  * The managed-runtime ContentSource: content served from the deployed
  * Worker's own static assets.
@@ -44,8 +45,11 @@ const ASSET_READ_ATTEMPTS = 3
 export interface ContentManifestEntry {
   /** Publish-observed modification time (e.g. commit timestamp). */
   modifiedAtMs?: number
+  pageUpdate?: PageUpdateMetadata
   /** Raw UTF-8 source identity, updated on every content-only upsert. */
   sha256?: string
+  /** Physical authored identity, which can differ from a sanitized published spec. */
+  rawSha256?: string
   /** Affinity is valid only while the raw source SHA still matches its record. */
   searchShard?: number
 }
@@ -270,6 +274,7 @@ export function createAssetsContentSource(
         return {
           content: response.body,
           modifiedAtMs: manifest.files[projectPath]?.modifiedAtMs ?? 0,
+          pageUpdate: normalizePageUpdateMetadata(manifest.files[projectPath]?.pageUpdate),
         }
       } catch (error) {
         console.warn(`[thally] published content asset read failed: ${projectPath} (${error instanceof Error ? error.message : 'fetch failed'})`)

@@ -28,6 +28,7 @@
  * synchronous fast path and otherwise reads the same index from ASSETS.
  */
 
+import { normalizePageUpdateMetadata, type PageUpdateMetadata } from '@/lib/page-update'
 import { getContentAssetFetcher } from '@/lib/content-source/runtime'
 
 interface ContentIndexEntry {
@@ -35,6 +36,7 @@ interface ContentIndexEntry {
   data: Record<string, unknown>
   /** Publish-observed modification time; drives translation staleness only. */
   modifiedAtMs: number
+  pageUpdate?: PageUpdateMetadata
 }
 
 export interface ContentIndex {
@@ -76,12 +78,13 @@ function parseContentIndex(raw: string): ContentIndex | null {
     const pages: Record<string, ContentIndexEntry> = {}
     for (const [key, value] of Object.entries(candidate.pages)) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-      const entry = value as { data?: unknown; modifiedAtMs?: unknown }
+      const entry = value as { data?: unknown; modifiedAtMs?: unknown; pageUpdate?: unknown }
       if (!entry.data || typeof entry.data !== 'object' || Array.isArray(entry.data)) {
         return null
       }
       pages[key] = {
         data: entry.data as Record<string, unknown>,
+        ...(normalizePageUpdateMetadata(entry.pageUpdate) ? { pageUpdate: normalizePageUpdateMetadata(entry.pageUpdate) } : {}),
         modifiedAtMs:
           typeof entry.modifiedAtMs === 'number' && Number.isFinite(entry.modifiedAtMs)
             ? entry.modifiedAtMs
