@@ -21,11 +21,13 @@
  */
 
 import type { ContentSource, ContentSourceFile } from './types'
+import { publishedContentUnavailable } from './errors'
 import { createBoundedCache, createBoundedPromiseCache, estimateRetainedPayloadBytes } from '@/lib/bounded-cache'
 import { getContentAssetFetcher, getContentAssetRequestContext, type ContentAssetFetcher } from './runtime'
 import {
   decodePreparedSearchShard, isPreparedSearchDescriptor, isRawSha256,
-  MAX_SEARCH_SHARD_BYTES, type PreparedSearchDescriptor, type PreparedSearchShard,
+  MAX_SEARCH_SHARD_BYTES, preparedRetrievalContent,
+  type PreparedSearchDescriptor, type PreparedSearchRecord, type PreparedSearchShard,
 } from '@/lib/search/prepared-content-contract'
 
 /** Reserved asset prefix for published content. Shared with the publish pipeline. */
@@ -102,6 +104,14 @@ export function createAssetsContentSource(
   // At most 256 descriptors exist. Pending ownership is separate from settled
   // LRU eviction, so concurrent pages never refetch the same in-flight shard.
   const pendingPrepared = new Map<number, Promise<PreparedSearchShard | null>>()
+  const transferFailures = new WeakSet<object>()
+
+  async function transfer<T>(read: () => Promise<T>): Promise<T> {
+    try { return await read() } catch (error) {
+      if (error && typeof error === 'object') transferFailures.add(error)
+      throw error
+    }
+  }
 
   async function boundedBody(response: Response, maxBytes: number): Promise<string | null> {
     const reader = response.body?.getReader()
@@ -159,15 +169,17 @@ export function createAssetsContentSource(
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await withReadSlot(owner, async () => {
-          const response = await fetchAsset(assetPath)
+          const response = await transfer(() => fetchAsset(assetPath))
           if (response.ok) {
-            const body = maxBytes === undefined ? await response.text() : await boundedBody(response, maxBytes)
+            const body = await transfer(() => maxBytes === undefined ? response.text() : boundedBody(response, maxBytes))
             return { status: response.status, body: body !== null && validateBody && !(await validateBody(body)) ? null : body }
           }
           // Failed response bodies still occupy a connection until cancelled.
-          await response.body?.cancel()
+          await transfer(async () => { await response.body?.cancel() })
           if ([408, 425, 429].includes(response.status) || response.status >= 500) {
-            throw new Error(`Published content asset temporarily unavailable (${response.status})`)
+            const error = new Error(`Published content asset temporarily unavailable (${response.status})`)
+            transferFailures.add(error)
+            throw error
           }
           return { status: response.status, body: null }
         })
@@ -238,13 +250,16 @@ export function createAssetsContentSource(
     return manifestPromise
   }
 
-  function readAsset(projectPath: string, manifest: ContentManifest): Promise<ContentSourceFile | null> {
+  function readAsset(projectPath: string, manifest: ContentManifest, publishedOnly = false): Promise<ContentSourceFile | null> {
     const fetchAsset = resolveFetcher()
     // Capture ownership before the cache schedules its loader continuation.
     const owner = resolveReadContext()
     // A temporarily unavailable binding must not turn embedded fallback bytes
     // into a successful asset-cache entry for the rest of the deployment.
-    if (!fetchAsset) return readFallback(projectPath)
+    if (!fetchAsset) {
+      if (publishedOnly) return Promise.reject(publishedContentUnavailable())
+      return readFallback(projectPath)
+    }
     return files.getOrLoad(projectPath, async () => {
       try {
         const response = await readResponse(fetchAsset, assetUrlPath(projectPath), undefined, undefined, owner)
@@ -293,21 +308,38 @@ export function createAssetsContentSource(
     return load
   }
 
+  async function loadPreparedRecord(projectPath: string): Promise<PreparedSearchRecord | undefined> {
+    if (!isSafeProjectPath(projectPath)) return undefined
+    const manifest = await loadManifest()
+    if (!manifest?.search || !Object.prototype.hasOwnProperty.call(manifest.files, projectPath)) return undefined
+    const entry = manifest.files[projectPath]
+    if (!entry || typeof entry !== 'object') return undefined
+    const index = entry.searchShard
+    if (!isRawSha256(entry.sha256) || !Number.isSafeInteger(index) || index === undefined
+      || index < 0 || index >= manifest.search.shards.length) return undefined
+    const shard = await loadSearchShard(index, manifest)
+    const record = shard?.records[projectPath]
+    return record?.sha256 === entry.sha256 ? record : undefined
+  }
+
   return {
     kind: 'assets',
 
     async searchContent(projectPath) {
-      if (!isSafeProjectPath(projectPath)) return undefined
-      const manifest = await loadManifest()
-      if (!manifest?.search || !Object.prototype.hasOwnProperty.call(manifest.files, projectPath)) return undefined
-      const entry = manifest.files[projectPath]
-      if (!entry || typeof entry !== 'object') return undefined
-      const index = entry.searchShard
-      if (!isRawSha256(entry.sha256) || !Number.isSafeInteger(index) || index === undefined
-        || index < 0 || index >= manifest.search.shards.length) return undefined
-      const shard = await loadSearchShard(index, manifest)
-      const record = shard?.records[projectPath]
-      return record?.sha256 === entry.sha256 ? record.content : undefined
+      return (await loadPreparedRecord(projectPath))?.content
+    },
+
+    async retrievalContent(projectPath) {
+      try {
+        const record = await loadPreparedRecord(projectPath)
+        return record ? preparedRetrievalContent(record) : undefined
+      } catch (error) {
+        // Only failed fetch/body transfers are availability failures. Integrity
+        // rejection still falls back canonically; unexpected validator errors
+        // remain visible instead of being disguised as service unavailability.
+        if (error && typeof error === 'object' && transferFailures.has(error)) throw publishedContentUnavailable()
+        throw error
+      }
     },
 
     async exists(projectPath: string): Promise<boolean> {
@@ -323,6 +355,22 @@ export function createAssetsContentSource(
       if (!manifest) return readFallback(projectPath)
       if (!Object.prototype.hasOwnProperty.call(manifest.files, projectPath)) return null
       return readAsset(projectPath, manifest)
+    },
+
+    async readPublished(projectPath: string): Promise<ContentSourceFile | null> {
+      if (!isSafeProjectPath(projectPath)) throw publishedContentUnavailable()
+      try {
+        const manifest = await loadManifest()
+        if (!manifest) throw publishedContentUnavailable()
+        if (!Object.prototype.hasOwnProperty.call(manifest.files, projectPath)) return null
+        const file = await readAsset(projectPath, manifest, true)
+        if (!file) throw publishedContentUnavailable()
+        return file
+      } catch {
+        // A strict consumer cannot treat a missing declared body or a transient
+        // binding/transport failure as permission to read baseline content.
+        throw publishedContentUnavailable()
+      }
     },
 
     async modifiedAt(projectPath: string): Promise<number> {

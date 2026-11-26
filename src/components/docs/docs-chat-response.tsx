@@ -6,13 +6,14 @@
  * or activate a citation that is absent from the retrieved evidence.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ComponentProps, type CSSProperties } from 'react'
 import { Check, Copy, RefreshCw, ThumbsDown, ThumbsUp } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { aiAnswerLink } from '@/lib/ai-answer-links'
 import type { AiAnswerSource } from '@/lib/ai-answer-sources'
 import styles from './docs-chat-response.module.css'
+import { rehypeChatStreamWords } from './docs-chat-stream-words'
 
 export type ChatResponseStatus = 'streaming' | 'done' | 'stopped' | 'error'
 
@@ -27,11 +28,49 @@ interface ChatResponseProps {
   onFeedback?: (feedback: 'up' | 'down' | null) => void
 }
 
+const StreamArrivalContext = createContext({ boundary: 0, isStreaming: false })
+
+function StreamWord({ node, children }: ComponentProps<'span'> & ExtraProps) {
+  const { boundary, isStreaming } = useContext(StreamArrivalContext)
+  // Mount-only state keeps a growing word's animation from restarting on each
+  // token. Source offsets also keep old words settled after Markdown reparents.
+  const [isNew] = useState(() => isStreaming && Number(node?.properties['data-stream-end']) > boundary)
+  return <span className={styles.word} data-stream-word data-stream-new={isNew || undefined}>{children}</span>
+}
+
+function StreamCaret() {
+  return <span className={styles.caret} data-stream-caret aria-hidden="true" />
+}
+
+const markdownComponents: Components & { 'stream-word': typeof StreamWord; 'stream-caret': typeof StreamCaret } = {
+  'stream-word': StreamWord,
+  'stream-caret': StreamCaret,
+  a: ({ href, children }) => href ? <a href={href}>{children}</a> : <span>{children}</span>,
+  img: ({ alt }) => <span>{alt ?? ''}</span>,
+}
+
+function Thinking() {
+  return <p className={styles.thinking} role="status" aria-label="Thinking…"><span aria-hidden="true">{Array.from('Thinking…').map((letter, index) => <span key={index} className={styles.thinkingLetter} style={{ '--letter': index } as CSSProperties}>{letter}</span>)}</span></p>
+}
+
 /** Retain partial text after cancellation or a failed stream so it can be copied. */
 export function ChatResponse({ text, status, error, sources, onRetry, isRetryDisabled, feedback = null, onFeedback }: ChatResponseProps) {
   const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(copiedTimer.current), [])
+  const [received, setReceived] = useState({ text, boundary: status === 'streaming' ? 0 : text.length })
+  if (received.text !== text) {
+    // Snapshot corrections settle immediately. For normal appends, only text
+    // beyond the previously received source boundary can enter focus.
+    setReceived({ text, boundary: text.startsWith(received.text) ? received.text.length : text.length })
+  }
+  const [isVisible, setIsVisible] = useState(true)
+  useEffect(() => {
+    const update = () => setIsVisible(document.visibilityState !== 'hidden')
+    update()
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text)
@@ -41,9 +80,10 @@ export function ChatResponse({ text, status, error, sources, onRetry, isRetryDis
     } catch { setCopied(false) }
   }
   const isStreaming = status === 'streaming'
+  const hasText = Boolean(text.trim())
   return (
-    <div data-slot="chat-response" data-status={status} aria-busy={isStreaming}>
-      {text ? <div className={`${styles.prose} prose prose-sm dark:prose-invert max-w-none break-words
+    <div className={styles.response} data-slot="chat-response" data-status={status} data-motion-paused={!isVisible || undefined} aria-busy={isStreaming}>
+      {hasText ? <StreamArrivalContext.Provider value={{ boundary: received.boundary, isStreaming }}><div className={`${styles.prose} prose prose-sm dark:prose-invert max-w-none break-words
         [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
         [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto
         prose-p:leading-relaxed prose-p:my-2 first:prose-p:mt-0
@@ -57,14 +97,12 @@ export function ChatResponse({ text, status, error, sources, onRetry, isRetryDis
         <ReactMarkdown
           skipHtml
           remarkPlugins={[remarkGfm]}
+          rehypePlugins={[[rehypeChatStreamWords, { hasCaret: isStreaming }]]}
           urlTransform={(url) => aiAnswerLink(url, sources, typeof window === 'undefined' ? undefined : window.location.origin) ?? ''}
-          components={{
-            a: ({ href, children }) => href ? <a href={href}>{children}</a> : <span>{children}</span>,
-            img: ({ alt }) => <span>{alt ?? ''}</span>,
-          }}
+          components={markdownComponents}
         >{text}</ReactMarkdown>
-      </div> : null}
-      {isStreaming ? <span className="inline-flex items-center gap-2 py-1 text-xs text-muted-foreground" role="status"><span className="h-1.5 w-1.5 rounded-full bg-accent motion-safe:animate-pulse" aria-hidden="true" /><span className={text ? 'sr-only' : undefined}>Writing response…</span></span> : null}
+      </div></StreamArrivalContext.Provider> : null}
+      {isStreaming && !hasText ? <Thinking /> : null}
       {status === 'stopped' ? <p className="mt-2 text-xs text-muted-foreground" role="status">Response stopped. This request may still use AI Credits.</p> : null}
       {status === 'error' ? <p className="mt-2 text-xs text-destructive" role="status">{error || 'The response was interrupted. Please try again.'}</p> : null}
       {!isStreaming ? <div className="thally-docs-chat-feedback -ml-1 mt-2 flex items-center gap-0.5" aria-label="Answer actions">

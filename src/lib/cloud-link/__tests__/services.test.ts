@@ -34,6 +34,7 @@ import {
   parseAiAnswerSources,
 } from '@/lib/ai-answer-sources'
 import { parseAiFollowUps } from '@/lib/ai-chat-suggestions'
+import { publishedContentUnavailable } from '@/lib/content-source/errors'
 
 const cloudConfig = {
   siteId: 'site-1',
@@ -167,6 +168,7 @@ describe('Thally Cloud service adapters', () => {
     expect(response.headers.get('x-upstream-internal')).toBeNull()
     expect(response.body).toBe(upstream.body)
     expect(upstream.bodyUsed).toBe(false)
+    expect(response.headers.get('server-timing')).toMatch(/^thally_runtime_prep;dur=\d+\.\d, thally_retrieval;dur=\d+\.\d, thally_upstream_headers;dur=\d+\.\d$/)
     const reader = response.body!.getReader()
     const firstRead = reader.read()
     const chunk = new TextEncoder().encode('data: {"type":"answer","text":"First"}\n\n')
@@ -197,6 +199,27 @@ describe('Thally Cloud service adapters', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('x-accel-buffering')).toBeNull()
     await expect(response.text()).resolves.toBe('Original response')
+  })
+
+  it('measures local stages and forwards only finite allowlisted numeric service timings', async () => {
+    let clock = 0
+    const timingSpy = vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    mocks.getCloudSiteConfig.mockImplementationOnce(async () => { clock = 5; return cloudConfig })
+    mocks.getCloudServiceGrant.mockImplementationOnce(async () => { clock = 12; return 'release-grant' })
+    mocks.getRelevantChunks.mockImplementationOnce(async () => { clock = 42; return [] })
+    const upstream = new Response('Grounded answer', { headers: {
+      'server-timing': 'thally_auth;dur=7.25, thally_admission;dur=12, thally_reservation;dur=10;desc="private-key", db;dur=9;desc="tenant-id", thally_auth;dur=999, thally_reservation;dur=14.5, thally_admission;dur=-1, thally_auth;dur=Infinity',
+    } })
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async () => { clock = 82; return upstream })
+    try {
+      const response = await handleCloudAiChat(new Request('https://docs.example.com/api/chat', {
+        method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'Question' }] }),
+      }))
+      expect(response.headers.get('server-timing')).toBe('thally_runtime_prep;dur=12.0, thally_retrieval;dur=30.0, thally_upstream_headers;dur=40.0, thally_auth;dur=7.3, thally_admission;dur=12.0, thally_reservation;dur=14.5')
+      expect(response.headers.get('server-timing')).not.toMatch(/desc|private-key|tenant-id|db;|Infinity|-1/)
+      expect(upstream.bodyUsed).toBe(false)
+      await expect(response.text()).resolves.toBe('Grounded answer')
+    } finally { timingSpy.mockRestore() }
   })
 
   it('re-normalizes model-written follow-ups before relaying them to the browser', async () => {
@@ -243,6 +266,19 @@ describe('Thally Cloud service adapters', () => {
         headers: expect.objectContaining({ authorization: 'Bearer release-grant' }),
       }),
     )
+  })
+
+  it('returns a closed transient readiness failure without forwarding or hiding unrelated errors', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    mocks.getRelevantChunks.mockRejectedValueOnce(publishedContentUnavailable())
+    const request = () => new Request('https://docs.example.com/api/chat', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'Question' }] }) })
+    const response = await handleCloudAiChat(request())
+    expect(response.status).toBe(503)
+    await expect(response.text()).resolves.toBe('Thally AI is temporarily unavailable. Please try again.')
+    expect(fetchMock).not.toHaveBeenCalled()
+    mocks.getRelevantChunks.mockRejectedValueOnce(new Error('Programming failure'))
+    await expect(handleCloudAiChat(request())).rejects.toThrow('Programming failure')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('does not send disabled agent analytics', async () => {
