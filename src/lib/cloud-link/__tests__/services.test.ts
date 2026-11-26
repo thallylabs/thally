@@ -147,9 +147,13 @@ describe('Thally Cloud service adapters', () => {
     })
   })
 
-  it('forwards streaming negotiation and aborts the upstream body on disconnect', async () => {
+  it.each(['text/event-stream', 'Text/Event-Stream; charset=UTF-8'])('forwards %s chunks without buffering and aborts on disconnect', async (contentType) => {
     mocks.getRelevantChunks.mockResolvedValue([])
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('data: {}\n\n', { headers: { 'content-type': 'text/event-stream' } }))
+    let upstreamController!: ReadableStreamDefaultController<Uint8Array>
+    const upstream = new Response(new ReadableStream<Uint8Array>({ start(controller) { upstreamController = controller } }), {
+      headers: { 'content-type': contentType, 'cache-control': 'public', 'x-accel-buffering': 'yes', 'x-upstream-internal': 'test-value' },
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(upstream)
     const controller = new AbortController()
     const response = await handleCloudAiChat(new Request('https://docs.example.com/api/chat', {
       method: 'POST', headers: { accept: 'text/event-stream' }, signal: controller.signal,
@@ -157,10 +161,42 @@ describe('Thally Cloud service adapters', () => {
     }))
     const options = fetchMock.mock.calls[0][1]!
     expect(options.headers).toMatchObject({ accept: 'text/event-stream', authorization: 'Bearer release-grant' })
-    expect(response.headers.get('content-type')).toBe('text/event-stream')
+    expect(response.headers.get('content-type')).toBe(contentType)
+    expect(response.headers.get('cache-control')).toBe('no-store, no-transform')
+    expect(response.headers.get('x-accel-buffering')).toBe('no')
+    expect(response.headers.get('x-upstream-internal')).toBeNull()
+    expect(response.body).toBe(upstream.body)
+    expect(upstream.bodyUsed).toBe(false)
+    const reader = response.body!.getReader()
+    const firstRead = reader.read()
+    const chunk = new TextEncoder().encode('data: {"type":"answer","text":"First"}\n\n')
+    upstreamController.enqueue(chunk)
+    // The upstream stays open: the first chunk must arrive before completion.
+    await expect(firstRead).resolves.toEqual({ value: chunk, done: false })
     expect(options.signal?.aborted).toBe(false)
     controller.abort()
     expect(options.signal?.aborted).toBe(true)
+    await reader.cancel()
+  })
+
+  it.each([
+    [200, 'text/plain; charset=utf-8'],
+    [200, 'application/json'],
+    [503, 'text/event-stream'],
+  ])('keeps status %i %s fallback headers and body unchanged', async (status, contentType) => {
+    mocks.getRelevantChunks.mockResolvedValue([])
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('Original response', {
+      status, headers: { 'content-type': contentType, 'x-accel-buffering': 'no' },
+    }))
+    const response = await handleCloudAiChat(new Request('https://docs.example.com/api/chat', {
+      method: 'POST', headers: { accept: 'text/event-stream' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'How?' }] }),
+    }))
+    expect(response.status).toBe(status)
+    expect(response.headers.get('content-type')).toBe(contentType)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-accel-buffering')).toBeNull()
+    await expect(response.text()).resolves.toBe('Original response')
   })
 
   it('re-normalizes model-written follow-ups before relaying them to the browser', async () => {
