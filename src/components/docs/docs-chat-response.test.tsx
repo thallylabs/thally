@@ -1,10 +1,17 @@
 /** Partial Markdown must remain inert until its destination is grounded. */
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { Window } from 'happy-dom'
 import { ChatResponse } from './docs-chat-response'
 import { aiAnswerLink } from '@/lib/ai-answer-links'
 
 const sources = [{ title: 'Guide', url: '/guide?mode=one#start' }]
+const inertWindow = new Window({ settings: {
+  enableJavaScriptEvaluation: false, disableJavaScriptFileLoading: true,
+  disableCSSFileLoading: true, enableImageFileLoading: false,
+} })
+afterAll(() => inertWindow.happyDOM.close())
+
 function render(text: string) {
   return renderToStaticMarkup(<ChatResponse text={text} sources={sources} status="streaming" onRetry={() => {}} isRetryDisabled={false} />)
 }
@@ -20,8 +27,8 @@ describe('progressive answer rendering', () => {
 
   it('renders incomplete Markdown and later corrected snapshots without unsafe links', () => {
     expect(render('Use **the guide** and [read](/gu')).not.toContain('href=')
-    const strong = render('Use **the guide** and [read](/guide?mode=one)').match(/<strong>([\s\S]*?)<\/strong>/)?.[1]
-    expect(strong?.replace(/<[^>]*>/g, '')).toBe('the guide')
+    const document = new inertWindow.DOMParser().parseFromString(render('Use **the guide** and [read](/guide?mode=one)'), 'text/html')
+    expect(document.querySelector('strong')?.textContent).toBe('the guide')
     expect(render('[read](/guide?mode=one)')).toContain('href="/guide?mode=one"')
     expect(render('```ts\nconst count = 1')).toContain('<code class="language-ts">')
   })
