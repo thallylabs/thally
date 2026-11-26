@@ -158,12 +158,17 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   const followUpsHeader = serializeAiFollowUps(
     parseAiFollowUps(response.headers.get(AI_FOLLOW_UPS_HEADER)),
   )
+  const contentType = response.headers.get('content-type') ?? 'text/plain; charset=utf-8'
+  const isStreaming = response.ok && contentType.split(';', 1)[0].trim().toLowerCase() === AI_CHAT_STREAM_CONTENT_TYPE
 
   return new Response(response.body, {
     status: response.status,
     headers: {
-      'content-type': response.headers.get('content-type') ?? 'text/plain; charset=utf-8',
-      'cache-control': 'no-store',
+      'content-type': contentType,
+      // Reconstruct trusted delivery directives rather than forwarding the
+      // upstream header set: buffering or transformations can hide tokens.
+      'cache-control': isStreaming ? 'no-store, no-transform' : 'no-store',
+      ...(isStreaming ? { 'x-accel-buffering': 'no' } : {}),
       ...(response.headers.get('retry-after')
         ? { 'retry-after': response.headers.get('retry-after')! }
         : {}),
