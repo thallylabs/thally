@@ -8,12 +8,12 @@
  */
 
 import {
+  existsSync,
   mkdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
-import { checkStarterIntegrity } from '@thallylabs/core/starter-integrity'
 import { compile } from '@mdx-js/mdx'
 // tsx exposes these extensionless TypeScript modules through CJS interop when
 // this generator runs as ESM. Their declared shape still has named exports.
@@ -45,6 +45,13 @@ const {
 } = runtimeContentFilesModule as unknown as typeof import('./lib/runtime-content-files')
 
 const projectRoot = process.cwd()
+// npm's workspace postinstall runs before Core's dist exists. Source checkouts
+// use the same Core module directly; standalone sites use its published export.
+// Resolve beside this script, never from customer content or the build cwd.
+const workspaceIntegritySource = new URL('../packages/core/src/starter-integrity.ts', import.meta.url)
+const { checkStarterIntegrity } = (existsSync(workspaceIntegritySource)
+  ? await import(workspaceIntegritySource.href)
+  : await import('@thallylabs/core/starter-integrity')) as typeof import('@thallylabs/core/starter-integrity')
 const integrityIssues = checkStarterIntegrity(projectRoot)
 for (const issue of integrityIssues) console.error(`[thally] ${issue.file ?? 'starter'}: ${issue.message}`)
 if (integrityIssues.some((issue) => issue.severity === 'error')) {
