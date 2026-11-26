@@ -27,9 +27,11 @@ interface DocLayoutProps {
   children: React.ReactNode
   /** Keep a manual endpoint bar above the responsive parameter/code grid. */
   endpoint?: React.ReactNode
+  /** Request-resolved date policy; direct compositions retain local/snapshot defaults. */
+  showLastUpdated?: boolean
 }
 
-function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: body }: DocLayoutProps) {
+function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, showLastUpdated, children: body }: DocLayoutProps) {
   const children = <>{endpoint}{body}</>
   const { prev, next, breadcrumb: breadcrumbs } = navigation ?? {
     ...getPrevNextLinks(doc.href),
@@ -46,7 +48,8 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
   const cloud = getManagedSiteConfigSnapshot()
   const contentControls = getBuildContentControls()
   const showBreadcrumbs = contentControls.showBreadcrumbs && getBreadcrumbsEnabled()
-  const pageDate = contentControls.showLastUpdated ? <PageUpdated pageUpdate={doc.pageUpdate ?? resolvePageUpdate({ lastUpdated: doc.lastUpdated })} locale={locale} /> : null
+  const dateVisible = showLastUpdated ?? contentControls.showLastUpdated
+  const pageDate = dateVisible ? <PageUpdated pageUpdate={doc.pageUpdate ?? resolvePageUpdate({ lastUpdated: doc.lastUpdated })} locale={locale} /> : null
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
@@ -124,7 +127,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
         <ContentStack>
           <div className="not-prose space-y-4">
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
-            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} showLastUpdated={dateVisible} />
           </div>
           <InlineUpdateFilters railVisible={false} />
           <Prose className="flex-auto w-full">{children}</Prose>
@@ -145,7 +148,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
         <ContentStack>
           <div className="not-prose space-y-4">
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
-            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} showLastUpdated={dateVisible} />
           </div>
           <InlineUpdateFilters railVisible={false} />
           <Prose className="flex-auto w-full">{children}</Prose>
@@ -168,7 +171,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
         <ContentStack>
           <div className="not-prose space-y-4">
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
-            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} showLastUpdated={dateVisible} />
           </div>
           {endpoint}
           <div className="thally-authored-endpoint-grid">
@@ -194,7 +197,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, endpoint, children: 
         <ContentStack>
           <div className="not-prose space-y-4">
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
-            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} showLastUpdated={dateVisible} />
           </div>
           <InlineUpdateFilters railVisible={true} />
           <Prose className="flex-auto w-full">{children}</Prose>

@@ -14,6 +14,7 @@ import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
 import { DocLayout } from '@/components/docs/doc-layout'
+import { getEffectivePageDateVisibility } from '@/lib/cloud-link/page-date-visibility'
 import { LocaleFallbackBanner } from '@/components/docs/locale-fallback-banner'
 import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
 import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-hydrator'
@@ -210,6 +211,7 @@ export default async function DocsPage({ params }: PageProps) {
     denyDocumentAccess(reader, requestedPath, missingTarget)
   }
 
+  const showLastUpdated = await getEffectivePageDateVisibility()
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
   const primaryHref = docPathFromSlug(doc.slug)
@@ -277,7 +279,7 @@ export default async function DocsPage({ params }: PageProps) {
           {localeAvailability}
           {localizedNavigation}
           <JsonLdScript data={jsonLd} />
-          <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
+          <DocLayout doc={doc} locale={contentLocale} navigation={nav} showLastUpdated={showLastUpdated}>
             {localeNotice}
             <p role="note" className="not-prose rounded-md border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
               The API endpoint for this page could not be loaded, so only the page text is shown.
@@ -297,7 +299,7 @@ export default async function DocsPage({ params }: PageProps) {
           <JsonLdScript data={jsonLd} />
           {localeNotice}
           <div className="not-prose">
-            <DocHeader doc={doc} eyebrow={getEyebrowMode() === 'path' ? nav.groupPath : nav.group} showDescription={doc.descriptionPlacement !== 'operation'} />
+            <DocHeader doc={doc} eyebrow={getEyebrowMode() === 'path' ? nav.groupPath : nav.group} showDescription={doc.descriptionPlacement !== 'operation'} showLastUpdated={showLastUpdated} />
           </div>
           <ApiLayout>
             <OperationPanel operation={packValue(operationNode.operation)} showDescription={!doc.description || doc.descriptionPlacement === 'operation'} playground={'revealed' in lookup && playground === 'interactive' ? 'simple' : playground} locale={contentLocale}>
@@ -319,7 +321,7 @@ export default async function DocsPage({ params }: PageProps) {
       {localeAvailability}
       {localizedNavigation}
       <JsonLdScript data={jsonLd} />
-      <DocLayout doc={doc} locale={contentLocale} navigation={nav} endpoint={doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} locale={contentLocale} /> : undefined}>
+      <DocLayout doc={doc} locale={contentLocale} navigation={nav} showLastUpdated={showLastUpdated} endpoint={doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} locale={contentLocale} /> : undefined}>
         {localeNotice}
         <Content />
       </DocLayout>

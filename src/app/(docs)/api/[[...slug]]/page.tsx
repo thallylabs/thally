@@ -1,4 +1,4 @@
-import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
+import { getEffectivePageDateVisibility } from '@/lib/cloud-link/page-date-visibility'
 /** Authored API documents share the docs renderer; generated operations use the API shell. */
 
 import type { Metadata } from 'next'
@@ -139,6 +139,7 @@ async function renderApiReferencePage({ params }: PageProps) {
   const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (node) {
     if (!canReaderSeeUnmarkedContent(reader)) denyDocumentAccess(reader, `/api/${resolved.slug.join('/')}`)
+    const showLastUpdated = await getEffectivePageDateVisibility()
     const pageUrl = `${siteUrl}${node.href}`
     const jsonLd = buildApiOperationJsonLd({
       siteUrl,
@@ -164,7 +165,7 @@ async function renderApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle pageUpdate={node.pageUpdate} showLastUpdated={getBuildContentControls().showLastUpdated} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={packValue(node.operation)} pageActions={{ options: getContextualOptions(), serverName: agentServerName(effectiveSite.name), markdown: apiOperationMarkdown(describeApiOperation(node, siteUrl)) }} showTitle pageUpdate={node.pageUpdate} showLastUpdated={showLastUpdated} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }
