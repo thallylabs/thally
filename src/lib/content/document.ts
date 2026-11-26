@@ -18,6 +18,8 @@ import {
 } from '@/lib/runtime-sources'
 import { getContentSource } from '@/lib/content-source'
 import { createBoundedCache, estimateRetainedPayloadBytes } from '@/lib/bounded-cache'
+import { createHash } from 'node:crypto'
+import { publishedContentUnavailable } from '@/lib/content-source/errors'
 
 const CONTENT_ROOT = 'src/content'
 
@@ -58,8 +60,13 @@ function parseDocument(
   raw: string,
   modifiedAtMs: number,
 ): ContentDocument {
-  const cacheKey = `${origin}:${filePath}`
-  const cached = origin === 'assets' ? assetDocuments.get(cacheKey) : documentCache.get(cacheKey)
+  // Strict AI reads must not reuse an earlier embedded fallback merely because
+  // its mtime matches. Raw identity also separates immutable source releases.
+  const cacheKey = origin === 'published-assets'
+    ? `${origin}:${pageId}:${filePath}:${createHash('sha256').update(raw).digest('hex')}`
+    : `${origin}:${filePath}`
+  const isAssetOrigin = origin === 'assets' || origin === 'published-assets'
+  const cached = isAssetOrigin ? assetDocuments.get(cacheKey) : documentCache.get(cacheKey)
   if (cached?.modifiedAtMs === modifiedAtMs) return cached.document
 
   const { data, content } = parseFrontmatter(raw)
@@ -73,7 +80,7 @@ function parseDocument(
   }
 
   const entry = { modifiedAtMs, document }
-  if (origin === 'assets') assetDocuments.set(cacheKey, entry, estimateRetainedPayloadBytes(entry, 4 * 1024 * 1024))
+  if (isAssetOrigin) assetDocuments.set(cacheKey, entry, estimateRetainedPayloadBytes(entry, 4 * 1024 * 1024))
   else documentCache.set(cacheKey, entry)
   return document
 }
@@ -101,11 +108,14 @@ export function getContentDocument(pageId: string, locale?: string): ContentDocu
 export async function loadContentDocument(
   pageId: string,
   locale?: string,
+  options: { publishedOnly?: boolean } = {},
 ): Promise<ContentDocument | null> {
   const source = getContentSource()
+  const publishedOnly = options.publishedOnly && source.kind === 'assets'
+  if (publishedOnly && !source.readPublished) throw publishedContentUnavailable()
   for (const filePath of contentFileCandidates(pageId, locale)) {
-    const file = await source.read(filePath)
-    if (file) return parseDocument(source.kind, pageId, filePath, file.content, file.modifiedAtMs)
+    const file = publishedOnly ? await source.readPublished!(filePath) : await source.read(filePath)
+    if (file) return parseDocument(publishedOnly ? 'published-assets' : source.kind, pageId, filePath, file.content, file.modifiedAtMs)
   }
   return null
 }

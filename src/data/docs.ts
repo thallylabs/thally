@@ -870,6 +870,7 @@ export function isDocPublished(pageId: string, locale?: string): boolean {
 }
 
 let assetRecordPromise: Promise<void> | undefined
+const publishedRecordLoads = new WeakMap<object, Promise<ReadonlySet<string>>>()
 
 /**
  * Awaited by every async loader and route that lists or serves pages. A no-op
@@ -879,19 +880,62 @@ let assetRecordPromise: Promise<void> | undefined
 export function ensureDocPublication(): Promise<void> {
   // Same test as `isRemoteContentSource`, inline so this module stays free of the content-source providers.
   if (process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() !== 'assets') return Promise.resolve()
-  assetRecordPromise ??= (async () => {
+  if (assetRecordPromise) return assetRecordPromise
+  let failed = false
+  const pending = (async () => {
     try {
       const { getContentSource } = await import('@/lib/content-source')
       const file = await getContentSource().read(UNPUBLISHED_PAGES_FILE)
       assetRecord = file ? parseRecord(String(file.content)) : new Set()
     } catch {
+      failed = true
       assetRecord = new Set()
     }
     _allEntries = null
     loadedEntriesPromise = null
     sidebarCollectionsCache.clear()
   })()
-  return assetRecordPromise
+  assetRecordPromise = pending
+  void pending.then(() => {
+    if (failed && assetRecordPromise === pending) assetRecordPromise = undefined
+  })
+  return pending
+}
+
+/** Require a release-backed publication record before exposing current bodies to AI. */
+export async function ensureAuthoritativeDocPublication(): Promise<void> {
+  const { getContentSource } = await import('@/lib/content-source')
+  const source = getContentSource()
+  if (source.kind !== 'assets') return ensureDocPublication()
+  // An older ordinary read may still be installing an embedded/empty fallback.
+  // Finish it first, then replace that state only with a strict release read.
+  await ensureDocPublication()
+  let pending = publishedRecordLoads.get(source)
+  if (!pending) {
+    pending = (async () => {
+      const { publishedContentUnavailable } = await import('@/lib/content-source/errors')
+      if (!source.readPublished) throw publishedContentUnavailable()
+      const file = await source.readPublished(UNPUBLISHED_PAGES_FILE)
+      if (!file) return new Set<string>()
+      let value: unknown
+      try { value = JSON.parse(file.content) } catch { throw publishedContentUnavailable() }
+      if (!Array.isArray(value) || value.some((id) => typeof id !== 'string')) throw publishedContentUnavailable()
+      return new Set<string>(value)
+    })()
+    publishedRecordLoads.set(source, pending)
+    void pending.catch(() => {
+      if (publishedRecordLoads.get(source) === pending) publishedRecordLoads.delete(source)
+    })
+  }
+  const record = await pending
+  // A strict success supersedes any retryable ordinary fallback attempt.
+  assetRecordPromise = Promise.resolve()
+  if (assetRecord !== record) {
+    assetRecord = record
+    _allEntries = null
+    loadedEntriesPromise = null
+    sidebarCollectionsCache.clear()
+  }
 }
 
 /** Locale directories are reserved even when Cloud selects them after build. */
@@ -1130,6 +1174,7 @@ function hydrateContentIndex(index: ContentIndex): void {
   // using the authoritative release frontmatter now cached by content-index.
   frontmatterCache.clear()
   _allEntries = null
+  loadedEntriesPromise = null
   sidebarCollectionsCache.clear()
 }
 
@@ -1164,11 +1209,14 @@ export async function loadDocEntries(reader: ReaderContext = ANONYMOUS_READER): 
 async function loadPublishedDocEntries(): Promise<Array<DocEntry>> {
   await ensureDocPublication()
   docsConfig()
+  // A previously missing index can recover in the same isolate. Never return
+  // a cached embedded listing before checking current release metadata.
+  const index = await loadContentIndex()
+  if (index) hydrateContentIndex(index)
+  if (!index && process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets') return getAllDocEntries()
   if (loadedEntriesPromise) return loadedEntriesPromise
   loadedEntriesPromise = (async () => {
-    const index = await loadContentIndex()
     if (!index) return getAllDocEntries()
-    hydrateContentIndex(index)
     const seen = new Set<string>()
     const ids: Array<string> = []
     const add = (id: string) => {

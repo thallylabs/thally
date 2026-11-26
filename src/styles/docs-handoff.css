@@ -833,8 +833,27 @@ html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thal
 }
 
 .thally-docs-chat-user {
-  border-radius: 14px 14px 4px 14px;
-  background: var(--docs-surface-2);
+  min-width: 0;
+  max-width: 85%;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--docs-ink) 5%, var(--docs-bg));
+  color: var(--docs-ink);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* Questions use the site's body face and a compact rhythm independently of
+   article paragraph styles; pasted lines and long identifiers stay readable. */
+.thally-docs-chat-user > .thally-docs-chat-question {
+  margin: 0;
+  max-width: none;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .thally-docs-chat-sources {

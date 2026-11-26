@@ -447,7 +447,8 @@ function rawSha256(value: string): string {
 }
 
 /**
- * Prepare only canonical search text. Entry metadata, visibility, locales and
+ * Prepare canonical search and full retrieval text in one parse. Metadata,
+ * visibility, locales and
  * current versions are resolved by the runtime, never frozen in these shards.
  * Limits bound a transfer/decode; oversized records keep the normal parser.
  */
@@ -477,12 +478,21 @@ async function writePreparedSearchAssets(outputRoot: string, sources: Readonly<R
   for (const filePath of Object.keys(manifest.files)) {
     if (!filePath.startsWith('src/content/') || !filePath.endsWith('.mdx')) continue
     const { content } = parseFrontmatter(sources[filePath].content)
+    const parsed = parseMdxContent(content, 'agents')
     const record: PreparedSearchRecord = {
       sha256: manifest.files[filePath].sha256,
-      content: projectSearchContent(parseMdxContent(content, 'agents')),
+      content: projectSearchContent(parsed),
+      retrieval: { version: 1, sections: parsed.sections },
     }
-    const json = `${JSON.stringify(filePath)}:${JSON.stringify(record)}`
-    const bytes = Buffer.byteLength(json)
+    let json = `${JSON.stringify(filePath)}:${JSON.stringify(record)}`
+    let bytes = Buffer.byteLength(json)
+    if (bytes + Buffer.byteLength(prefix + suffix) > MAX_SEARCH_SHARD_BYTES) {
+      // Large documents must retain their complete canonical fallback rather
+      // than silently truncating retrieval or losing bounded search content.
+      delete record.retrieval
+      json = `${JSON.stringify(filePath)}:${JSON.stringify(record)}`
+      bytes = Buffer.byteLength(json)
+    }
     if (bytes + Buffer.byteLength(prefix + suffix) > MAX_SEARCH_SHARD_BYTES) continue
     if (size + bytes + (pairs.length ? 1 : 0) > MAX_SEARCH_SHARD_BYTES) flush()
     if (descriptor.shards.length >= MAX_SEARCH_SHARDS) break

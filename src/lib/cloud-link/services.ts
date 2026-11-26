@@ -10,7 +10,7 @@
 import 'server-only'
 
 import '@/lib/search/register-doc-source'
-import { getRelevantChunks } from '@thallylabs/core/embeddings'
+import { getAiChatRelevantChunks, isAiChatRetrievalUnavailable } from '@/lib/ai-chat-retrieval'
 import { siteConfig } from '@/data/site'
 import {
   MAX_AI_CHAT_REQUEST_BYTES,
@@ -32,6 +32,20 @@ import { getCloudServiceGrant, getCloudSiteConfig } from './client'
 
 const DEFAULT_CLOUD_URL = 'https://app.thally.io'
 const REQUEST_TIMEOUT_MS = 30_000
+const REMOTE_CHAT_TIMING = /^(thally_auth|thally_admission|thally_reservation)\s*;\s*dur\s*=\s*(\d+(?:\.\d+)?)$/
+
+/** Keep only bounded numeric service stages; upstream descriptions stay private. */
+function cloudChatTiming(value: string | null): Array<string> {
+  if (!value || value.length > 4096) return []
+  const stages = new Map<string, number>()
+  for (const metric of value.split(',')) {
+    const match = REMOTE_CHAT_TIMING.exec(metric.trim())
+    if (!match) continue
+    const duration = Number(match[2])
+    if (Number.isFinite(duration) && duration <= 3_600_000 && !stages.has(match[1])) stages.set(match[1], duration)
+  }
+  return [...stages].map(([stage, duration]) => `${stage};dur=${duration.toFixed(1)}`)
+}
 function cloudUrl(pathname: string): URL {
   const configured =
     process.env.THALLY_CLOUD_URL?.trim() ||
@@ -87,6 +101,7 @@ export async function isCloudAiAvailable(siteUrl: string): Promise<boolean> {
 
 /** Build bounded retrieval context locally and stream a metered Cloud answer. */
 export async function handleCloudAiChat(request: Request): Promise<Response> {
+  const startedAt = performance.now()
   const siteUrl = new URL(request.url).origin
   const cloud = await getCloudSiteConfig(siteUrl)
   if (!cloud?.entitlements.features?.aiAnswers || !cloud.siteConfig.portable.ai?.enabled) {
@@ -113,10 +128,18 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   // topic; the previous question supplies the rest at reduced weight.
   const previousQuestion = questions.at(-2)
 
-  const results = await getRelevantChunks(question, {
-    ...RETRIEVAL_OPTIONS,
-    ...(previousQuestion ? { context: previousQuestion } : {}),
-  })
+  const retrievalStartedAt = performance.now()
+  let results: Awaited<ReturnType<typeof getAiChatRelevantChunks>>
+  try {
+    results = await getAiChatRelevantChunks(question, {
+      ...RETRIEVAL_OPTIONS,
+      ...(previousQuestion ? { context: previousQuestion } : {}),
+    })
+  } catch (error) {
+    if (!isAiChatRetrievalUnavailable(error)) throw error
+    return new Response('Thally AI is temporarily unavailable. Please try again.', { status: 503, headers: { 'cache-control': 'no-store' } })
+  }
+  const retrievalMs = performance.now() - retrievalStartedAt
   const context = results.map(({ chunk }) => ({
     title: chunk.title,
     heading: chunk.headingPath.join(' > ') || chunk.title,
@@ -125,6 +148,7 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   }))
 
   let response: Response
+  const upstreamStartedAt = performance.now()
   try {
     response = await fetch(cloudUrl('api/runtime/chat'), {
       method: 'POST',
@@ -149,6 +173,7 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   } catch {
     return new Response('Thally AI is temporarily unavailable.', { status: 503 })
   }
+  const upstreamHeadersMs = performance.now() - upstreamStartedAt
 
   // The retrieval happened in this trusted runtime, so expose that bounded
   // local evidence rather than accepting link metadata from the remote model.
@@ -165,6 +190,14 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
     status: response.status,
     headers: {
       'content-type': contentType,
+      // Upstream header wait includes the remote stages; the metrics describe
+      // nested boundaries and must not be summed as independent latency.
+      'server-timing': [
+        `thally_runtime_prep;dur=${Math.max(0, upstreamStartedAt - startedAt - retrievalMs).toFixed(1)}`,
+        `thally_retrieval;dur=${Math.max(0, retrievalMs).toFixed(1)}`,
+        `thally_upstream_headers;dur=${Math.max(0, upstreamHeadersMs).toFixed(1)}`,
+        ...cloudChatTiming(response.headers.get('server-timing')),
+      ].join(', '),
       // Reconstruct trusted delivery directives rather than forwarding the
       // upstream header set: buffering or transformations can hide tokens.
       'cache-control': isStreaming ? 'no-store, no-transform' : 'no-store',

@@ -451,7 +451,7 @@ export function DocsChat({
 
                     {msg.role === 'user' ? (
                       /* User bubble */
-                      <div className="thally-docs-chat-user max-w-[78%] overflow-hidden text-sm leading-relaxed">
+                      <div className="thally-docs-chat-user">
                         {msg.images?.length ? (
                           <div className={`grid gap-1.5 p-1.5 pb-0 ${msg.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                             {msg.images.map((image) => (
@@ -467,9 +467,7 @@ export function DocsChat({
                             ))}
                           </div>
                         ) : null}
-                        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          <span className="block px-4 py-2.5">{msg.content}</span>
-                        </span>
+                        <p className="thally-docs-chat-question">{msg.content}</p>
                       </div>
                     ) : (
                       /* Assistant — no bubble, full prose */

@@ -4,6 +4,7 @@
  * the ordinary request-time page listing remain authoritative.
  */
 import type { SearchContentProjection } from '@thallylabs/core/search'
+import type { ContentSection } from '@thallylabs/core/content'
 
 /** Increment when canonical parsing or search projection semantics change. */
 export const PREPARED_SEARCH_FORMAT = 'thally-search-content-v1'
@@ -24,6 +25,15 @@ export interface PreparedSearchDescriptor {
 export interface PreparedSearchRecord {
   sha256: string
   content: SearchContentProjection
+  /** Optional full retrieval projection; bounded search text stays unchanged. */
+  retrieval?: { version: 1; sections: Array<ContentSection> }
+}
+
+export interface PreparedRetrievalContent {
+  version: 1
+  /** Raw MDX SHA verified against the active content manifest. */
+  sourceHash: string
+  sections: Array<ContentSection>
 }
 
 export interface PreparedSearchShard {
@@ -68,4 +78,20 @@ export function decodePreparedSearchShard(body: string): PreparedSearchShard | n
   return records.every(([filePath, record]) => filePath.startsWith('src/content/') && filePath.endsWith('.mdx')
     && filePath.split('/').every((segment) => segment && segment !== '.' && segment !== '..')
     && record && isRawSha256(record.sha256) && isProjection(record.content)) ? value : null
+}
+
+/** Validate optional retrieval only on use, preserving valid legacy search text. */
+export function preparedRetrievalContent(record: PreparedSearchRecord): PreparedRetrievalContent | undefined {
+  const value = record.retrieval
+  if (!isRawSha256(record.sha256) || !value || value.version !== 1 || !Array.isArray(value.sections) || value.sections.length > MAX_SEARCH_SHARD_BYTES
+    || !value.sections.every((section) => section && typeof section === 'object'
+      && typeof section.id === 'string' && typeof section.title === 'string' && typeof section.text === 'string'
+      && Number.isSafeInteger(section.depth) && section.depth >= 0 && section.depth <= 6
+      && Array.isArray(section.headingPath) && section.headingPath.every((heading) => typeof heading === 'string')
+      && Array.isArray(section.code) && section.code.every((code) => code && typeof code === 'object'
+        && typeof code.language === 'string' && typeof code.source === 'string'
+        && (code.title === undefined || typeof code.title === 'string')
+        && (code.hasLanguageTag === undefined || typeof code.hasLanguageTag === 'boolean')
+        && Number.isSafeInteger(code.index) && code.index >= 0))) return undefined
+  return { version: 1, sourceHash: record.sha256, sections: value.sections }
 }

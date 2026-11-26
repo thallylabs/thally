@@ -37,6 +37,41 @@ async function fixture(sources: RuntimeSourceMap) {
 }
 
 describe('prepared search assets', () => {
+  it('prepares complete retrieval sections from the same canonical parse without truncating late prose or code', async () => {
+    const body = `## Full section\n\n${'early prose '.repeat(250)} latefactneedle\n\n\`\`\`ts title="sample"\n${'const value = 1;\n'.repeat(180)}// late-code-needle\n\`\`\``
+    const data = await fixture({ 'src/content/full.mdx': { content: body, modifiedAtMs: 1 } })
+    expect(await data.source.retrievalContent!('src/content/full.mdx')).toEqual({ version: 1, sourceHash: sha(body), sections: parseMdxContent(body, 'agents').sections })
+    const search = await data.source.searchContent!('src/content/full.mdx')
+    expect(search).toEqual(projectSearchContent(parseMdxContent(body, 'agents')))
+    expect(search!.sections[0].text.length).toBeLessThanOrEqual(2000)
+    expect(JSON.stringify((await data.source.retrievalContent!('src/content/full.mdx'))!.sections)).toContain('late-code-needle')
+  })
+
+  it('keeps valid search text when optional retrieval is malformed, missing or incompatible', async () => {
+    const data = await fixture({ 'src/content/a.mdx': { content: 'Search remains valid', modifiedAtMs: 1 } })
+    const descriptor = data.manifest.search!.shards[0]
+    const original = JSON.parse(data.bodies.get(descriptor.path)!)
+    for (const retrieval of [undefined, { version: 2, sections: [] }, { version: 1, sections: [{ id: 'broken' }] }]) {
+      const shard = structuredClone(original)
+      shard.records['src/content/a.mdx'].retrieval = retrieval
+      const body = JSON.stringify(shard)
+      descriptor.sha256 = sha(body); descriptor.bytes = Buffer.byteLength(body)
+      data.bodies.set(descriptor.path, body)
+      const active = createAssetsContentSource(fallback, () => data.fetcher)
+      expect(await active.retrievalContent!('src/content/a.mdx')).toBeUndefined()
+      expect(await active.searchContent!('src/content/a.mdx')).toEqual(projectSearchContent(parseMdxContent('Search remains valid', 'agents')))
+    }
+  })
+
+  it('omits only oversized full retrieval while retaining the bounded search projection', async () => {
+    const body = `## Code\n\n\`\`\`txt\n${'large code '.repeat(110_000)}\n\`\`\`\n\n## Last section\n\nLate visible fact.`
+    const data = await fixture({ 'src/content/large.mdx': { content: body, modifiedAtMs: 1 } })
+    expect(data.manifest.search).toBeDefined()
+    expect(await data.source.retrievalContent!('src/content/large.mdx')).toBeUndefined()
+    expect(await data.source.searchContent!('src/content/large.mdx')).toEqual(projectSearchContent(parseMdxContent(body, 'agents')))
+    expect(data.manifest.search!.shards.every(({ bytes }) => bytes <= MAX_SEARCH_SHARD_BYTES)).toBe(true)
+  })
+
   it('uses the canonical agent projection, raw source SHA and deterministic bounded shards', async () => {
     const raw = '---\ntitle: Ignored listing metadata\n---\n# Café\n\n<Human>human-only</Human>\n\n<Agent>机器 needle</Agent>\n\n## Detail\n\nText.'
     const data = await fixture({ 'src/content/a.mdx': { content: raw, modifiedAtMs: 5 } })

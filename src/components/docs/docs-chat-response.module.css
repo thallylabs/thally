@@ -1,13 +1,61 @@
-/* Newly created Markdown blocks settle once; arriving tokens stay immediate. */
-.prose > :last-child {
-  animation: arrive 160ms ease-out;
+/* Actual provider arrival drives motion; no text is held in an animation queue. */
+.prose { min-width: 0; }
+
+.word {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-decoration: inherit;
+  text-decoration-color: inherit;
+  text-underline-offset: inherit;
 }
 
-@keyframes arrive {
-  from { opacity: 0.65; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
+.response[data-status='streaming'] .word[data-stream-new] {
+  animation: word-focus 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.thinking {
+  margin: 0;
+  padding-block: 0.25rem;
+  color: hsl(var(--thally-foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.thinkingLetter {
+  animation: thinking-ink 1.25s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation-delay: calc(var(--letter, 0) * 65ms);
+}
+
+.caret {
+  display: inline-block;
+  width: 0.12em;
+  height: 0.85em;
+  margin-inline-start: 0.18em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.65;
+  vertical-align: -0.05em;
+}
+
+.response[data-motion-paused] .thinkingLetter { animation-play-state: paused; }
+
+@keyframes word-focus {
+  from { opacity: 0.72; filter: blur(1.5px); transform: translateY(1px); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+
+@keyframes thinking-ink {
+  0%, 65%, 100% { opacity: 0.72; }
+  30% { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .prose > :last-child { animation: none; }
+  .response[data-status='streaming'] .word[data-stream-new], .thinkingLetter {
+    animation: none;
+    filter: none;
+    opacity: 1;
+    transform: none;
+  }
 }

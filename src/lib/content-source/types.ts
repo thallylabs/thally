@@ -18,6 +18,7 @@
  */
 
 import type { SearchContentProjection } from '@thallylabs/core/search'
+import type { PreparedRetrievalContent } from '@/lib/search/prepared-content-contract'
 
 export type ContentSourceKind = 'filesystem' | 'assets'
 
@@ -36,10 +37,14 @@ export interface ContentSource {
   exists(projectPath: string): Promise<boolean>
   /** Read one file, null when absent; transient service failures may reject. */
   read(projectPath: string): Promise<ContentSourceFile | null>
+  /** Strict release read: absent declared membership is null; unavailable authority rejects. */
+  readPublished?(projectPath: string): Promise<ContentSourceFile | null>
   /** Modification time for staleness comparisons; 0 when unknown/missing. */
   modifiedAt(projectPath: string): Promise<number>
   /** List file paths below a project-relative directory prefix. */
   list(prefix: string): Promise<Array<string>>
   /** Optional verified canonical search text; undefined uses the ordinary document parser. */
   searchContent?(projectPath: string): Promise<SearchContentProjection | undefined>
+  /** Full sections verified against this release; undefined requires canonical parsing. */
+  retrievalContent?(projectPath: string): Promise<PreparedRetrievalContent | undefined>
 }

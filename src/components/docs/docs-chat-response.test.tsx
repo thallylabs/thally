@@ -20,7 +20,8 @@ describe('progressive answer rendering', () => {
 
   it('renders incomplete Markdown and later corrected snapshots without unsafe links', () => {
     expect(render('Use **the guide** and [read](/gu')).not.toContain('href=')
-    expect(render('Use **the guide** and [read](/guide?mode=one)')).toContain('<strong>the guide</strong>')
+    const strong = render('Use **the guide** and [read](/guide?mode=one)').match(/<strong>([\s\S]*?)<\/strong>/)?.[1]
+    expect(strong?.replace(/<[^>]*>/g, '')).toBe('the guide')
     expect(render('[read](/guide?mode=one)')).toContain('href="/guide?mode=one"')
     expect(render('```ts\nconst count = 1')).toContain('<code class="language-ts">')
   })
