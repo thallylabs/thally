@@ -22,7 +22,7 @@ const PRE_GRAMMAR_RULES = [
 ];
 
 /** Create one clean, immutable runtime and its portable starter without external dependencies or a lockfile install. */
-function contractFixture(t, { grammars = false, ownership = FRAMEWORK_SYNC_ELIGIBLE, danglingGrammar = false } = {}) {
+function contractFixture(t, { grammars = false, ownership = FRAMEWORK_SYNC_ELIGIBLE, danglingGrammar = false, frameworkContract = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "thally-grammar-contract-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const runtimeDirectory = join(root, "runtime");
@@ -33,7 +33,11 @@ function contractFixture(t, { grammars = false, ownership = FRAMEWORK_SYNC_ELIGI
     writeFileSync(destination, typeof value === "string" || Buffer.isBuffer(value) ? value : JSON.stringify(value));
   };
   const version = "1.2.3";
-  const dependencies = { "@thallylabs/core": `^${version}` };
+  const framework = { next: "16.4.6", react: "19.2.9", "react-dom": "19.2.9" };
+  const dependencies = { "@thallylabs/core": `^${version}`, ...framework };
+  const devDependencies = { "eslint-config-next": "16.4.6" };
+  write(runtimeDirectory, "package.json", { dependencies: framework, devDependencies });
+  if (frameworkContract) write(runtimeDirectory, ".github/scripts/starter-runtime-contract.mjs", "export const FRAMEWORK_DEPENDENCY_STARTER_VERSION = 4;\n");
   write(runtimeDirectory, "packages/core/package.json", { name: "@thallylabs/core", version });
   write(runtimeDirectory, "src/mdx/rehype.ts", "export const renderer = true;\n");
   const assets = ["baml.tmLanguage.json", "baml-jinja.tmLanguage.json", "LICENSE", "NOTICE"];
@@ -55,17 +59,28 @@ function contractFixture(t, { grammars = false, ownership = FRAMEWORK_SYNC_ELIGI
   git("add", ".");
   git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
   write(starterDirectory, "starter-release.json", {
-    schemaVersion: 1, starterVersion: 3, repository: "thallylabs/starter",
+    schemaVersion: 1, starterVersion: 4, repository: "thallylabs/starter",
+    frameworkDependencies: { ...framework, ...devDependencies },
     runtime: { repository: "thallylabs/thally", commitSha: git("rev-parse", "HEAD"), treeSha: git("rev-parse", "HEAD^{tree}") },
     ownership: { frameworkSyncEligible: ownership }, packages: dependencies,
   });
-  write(starterDirectory, "package.json", { dependencies });
-  write(starterDirectory, "package-lock.json", { packages: { "": { dependencies }, "node_modules/@thallylabs/core": { version } } });
+  write(starterDirectory, "package.json", { dependencies, devDependencies });
+  const refreshLockfile = () => {
+    const manifest = JSON.parse(readFileSync(join(starterDirectory, "package.json"), "utf8"));
+    write(starterDirectory, "package-lock.json", { packages: {
+      "": manifest,
+      "node_modules/@thallylabs/core": { version },
+      ...Object.fromEntries(Object.entries({ ...manifest.dependencies, ...manifest.devDependencies })
+        .filter(([name]) => name !== "@thallylabs/core")
+        .map(([name, resolvedVersion]) => [`node_modules/${name}`, { version: resolvedVersion }])),
+    } });
+  };
+  refreshLockfile();
   write(starterDirectory, "src/mdx/rehype.ts", "export const renderer = true;\n");
   return {
     starterDirectory, runtimeDirectory, assets,
     check: () => checkStarterRuntimeContract({ starterDirectory, runtimeDirectory }),
-    sync: () => syncStarterRuntimeContract({ starterDirectory, runtimeDirectory, refreshLockfile: () => {} }),
+    sync: () => syncStarterRuntimeContract({ starterDirectory, runtimeDirectory, refreshLockfile }),
   };
 }
 
@@ -84,9 +99,14 @@ test("rejects monorepo integration tests already present in a standalone snapsho
   };
   try {
     const { version } = JSON.parse(readFileSync(join(runtimeDirectory, "packages/core/package.json"), "utf8"));
+    const runtimePackage = JSON.parse(readFileSync(join(runtimeDirectory, "package.json"), "utf8"));
+    const frameworkDependencies = Object.fromEntries(["next", "react", "react-dom"].map((name) => [name, runtimePackage.dependencies[name]]));
+    frameworkDependencies["eslint-config-next"] = runtimePackage.devDependencies["eslint-config-next"];
     const dependencies = { "@thallylabs/core": `^${version}` };
     write("starter-release.json", {
       schemaVersion: 1,
+      starterVersion: 4,
+      frameworkDependencies,
       repository: "thallylabs/starter",
       runtime: { repository: "thallylabs/thally" },
       ownership: { frameworkSyncEligible: FRAMEWORK_SYNC_ELIGIBLE },
@@ -103,6 +123,89 @@ test("rejects monorepo integration tests already present in a standalone snapsho
   } finally {
     rmSync(starterDirectory, { recursive: true, force: true });
   }
+});
+
+test("updates vulnerable starter framework pins and lock resolution while preserving portable owner fields", (t) => {
+  const fixture = contractFixture(t);
+  const packagePath = join(fixture.starterDirectory, "package.json");
+  const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
+  manifest.dependencies.next = "16.4.1";
+  manifest.dependencies.react = "19.2.0";
+  manifest.dependencies["react-dom"] = "19.2.0";
+  manifest.dependencies["owner-plugin"] = "1.0.0";
+  manifest.devDependencies["eslint-config-next"] = "16.3.5";
+  manifest.scripts = { check: "portable-check" };
+  writeFileSync(packagePath, JSON.stringify(manifest));
+  assert.equal(fixture.check().differences.filter((message) => message.startsWith("package.json pins")).length, 4);
+  fixture.sync();
+  const updated = JSON.parse(readFileSync(packagePath, "utf8"));
+  assert.deepEqual(updated.dependencies, { "@thallylabs/core": "^1.2.3", next: "16.4.6", react: "19.2.9", "react-dom": "19.2.9", "owner-plugin": "1.0.0" });
+  assert.deepEqual(updated.devDependencies, { "eslint-config-next": "16.4.6" });
+  assert.deepEqual(updated.scripts, { check: "portable-check" });
+  assert.deepEqual(fixture.check().differences, []);
+});
+
+test("rejects stale framework lock roots and resolved peers even when the starter manifest is current", (t) => {
+  const fixture = contractFixture(t);
+  const lockPath = join(fixture.starterDirectory, "package-lock.json");
+  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+  lock.packages[""].dependencies.next = "16.4.1";
+  lock.packages["node_modules/react-dom"].version = "19.2.0";
+  delete lock.packages["node_modules/eslint-config-next"];
+  writeFileSync(lockPath, JSON.stringify(lock));
+  assert.deepEqual(fixture.check().differences.sort(), [
+    "package-lock.json root pins next 16.4.1, expected 16.4.6",
+    "package-lock.json resolves react-dom 19.2.0, expected 19.2.9",
+    "package-lock.json resolves eslint-config-next nothing, expected 16.4.6",
+  ].sort());
+});
+
+test("rejects ranged runtime framework pins before modifying the starter", (t) => {
+  const fixture = contractFixture(t);
+  const packagePath = join(fixture.runtimeDirectory, "package.json");
+  const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
+  manifest.dependencies.next = "^16.4.6";
+  writeFileSync(packagePath, JSON.stringify(manifest));
+  assert.throws(fixture.check, /Runtime next must have an exact stable version/);
+});
+
+test("preserves retained v1-v3 dependency checks without requiring the newer framework tuple", (t) => {
+  const fixture = contractFixture(t);
+  const path = join(fixture.starterDirectory, "starter-release.json");
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  delete manifest.frameworkDependencies;
+  const packagePath = join(fixture.starterDirectory, "package.json");
+  const starter = JSON.parse(readFileSync(packagePath, "utf8"));
+  starter.dependencies.next = "15.0.0";
+  writeFileSync(packagePath, JSON.stringify(starter));
+  for (const starterVersion of [1, 2, 3]) {
+    manifest.starterVersion = starterVersion;
+    writeFileSync(path, JSON.stringify(manifest));
+    assert.deepEqual(fixture.check().differences, []);
+  }
+  starter.dependencies["@thallylabs/core"] = "^0.0.1";
+  writeFileSync(packagePath, JSON.stringify(starter));
+  assert.ok(fixture.check().differences.includes("package.json pins @thallylabs/core ^0.0.1, expected ^1.2.3"));
+});
+
+test("fails closed when the v4 framework tuple is removed, malformed, or downgraded", (t) => {
+  const fixture = contractFixture(t);
+  const path = join(fixture.starterDirectory, "starter-release.json");
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  for (const marker of [undefined, null, [], {}, { next: "16.4.1", react: "19.2.9", "react-dom": "19.2.9", "eslint-config-next": "16.4.6" }]) {
+    writeFileSync(path, JSON.stringify({ ...manifest, frameworkDependencies: marker }));
+    assert.throws(fixture.check, /frameworkDependencies must match the exact runtime framework tuple/);
+  }
+});
+
+test("rejects stripping the new contract version from a runtime that explicitly requires it", (t) => {
+  const fixture = contractFixture(t, { frameworkContract: true });
+  const path = join(fixture.starterDirectory, "starter-release.json");
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  manifest.starterVersion = 3;
+  delete manifest.frameworkDependencies;
+  writeFileSync(path, JSON.stringify(manifest));
+  assert.throws(fixture.check, /cannot downgrade the pinned runtime's framework dependency contract/);
 });
 
 // Test coverage stays with the engine, including new suites added in the future.
@@ -123,7 +226,7 @@ test("synchronizes every grammar asset and attribution file byte-for-byte withou
   assert.deepEqual(fixture.check().differences, []);
   const manifest = JSON.parse(readFileSync(join(fixture.starterDirectory, "starter-release.json"), "utf8"));
   assert.deepEqual(manifest.ownership.frameworkSyncEligible, FRAMEWORK_SYNC_ELIGIBLE);
-  assert.equal(manifest.starterVersion, 3);
+  assert.equal(manifest.starterVersion, 4);
   assert.equal(readFileSync(customerPath, "utf8"), "customer components\n");
   assert.equal(FRAMEWORK_SYNC_ELIGIBLE.includes("src/mdx/**"), false);
   for (const asset of fixture.assets) {
