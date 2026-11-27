@@ -361,15 +361,22 @@ describe('a stylesheet with thousands of references to follow', { timeout: 60_00
   // How long a run takes depends on the machine, so each test compares two sizes of the same input instead: four times the input takes about
   // four times as long when the work is linear and about sixteen times as long when it is quadratic. That is counted in the processor time
   // the run uses, which a busy machine does not stretch the way it stretches the time on the clock.
+  //
+  // Linear work still measures more than four, because a larger input also makes garbage collection and cache misses cost more per item:
+  // about five to seven on a laptop, and occasionally just over the limit on a busy shared CI runner. A measurement over the limit is
+  // therefore taken again, up to three times in all, and the lowest counts. Quadratic work measures over the limit every time, so a retry
+  // lets through only a slow patch of the machine.
   const SMALL = 1000
   const LARGER_BY = 4
   const LARGE = SMALL * LARGER_BY
   const REPEATS = 9
+  const ATTEMPTS = 3
   const MOST_LINEAR_GROWTH = 9
   const processorMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000 }
   /**
    * How many times longer the work `prepare` returns takes for `LARGER_BY` times `size` than for `size`. The input is built outside the
    * timing, each size is taken at its fastest of several runs after one to warm up, and the runs alternate so a slow patch meets both sizes.
+   * A measurement over `MOST_LINEAR_GROWTH` is repeated up to `ATTEMPTS` times and the lowest is returned.
    */
   const growth = <T,>(prepare: (size: number) => () => T, size: number): { result: T; ratio: number } => {
     const [small, large] = [prepare(size), prepare(size * LARGER_BY)]
@@ -378,16 +385,24 @@ describe('a stylesheet with thousands of references to follow', { timeout: 60_00
       const result = work()
       return { result, ms: processorMs() - start }
     }
-    time(small)
-    let [fastestSmall, fastestLarge] = [Infinity, Infinity]
-    let result!: T
-    for (let repeat = 0; repeat < REPEATS; repeat++) {
-      fastestSmall = Math.min(fastestSmall, time(small).ms)
-      const run = time(large)
-      fastestLarge = Math.min(fastestLarge, run.ms)
-      result = run.result
+    const measure = (): { result: T; ratio: number } => {
+      time(small)
+      let [fastestSmall, fastestLarge] = [Infinity, Infinity]
+      let result!: T
+      for (let repeat = 0; repeat < REPEATS; repeat++) {
+        fastestSmall = Math.min(fastestSmall, time(small).ms)
+        const run = time(large)
+        fastestLarge = Math.min(fastestLarge, run.ms)
+        result = run.result
+      }
+      return { result, ratio: fastestLarge / fastestSmall }
     }
-    return { result, ratio: fastestLarge / fastestSmall }
+    let lowest = measure()
+    for (let attempt = 1; attempt < ATTEMPTS && lowest.ratio >= MOST_LINEAR_GROWTH; attempt++) {
+      const next = measure()
+      if (next.ratio < lowest.ratio) lowest = next
+    }
+    return lowest
   }
 
   it('follows a chain of custom properties declared in the opposite order to the one they are read in', () => {
