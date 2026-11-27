@@ -135,8 +135,8 @@ describe('stable starter release', () => {
       `https://codeload.github.com/thallylabs/starter/tar.gz/${STARTER_COMMIT_SHA}`,
     )
     expect(STABLE_SCAFFOLD_RELEASE.source.treeSha).toBeTruthy()
-    // Retained v2 and lean v3 releases share the same immutable identity contract.
-    expect([2, 3]).toContain(STABLE_SCAFFOLD_RELEASE.starterVersion)
+    // Retained v2, lean v3 and framework-pinned v4 share the immutable identity contract.
+    expect([2, 3, 4]).toContain(STABLE_SCAFFOLD_RELEASE.starterVersion)
     expect(isStableScaffoldRelease(structuredClone(STABLE_SCAFFOLD_RELEASE))).toBe(true)
     expect(SUPPORTED_SCAFFOLD_RELEASES.some(({ starterVersion }) => starterVersion === 2)).toBe(true)
     // The retained chain grows by one supported record per promotion, so assert its
