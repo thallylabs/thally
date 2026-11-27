@@ -32,6 +32,13 @@ const CORE_PACKAGE_NAME = "@thallylabs/core";
 const CORE_PACKAGE_PATH = "packages/core/package.json";
 const STARTER_PACKAGE_PATH = "package.json";
 const STARTER_LOCK_PATH = "package-lock.json";
+// The runtime owns its framework compatibility tuple, while starter keeps its
+// portable scripts and unrelated dependencies. Sync only these exact pins so a
+// security patch cannot produce a byte-identical snapshot with vulnerable peers.
+const FRAMEWORK_DEPENDENCIES = Object.freeze({
+  dependencies: ["next", "react", "react-dom"],
+  devDependencies: ["eslint-config-next"],
+});
 const SHA_1 = /^[0-9a-f]{40}$/;
 const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 
@@ -87,6 +94,9 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
 // legacy exclusions when validating retained v1/v2 archives: promotion and
 // rollback use the current verifier and must still accept their exact trees.
 export const LEAN_STARTER_VERSION = 3;
+// V4 adds an exact framework tuple. Retained v1-v3 release identities keep
+// their original checks, which are still required for immutable rollback.
+export const FRAMEWORK_DEPENDENCY_STARTER_VERSION = 4;
 const LEGACY_SOURCE_ONLY_PATHS = new Set([
   "src/lib/__tests__/frontmatter.test.ts",
   "src/lib/__tests__/frontmatter-parity.test.ts",
@@ -231,6 +241,26 @@ function runtimeCoreIdentity(runtimeDirectory) {
   return { version: manifest.version, constraint: `^${manifest.version}` };
 }
 
+/** Read the authored framework pins without taking ownership of the starter manifest. */
+function runtimeFrameworkDependencies(runtimeDirectory) {
+  const manifest = JSON.parse(readFileSync(inside(runtimeDirectory, STARTER_PACKAGE_PATH), "utf8"));
+  return Object.entries(FRAMEWORK_DEPENDENCIES).flatMap(([field, names]) => names.map((name) => {
+    const version = manifest[field]?.[name];
+    invariant(typeof version === "string" && STABLE_SEMVER.test(version), `Runtime ${name} must have an exact stable version.`);
+    return { field, name, version };
+  }));
+}
+
+/** Detect the new contract from the pinned Git blob, never by executing candidate code. */
+function runtimeRequiresFrameworkDependencies(runtimeDirectory) {
+  const path = ".github/scripts/starter-runtime-contract.mjs";
+  const options = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+  const entry = execFileSync("git", ["-C", runtimeDirectory, "ls-tree", "HEAD", "--", path], options).trim();
+  if (!entry) return false;
+  const source = execFileSync("git", ["-C", runtimeDirectory, "show", `HEAD:${path}`], options);
+  return /^export const FRAMEWORK_DEPENDENCY_STARTER_VERSION = 4;$/m.test(source);
+}
+
 function readStarterPackage(starterDirectory) {
   const packagePath = inside(starterDirectory, STARTER_PACKAGE_PATH);
   const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
@@ -371,10 +401,33 @@ export function checkStarterRuntimeContract({
   const runtimeRoot = resolve(runtimeDirectory);
   const { manifest } = readManifest(starterRoot, { runtimeDirectory: runtimeRoot });
   const identity = runtimeIdentity(runtimeRoot);
+  invariant(!runtimeRequiresFrameworkDependencies(runtimeRoot) || manifest.starterVersion >= FRAMEWORK_DEPENDENCY_STARTER_VERSION,
+    "starter-release.json cannot downgrade the pinned runtime's framework dependency contract.");
   const expectedCore = runtimeCoreIdentity(runtimeRoot);
+  const expectedFramework = manifest.starterVersion >= FRAMEWORK_DEPENDENCY_STARTER_VERSION
+    ? runtimeFrameworkDependencies(runtimeRoot) : [];
   const { manifest: starterPackage } = readStarterPackage(starterRoot);
   const starterLock = readStarterLock(starterRoot);
   const differences = [];
+  if (manifest.starterVersion >= FRAMEWORK_DEPENDENCY_STARTER_VERSION) {
+    const expectedPins = Object.fromEntries(expectedFramework.map(({ name, version }) => [name, version]));
+    invariant(manifest.frameworkDependencies && typeof manifest.frameworkDependencies === "object" &&
+      !Array.isArray(manifest.frameworkDependencies) &&
+      Object.keys(manifest.frameworkDependencies).length === expectedFramework.length &&
+      Object.entries(expectedPins).every(([name, version]) => manifest.frameworkDependencies[name] === version),
+    "starter-release.json frameworkDependencies must match the exact runtime framework tuple.");
+  }
+  for (const { field, name, version } of expectedFramework) {
+    if (starterPackage[field]?.[name] !== version) {
+      differences.push(`${STARTER_PACKAGE_PATH} pins ${name} ${starterPackage[field]?.[name] ?? "nothing"}, expected ${version}`);
+    }
+    if (starterLock.packages[""]?.[field]?.[name] !== version) {
+      differences.push(`${STARTER_LOCK_PATH} root pins ${name} ${starterLock.packages[""]?.[field]?.[name] ?? "nothing"}, expected ${version}`);
+    }
+    if (starterLock.packages[`node_modules/${name}`]?.version !== version) {
+      differences.push(`${STARTER_LOCK_PATH} resolves ${name} ${starterLock.packages[`node_modules/${name}`]?.version ?? "nothing"}, expected ${version}`);
+    }
+  }
   if (manifest.runtime.commitSha !== identity.commitSha) {
     differences.push(
       `starter-release.json pins ${manifest.runtime.commitSha}, expected ${identity.commitSha}`,
@@ -442,10 +495,12 @@ export function syncStarterRuntimeContract({
     allowOwnershipDrift: true,
   });
   const expectedCore = runtimeCoreIdentity(runtimeRoot);
+  const expectedFramework = runtimeFrameworkDependencies(runtimeRoot);
   const { manifest: starterPackage, packagePath: starterPackagePath } =
     readStarterPackage(starterRoot);
   manifest.ownership.frameworkSyncEligible = [...FRAMEWORK_SYNC_ELIGIBLE];
-  manifest.starterVersion = LEAN_STARTER_VERSION;
+  manifest.starterVersion = FRAMEWORK_DEPENDENCY_STARTER_VERSION;
+  manifest.frameworkDependencies = Object.fromEntries(expectedFramework.map(({ name, version }) => [name, version]));
   const identity = runtimeIdentity(runtimeRoot);
   const rules = FRAMEWORK_SYNC_ELIGIBLE.map(parseRule);
 
@@ -486,6 +541,10 @@ export function syncStarterRuntimeContract({
     [CORE_PACKAGE_NAME]: expectedCore.constraint,
   };
   starterPackage.dependencies[CORE_PACKAGE_NAME] = expectedCore.constraint;
+  for (const { field, name, version } of expectedFramework) {
+    starterPackage[field] ??= {};
+    starterPackage[field][name] = version;
+  }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   writeFileSync(
     starterPackagePath,

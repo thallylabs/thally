@@ -24,6 +24,8 @@ import {
 } from "../../../../.github/scripts/starter-runtime-contract.mjs";
 
 const temporaryDirectories: Array<string> = [];
+const frameworkDependencies = { next: "16.4.6", react: "19.2.9", "react-dom": "19.2.9" };
+const frameworkDevDependencies = { "eslint-config-next": "16.4.6" };
 
 function temporaryDirectory(name: string): string {
   const directory = mkdtempSync(join(tmpdir(), `${name}-`));
@@ -48,8 +50,9 @@ function writeCoreLock(
       {
         lockfileVersion: 3,
         packages: {
-          "": { dependencies: { "@thallylabs/core": core.constraint } },
+          "": { dependencies: { "@thallylabs/core": core.constraint, ...frameworkDependencies }, devDependencies: frameworkDevDependencies },
           "node_modules/@thallylabs/core": { version: core.version },
+          ...Object.fromEntries(Object.entries({ ...frameworkDependencies, ...frameworkDevDependencies }).map(([name, version]) => [`node_modules/${name}`, { version }])),
         },
       },
       null,
@@ -64,6 +67,7 @@ function createRuntime(): {
   treeSha: string;
 } {
   const directory = temporaryDirectory("thally-runtime-contract");
+  write(directory, "package.json", JSON.stringify({ dependencies: frameworkDependencies, devDependencies: frameworkDevDependencies }));
   write(directory, "BUILD-WARNINGS.md", "# Build warning register\n");
   write(directory, "src/components/top-bar.tsx", "export const height = 56\n");
   write(directory, "src/lib/runtime.ts", "export const runtime = true\n");
@@ -224,7 +228,7 @@ describe("starter runtime contract", () => {
       refreshLockfile: writeCoreLock,
     });
 
-    expect(JSON.parse(readFileSync(join(starterDirectory, "starter-release.json"), "utf8")).starterVersion).toBe(3);
+    expect(JSON.parse(readFileSync(join(starterDirectory, "starter-release.json"), "utf8")).starterVersion).toBe(4);
 
     expect(
       checkStarterRuntimeContract({
@@ -285,7 +289,7 @@ describe("starter runtime contract", () => {
     syncStarterRuntimeContract({starterDirectory, runtimeDirectory: runtime.directory, refreshLockfile: writeCoreLock});
     const manifestPath = join(starterDirectory, "starter-release.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    expect(manifest.starterVersion).toBe(3);
+    expect(manifest.starterVersion).toBe(4);
     expect(() => readFileSync(join(starterDirectory, testPath))).toThrow();
     manifest.starterVersion = 2;
     writeFileSync(manifestPath, JSON.stringify(manifest));
