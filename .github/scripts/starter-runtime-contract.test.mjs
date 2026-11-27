@@ -99,9 +99,14 @@ test("rejects monorepo integration tests already present in a standalone snapsho
   };
   try {
     const { version } = JSON.parse(readFileSync(join(runtimeDirectory, "packages/core/package.json"), "utf8"));
+    const runtimePackage = JSON.parse(readFileSync(join(runtimeDirectory, "package.json"), "utf8"));
+    const frameworkDependencies = Object.fromEntries(["next", "react", "react-dom"].map((name) => [name, runtimePackage.dependencies[name]]));
+    frameworkDependencies["eslint-config-next"] = runtimePackage.devDependencies["eslint-config-next"];
     const dependencies = { "@thallylabs/core": `^${version}` };
     write("starter-release.json", {
       schemaVersion: 1,
+      starterVersion: 4,
+      frameworkDependencies,
       repository: "thallylabs/starter",
       runtime: { repository: "thallylabs/thally" },
       ownership: { frameworkSyncEligible: FRAMEWORK_SYNC_ELIGIBLE },
