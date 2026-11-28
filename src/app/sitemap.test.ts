@@ -1,21 +1,23 @@
 /** Sitemap languages and dates come from indexable versions of each document. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ translated: vi.fn() }))
+const mocks = vi.hoisted(() => ({ translated: vi.fn(), connection: vi.fn(), assets: false, calls: [] as string[] }))
+vi.mock('next/server', () => ({ connection: mocks.connection }))
+vi.mock('@/lib/content-source', () => ({ isRemoteContentSource: () => mocks.assets }))
 const docs = vi.hoisted(() => ({ sitemap: undefined as 'navigable' | undefined, introductionHref: '/', hasChangelog: false }))
 vi.mock('@/data/docs', () => ({
-  loadDocEntries: async () => [
+  loadDocEntries: async () => { mocks.calls.push('content'); return [
     { id: 'guide', slug: ['guide'], href: '/guide', hidden: false, noindex: false, lastUpdated: '2026-01-01' },
     { id: 'introduction', slug: [], href: docs.introductionHref, hidden: false, noindex: false },
     ...(docs.hasChangelog ? [{ id: 'changelog', slug: ['changelog'], href: '/changelog', hidden: false, noindex: false, lastUpdated: '2026-03-01' }] : []),
     { id: 'orphan', slug: ['orphan'], href: '/orphan', hidden: false, noindex: false },
-  ],
+  ] },
   canReaderViewPage: async () => true,
   getSeoConfig: () => ({ sitemap: docs.sitemap }),
   getVisiblePageIds: () => new Set(['guide', 'introduction']),
 }))
 vi.mock('@/data/api-reference', () => ({ getAllApiOperationNodes: async () => [] }))
-vi.mock('@/lib/cloud-link/request', () => ({ getRequestOrigin: async () => 'https://docs.example.com' }))
+vi.mock('@/lib/cloud-link/request', () => ({ getRequestOrigin: async () => { mocks.calls.push('origin'); return 'https://docs.example.com' } }))
 vi.mock('@/lib/i18n/request', () => ({
   getEffectiveI18nConfig: async () => ({
     defaultLocale: 'en',
@@ -28,9 +30,27 @@ import sitemap from './sitemap'
 
 beforeEach(() => {
   mocks.translated.mockReset()
+  mocks.assets = false
+  mocks.calls = []
+  mocks.connection.mockReset().mockImplementation(async () => { mocks.calls.push('connection') })
   docs.sitemap = undefined
   docs.introductionHref = '/'
   docs.hasChangelog = false
+})
+
+describe('release-backed sitemap request boundary', () => {
+  it('waits for a request before configured origin or asset metadata, even when the origin itself is static', async () => {
+    mocks.assets = true
+    mocks.translated.mockResolvedValue(null)
+    await sitemap()
+    expect(mocks.connection).toHaveBeenCalledOnce()
+    expect(mocks.calls.slice(0, 3)).toEqual(['connection', 'origin', 'content'])
+  })
+  it('keeps filesystem sitemap generation independent of a request', async () => {
+    mocks.translated.mockResolvedValue(null)
+    await sitemap()
+    expect(mocks.connection).not.toHaveBeenCalled()
+  })
 })
 
 describe('static sitemap entries', () => {

@@ -8,7 +8,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ files: {} as Record<string, string>, reads: [] as Array<string> }))
+const state = vi.hoisted(() => ({ files: {} as Record<string, string>, reads: [] as Array<string>, source: {} as object }))
 const config = vi.hoisted(() => ({
   auth: { mode: 'jwt', default: 'public' },
   i18n: { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'Français' }] },
@@ -25,19 +25,26 @@ vi.mock('@/lib/runtime-sources', () => ({ runtimeSourcePageUpdate: () => undefin
 }))
 // No index binding, and the ASSETS index is absent.
 vi.mock('@/lib/content-index', () => ({ getContentIndex: () => null, loadContentIndex: async () => null, isIndexedContentPath: () => true }))
-vi.mock('@/lib/content-source', () => ({
-  isRemoteContentSource: () => true,
-  getContentSource: () => ({
+vi.mock('@/lib/content-source', () => {
+  // The actual provider memoizes one immutable source per kind/release.
+  const source = {
     kind: 'assets',
     exists: async (path: string) => path in state.files,
     read: async (path: string) => {
       state.reads.push(path)
       return path in state.files ? { content: state.files[path] } : null
     },
-  }),
-}))
+    readPublished: async (path: string) => {
+      state.reads.push(path)
+      return path in state.files ? { content: state.files[path], modifiedAtMs: 0 } : null
+    },
+    list: async () => Object.keys(state.files),
+  }
+  state.source = source
+  return { isRemoteContentSource: () => true, getContentSource: () => state.source }
+})
 
-import { canReaderViewPage, loadPageAccess } from '@/data/docs'
+import { canReaderViewPage, loadPageAccess, loadDocEntries, loadSidebarCollections } from '@/data/docs'
 import { resetReaderAuthConfigForTests } from '@/lib/reader-auth/config'
 import type { ReaderContext } from '@/lib/reader-auth/access'
 
@@ -57,6 +64,8 @@ afterAll(() => vi.unstubAllEnvs())
 beforeEach(() => {
   resetReaderAuthConfigForTests()
   state.reads = []
+  // A new immutable release per case; one stable source throughout each case.
+  state.source = { ...state.source }
 })
 
 describe('assets source without a content index', () => {
@@ -86,4 +95,12 @@ describe('assets source without a content index', () => {
     expect(await canReaderViewPage('guides/secret', undefined, 'fr')).toBe(false)
     expect((await loadPageAccess('guides/open', '../x')).isMalformed).toBe(true)
   })
+  it('never reconstructs private navigation entries as public slug metadata', async () => {
+    const entries = await loadDocEntries()
+    expect(entries.map((entry) => entry.id)).not.toContain('guides/secret')
+    expect(entries.find((entry) => entry.id === 'introduction')?.title).toBe('Introduction')
+    const sidebar = await loadSidebarCollections()
+    expect(JSON.stringify(sidebar)).not.toContain('guides/secret')
+  })
+
 })

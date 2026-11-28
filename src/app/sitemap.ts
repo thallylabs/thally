@@ -1,4 +1,6 @@
 import type { MetadataRoute } from 'next'
+import { connection } from 'next/server'
+import { isRemoteContentSource } from '@/lib/content-source'
 import { canReaderViewPage, getSeoConfig, getVisiblePageIds, loadDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
@@ -16,6 +18,9 @@ import { canReaderAccessUnmarkedContent, ANONYMOUS_READER } from '@/lib/reader-a
  * whoever requests it, so a restricted page is never announced.
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // A configured origin can resolve without headers. Asset-backed content still
+  // needs request-time authority after content-only publishes reuse this Worker.
+  if (isRemoteContentSource()) await connection()
   const baseUrl = await getRequestOrigin()
   const allEntries = await loadDocEntries(ANONYMOUS_READER)
   const visibleIds = getSeoConfig().sitemap === 'navigable' ? getVisiblePageIds() : null
