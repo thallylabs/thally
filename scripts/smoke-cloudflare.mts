@@ -11,6 +11,15 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { missingNavigationRoutes, navigationPagePath, projectNavigationContract } from '@thallylabs/core/navigation'
+// tsx loads extensionless TypeScript helpers as CJS when this script is ESM,
+// matching the runtime-source generator's supported Node invocation.
+// @ts-expect-error -- runtime interop intentionally provides the default object
+import runtimeContentFilesModule from './lib/runtime-content-files'
+// @ts-expect-error -- runtime interop intentionally provides the default object
+import smokeReaderScopeModule from './lib/smoke-reader-scope'
+
+const { collectRuntimeContentFiles } = runtimeContentFilesModule as typeof import('./lib/runtime-content-files')
+const { anonymousSmokeScope, smokeUtilityPaths } = smokeReaderScopeModule as typeof import('./lib/smoke-reader-scope')
 
 interface SmokeCheck {
   name: string
@@ -28,35 +37,34 @@ interface PageRepresentation {
 
 const navigationConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'docs.json'), 'utf8'))
 const navigation = projectNavigationContract(navigationConfig)
-const expectedNavigationPaths = navigation.visiblePageIds.map(navigationPagePath)
+const scope = anonymousSmokeScope(navigationConfig, collectRuntimeContentFiles(process.cwd()))
+const expectedNavigationPaths = scope.publicNavigationIds.map(navigationPagePath)
 const firstContentPath = expectedNavigationPaths.find((pagePath) => pagePath !== '/')
-// A page the navigation lists. A local assets build has no content index, so it serves only those
-// pages to the page APIs; a site's `introduction` may be an unlisted custom home page, or absent.
-const samplePageId = navigation.visiblePageIds[0] ?? 'introduction'
+const samplePageId = scope.publicNavigationIds[0] ?? scope.publicPageIds[0]
 
 const checks: ReadonlyArray<SmokeCheck> = [
-  {
+  ...(scope.isRootPublic ? [{
     name: 'home',
     path: '/',
     contentType: 'text/html',
     validateHydrationBootstrap: true,
-  },
+  }] : []),
   ...(firstContentPath ? [{ name: 'navigable page', path: firstContentPath, contentType: 'text/html' }] : []),
   { name: 'docs index', path: '/api/docs-index', contentType: 'application/json' },
-  {
+  ...(samplePageId ? [{
     name: 'structured document',
     path: `/api/docs/${samplePageId}?format=json`,
     contentType: 'application/json',
-  },
+  }] : []),
   { name: 'search', path: '/api/search?q=Thally', contentType: 'application/json' },
-  { name: 'OpenAPI', path: '/openapi.yaml' },
+  ...(scope.allowsUnmarked ? [{ name: 'OpenAPI', path: '/openapi.yaml' }] : []),
   { name: 'complete LLM corpus', path: '/llms-full.txt', contentType: 'text/plain' },
   { name: 'agent guidance', path: '/AGENTS.md', contentType: 'text/markdown' },
-  {
+  ...(samplePageId ? [{
     name: 'source Markdown',
     path: `/api/markdown/${samplePageId}`,
     contentType: 'text/markdown',
-  },
+  }] : []),
   {
     name: 'cloud handshake',
     path: '/api/cloud/handshake',
@@ -108,20 +116,6 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
   const body = await indexResponse.text()
   const documentationUrl = body.match(/^- Documentation: (https?:\/\/\S+)$/m)?.[1]
   if (!documentationUrl) throw new Error('llms.txt did not advertise its documentation URL.')
-  const advertisedOrigin = new URL(documentationUrl).origin
-  const firstPartyPaths = Array.from(
-    new Set(
-      Array.from(body.matchAll(/https?:\/\/[^\s)>\]`]+/g), (match) => match[0])
-        .map((url) => url.replace(/[.,;:]$/, ''))
-        .filter((url) => new URL(url).origin === advertisedOrigin)
-        .map((url) => {
-          const resolvedUrl = new URL(
-            url.replace('{page-id}', samplePageId).replace('{query}', 'Thally'),
-          )
-          return `${resolvedUrl.pathname}${resolvedUrl.search}`
-        }),
-    ),
-  )
   const pagePaths = Array.from(
     body.matchAll(/^- \[[^\]]+\]\((https?:\/\/[^)]+)\)/gm),
     (match) => {
@@ -130,12 +124,20 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
     },
   )
 
-  if (pagePaths.length === 0) throw new Error('llms.txt did not emit any canonical page links.')
+  if (pagePaths.length === 0 && scope.publicNavigationIds.length > 0) throw new Error('llms.txt did not emit expected public canonical page links.')
+  const protectedPaths = new Set(scope.protectedPageIds.map(navigationPagePath))
+  for (const pagePath of pagePaths) {
+    if (protectedPaths.has(pagePath === '/introduction' ? '/' : pagePath)) throw new Error(`Protected page advertised by llms.txt: ${pagePath}.`)
+  }
+  // Authored prose may intentionally link a protected CTA. Only canonical
+  // advertised pages and public utility routes belong in the positive matrix.
+  const firstPartyPaths = [...new Set([...pagePaths, ...smokeUtilityPaths(body, { samplePageId, ...scope })])]
+  if (scope.publicPageIds.length === 0 && pagePaths.length !== 0) throw new Error('All-private source advertised public canonical pages.')
 
   // `introduction` is served at `/`, or at `/introduction` when docs.json redirects the root there
   // (`servedRootHref` in src/data/docs.ts). llms.txt links the address the page is served at.
   const missingRoutes = missingNavigationRoutes(
-    navigation,
+    { ...navigation, visiblePageIds: scope.publicNavigationIds },
     pagePaths.map((pagePath) => (pagePath === '/introduction' ? '/' : pagePath)),
   )
   if (missingRoutes.length > 0) {
@@ -195,7 +197,7 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
       }
     }
   }
-  if (pagePaths.every((pagePath) => offSitePaths.has(pagePath))) {
+  if (pagePaths.length > 0 && pagePaths.every((pagePath) => offSitePaths.has(pagePath))) {
     throw new Error('Every canonical page in llms.txt redirected off the site.')
   }
 
@@ -203,6 +205,27 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
     `[cloudflare-smoke] llms.txt matrix: ${firstPartyPaths.length} first-party link(s), ${pagePaths.length} canonical page(s)`
       + (offSitePaths.size ? `; skipped ${offSitePaths.size} redirected off the site: ${[...offSitePaths].join(', ')}` : ''),
   )
+}
+
+/** Protected targets stay gated even when public prose intentionally links them. */
+async function verifyProtectedPages(baseUrl: string): Promise<void> {
+  const denied = new Set([401, 403, 404, 302, 303, 307, 308])
+  const protectedPaths = scope.protectedPageIds.slice(0, 5).flatMap((id) => [
+    navigationPagePath(id), `${navigationPagePath(id)}?format=ldjson`, `/api/docs/${id}?format=json`, `/api/markdown/${id}`,
+  ])
+  if (!scope.isRootPublic) protectedPaths.push('/')
+  for (const pagePath of protectedPaths) {
+    const response = await fetch(smokeUrl(baseUrl, pagePath), { redirect: 'manual' })
+    await response.arrayBuffer()
+    if (!denied.has(response.status)) throw new Error(`Protected target ${pagePath} returned ${response.status}; expected anonymous denial.`)
+  }
+  const response = await fetch(`${baseUrl}/api/docs-index`)
+  const index = await response.json() as { pages?: Array<{ id?: string; url?: string }> }
+  const protectedIds = new Set(scope.protectedPageIds)
+  for (const page of index.pages ?? []) {
+    if (page.id && protectedIds.has(page.id)) throw new Error(`Protected page advertised by docs index: ${page.id}.`)
+  }
+  console.log(`[cloudflare-smoke] protected scope: ${protectedPaths.length} denied target(s); canonical listings exclude protected entries`)
 }
 
 async function availablePort(): Promise<number> {
@@ -260,6 +283,7 @@ async function main(): Promise<void> {
   let child: ChildProcess | null = null
   let output = ''
   let baseUrl = configuredUrl
+  console.log(`[cloudflare-smoke] anonymous scope from local authored source: ${scope.publicNavigationIds.length} public navigation page(s), ${scope.protectedPageIds.length} protected page(s)${configuredUrl ? "; remote deployment must match this source" : ""}`)
 
   if (!baseUrl) {
     const port = await availablePort()
@@ -316,6 +340,7 @@ async function main(): Promise<void> {
       console.log(`[cloudflare-smoke] ${check.name}: ${response.status}`)
     }
     await verifyLlmsPageMatrix(baseUrl)
+    await verifyProtectedPages(baseUrl)
   } finally {
     if (child) await stopPreview(child)
   }

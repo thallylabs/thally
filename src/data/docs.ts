@@ -504,6 +504,41 @@ interface FrontmatterData {
 }
 
 const frontmatterCache = new Map<string, FrontmatterData>()
+// Prepared metadata is release/source-scoped, never reader-scoped. Rejected or
+// partial loads are removed so a recovered authoritative source can retry.
+const sourceFrontmatterLoads = new WeakMap<object, Promise<ContentIndex>>()
+let preparedAssetIndex: ContentIndex | null = null
+let preparedAssetSource: object | null = null
+// Cache module loading only; select the current immutable source on each call.
+let contentSourceModule: Promise<typeof import('@/lib/content-source')> | undefined
+function loadContentSourceModule() {
+  return contentSourceModule ??= import('@/lib/content-source')
+}
+
+let observedFrontmatterMode: 'filesystem' | 'build' | 'assets' | undefined
+
+/** Match runtime-sources' explicit authored-files build phase, never an ASSETS error fallback. */
+function observeFrontmatterMode() {
+  const mode = process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() !== 'assets'
+    ? 'filesystem' : process.env.THALLY_CONTENT_BUILD === '1' ? 'build' : 'assets'
+  if (observedFrontmatterMode !== mode) {
+    observedFrontmatterMode = mode
+    frontmatterCache.clear()
+    _allEntries = null
+    loadedEntriesPromise = null
+    hydratedContentIndex = null
+    sidebarCollectionsCache.clear()
+  }
+  return mode
+}
+
+function isAssetContent(): boolean {
+  return observeFrontmatterMode() === 'assets'
+}
+
+function publishedFrontmatterIndex(): ContentIndex | null {
+  return getContentIndex() ?? (isAssetContent() ? preparedAssetIndex : null)
+}
 
 /**
  * Returned (by identity) when no file backs a page id. Callers that only need
@@ -534,6 +569,7 @@ function frontmatterCandidates(pageId: string, locale?: string): Array<string> {
 }
 
 function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
+  observeFrontmatterMode()
   const cacheKey = locale ? `${locale}:${pageId}` : pageId
   if (frontmatterCache.has(cacheKey)) {
     return frontmatterCache.get(cacheKey)!
@@ -548,7 +584,7 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
   // build, and falling through to the compiled copy here would pin nav
   // titles and descriptions to the stale build (or, under a shared bundle,
   // to another site's content entirely).
-  const index = getContentIndex()
+  const index = publishedFrontmatterIndex()
   if (index) {
     for (const filePath of candidates) {
       const entry = index.pages[filePath]
@@ -560,6 +596,10 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
     frontmatterCache.set(cacheKey, MISSING_FRONTMATTER)
     return MISSING_FRONTMATTER
   }
+
+  // Async consumers establish strict source metadata first. An unprepared
+  // synchronous assets consumer cannot recover authority from compiled bytes.
+  if (isAssetContent()) return MISSING_FRONTMATTER
 
   for (const filePath of candidates) {
     if (runtimeSourceExists(filePath)) {
@@ -794,7 +834,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   const href = slug.length ? `/${slug.join('/')}` : servedRootHref('/')
   const title = fm.title ?? deriveTitleFromSlug(pageId)
   const api = pageApiMetadata(fm)
-  const index = getContentIndex()
+  const index = publishedFrontmatterIndex()
   const filePath = frontmatterCandidates(pageId).find((candidate) => index ? Boolean(index.pages[candidate]) : runtimeSourceExists(candidate))
   const automatic = filePath ? runtimeSourcePageUpdate(filePath) : undefined
   return withPageUpdate({
@@ -815,7 +855,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     verifiedVersion: fm.verifiedVersion,
     noindex: fm.noindex,
     hidden: fm.hidden,
-    access: parsePageAccess(fm as Record<string, unknown>),
+    access: fm === MISSING_FRONTMATTER ? MALFORMED_PAGE_ACCESS : parsePageAccess(fm as Record<string, unknown>),
     ...(api.openapi ? { openapi: api.openapi } : {}),
     ...(api.manual ? { manualTarget: api.manual } : {}),
   }, fm, automatic)
@@ -899,7 +939,7 @@ export function ensureDocPublication(): Promise<void> {
   let failed = false
   const pending = (async () => {
     try {
-      const { getContentSource } = await import('@/lib/content-source')
+      const { getContentSource } = await loadContentSourceModule()
       const file = await getContentSource().read(UNPUBLISHED_PAGES_FILE)
       assetRecord = file ? parseRecord(String(file.content)) : new Set()
     } catch {
@@ -919,7 +959,7 @@ export function ensureDocPublication(): Promise<void> {
 
 /** Require a release-backed publication record before exposing current bodies to AI. */
 export async function ensureAuthoritativeDocPublication(): Promise<void> {
-  const { getContentSource } = await import('@/lib/content-source')
+  const { getContentSource } = await loadContentSourceModule()
   const source = getContentSource()
   if (source.kind !== 'assets') return ensureDocPublication()
   // An older ordinary read may still be installing an embedded/empty fallback.
@@ -969,7 +1009,8 @@ export function isLocaleDirectory(segment: string): boolean {
 /** Every page that has an .mdx file under src/content (default locale only). */
 function getAllContentPageIds(): Array<string> {
   const localeCodes = localeDirectoryCodes()
-  return listRuntimeSources(CONTENT_ROOT)
+  return (publishedFrontmatterIndex() ? Object.keys(publishedFrontmatterIndex()!.pages) : listRuntimeSources(CONTENT_ROOT))
+    .filter((filePath) => filePath.startsWith(`${CONTENT_ROOT}/`))
     .filter((filePath) => filePath.endsWith('.mdx'))
     .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
     .filter((relativePath) => !localeCodes.has((relativePath.split('/')[0] ?? '').toLowerCase()))
@@ -978,6 +1019,7 @@ function getAllContentPageIds(): Array<string> {
 }
 
 function getAllDocEntries(): Array<DocEntry> {
+  observeFrontmatterMode()
   const config = docsConfig()
   if (_allEntries) return _allEntries
 
@@ -1087,42 +1129,6 @@ export function getPageAccess(pageId: string, locale?: string): PageAccess {
   return mergePageAccess(primary, parsePageAccess(localizedData as Record<string, unknown>))
 }
 
-/** Parse one file's access frontmatter; unreadable frontmatter is malformed (closed). */
-function accessFromSource(raw: string): PageAccess {
-  try {
-    return parsePageAccess(parseFrontmatter(raw).data)
-  } catch {
-    return MALFORMED_PAGE_ACCESS
-  }
-}
-
-/**
- * Access read from the active ContentSource — the same files page bodies are
- * rendered from. Used when an assets release has no content index (local
- * `THALLY_CONTENT_SOURCE=assets` builds, or an index that failed to load):
- * the compiled maps are empty there, so "not in the index" would otherwise
- * read as "page does not exist" and deny every page. A file the content
- * source cannot read either is still denied.
- */
-async function loadPageAccessFromContentSource(pageId: string, locale?: string): Promise<PageAccess> {
-  const { getContentSource } = await import('@/lib/content-source')
-  const source = getContentSource()
-  const readFirst = async (paths: Array<string>) => {
-    for (const filePath of paths) {
-      const file = await source.read(filePath)
-      if (file) return String(file.content)
-    }
-    return null
-  }
-  const primary = await readFirst([`${CONTENT_ROOT}/${pageId}.mdx`, `${CONTENT_ROOT}/${pageId}/index.mdx`])
-  if (primary === null) return MALFORMED_PAGE_ACCESS
-  const primaryAccess = accessFromSource(primary)
-  if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return primaryAccess
-  const translation = await readFirst([`${CONTENT_ROOT}/${locale}/${pageId}.mdx`, `${CONTENT_ROOT}/${locale}/${pageId}/index.mdx`])
-  // Like readFrontmatter, a missing translation means the route renders the primary page.
-  return translation === null ? primaryAccess : mergePageAccess(primaryAccess, accessFromSource(translation))
-}
-
 /**
  * Request-time access for `pageId`, in three cases:
  * - a content index is available: it is authoritative (a page missing from it
@@ -1134,16 +1140,7 @@ async function loadPageAccessFromContentSource(pageId: string, locale?: string):
  */
 export async function loadPageAccess(pageId: string, locale?: string): Promise<PageAccess> {
   if (!isSafePageId(pageId, locale)) return MALFORMED_PAGE_ACCESS
-  await ensureDocPublication()
-  const index = await loadContentIndex()
-  if (index) {
-    hydrateContentIndex(index)
-    return getPageAccess(pageId, locale)
-  }
-  // Same test as `isRemoteContentSource`, inline so this module stays free of the content-source providers.
-  if (process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets') {
-    return loadPageAccessFromContentSource(pageId, locale)
-  }
+  await ensurePublishedFrontmatter()
   return getPageAccess(pageId, locale)
 }
 
@@ -1193,6 +1190,70 @@ function hydrateContentIndex(index: ContentIndex): void {
   sidebarCollectionsCache.clear()
 }
 
+/** Establish one authoritative metadata view for entries, access and navigation. */
+async function ensurePublishedFrontmatter(): Promise<ContentIndex | null> {
+  const mode = observeFrontmatterMode()
+  await ensureDocPublication()
+  // build:cloudflare already grants runtime-sources access to the local authored
+  // files for prerendering. No such flag/bypass is installed in emitted Workers.
+  if (mode === 'build') return null
+  const index = await loadContentIndex()
+  if (index) {
+    hydrateContentIndex(index)
+    return index
+  }
+  if (!isAssetContent()) return null
+  const { getContentSource } = await loadContentSourceModule()
+  const { publishedContentUnavailable } = await import('@/lib/content-source/errors')
+  const source = getContentSource()
+  if (preparedAssetSource !== source) {
+    preparedAssetSource = source
+    preparedAssetIndex = null
+    frontmatterCache.clear()
+    _allEntries = null
+    loadedEntriesPromise = null
+    sidebarCollectionsCache.clear()
+  }
+  let pending = sourceFrontmatterLoads.get(source)
+  if (!pending) {
+    pending = (async () => {
+      // list() may use compiled fallback on a failed manifest. Strict publication
+      // authority must precede even accepting an empty source enumeration.
+      await ensureAuthoritativeDocPublication()
+      if (!source.readPublished) throw publishedContentUnavailable()
+      const pages: ContentIndex['pages'] = {}
+      for (const filePath of await source.list(CONTENT_ROOT)) {
+        if (!filePath.startsWith(`${CONTENT_ROOT}/`) || !filePath.endsWith('.mdx')) continue
+        const file = await source.readPublished(filePath)
+        if (!file) throw publishedContentUnavailable()
+        let data: Record<string, unknown>
+        try { data = parseFrontmatter(file.content).data }
+        catch { data = { [FRONTMATTER_ERROR_MARKER]: true } }
+        pages[filePath] = { data, modifiedAtMs: file.modifiedAtMs, ...(file.pageUpdate ? { pageUpdate: file.pageUpdate } : {}) }
+      }
+      return { version: 1 as const, pages }
+    })()
+    sourceFrontmatterLoads.set(source, pending)
+    void pending.catch(() => {
+      if (sourceFrontmatterLoads.get(source) === pending) sourceFrontmatterLoads.delete(source)
+    })
+  }
+  const prepared = await pending
+  // A superseded invocation cannot install metadata for another source. Close
+  // this read; a fresh caller can retry without an unbounded identity-churn loop.
+  if (preparedAssetSource !== source || getContentSource() !== source) throw publishedContentUnavailable()
+  // Another request may recover the real index while source reads are pending.
+  // Its newer authority wins; late fallback completion cannot reinstall old views.
+  const recovered = getContentIndex()
+  if (recovered) {
+    hydrateContentIndex(recovered)
+    return recovered
+  }
+  preparedAssetIndex = prepared
+  hydrateContentIndex(prepared)
+  return prepared
+}
+
 function defaultLocalePageIds(index: ContentIndex): Array<string> {
   const localeCodes = localeDirectoryCodes()
   return Object.keys(index.pages)
@@ -1208,7 +1269,7 @@ function indexedFrontmatter(index: ContentIndex, pageId: string): FrontmatterDat
     const entry = index.pages[filePath]
     if (entry) return entry.data as FrontmatterData
   }
-  return {}
+  return MISSING_FRONTMATTER
 }
 
 /**
@@ -1222,13 +1283,14 @@ export async function loadDocEntries(reader: ReaderContext = ANONYMOUS_READER): 
 
 /** Every published entry, before reader visibility. Never returned to callers. */
 async function loadPublishedDocEntries(): Promise<Array<DocEntry>> {
-  await ensureDocPublication()
   docsConfig()
   // A previously missing index can recover in the same isolate. Never return
   // a cached embedded listing before checking current release metadata.
-  const index = await loadContentIndex()
-  if (index) hydrateContentIndex(index)
-  if (!index && process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets') return getAllDocEntries()
+  await ensurePublishedFrontmatter()
+  // An access-only request can hydrate a recovered index before this await's
+  // continuation runs. Select current authority now; no await separates this
+  // snapshot from synchronous enumeration and entry-cache installation.
+  const index = publishedFrontmatterIndex()
   if (loadedEntriesPromise) return loadedEntriesPromise
   loadedEntriesPromise = (async () => {
     if (!index) return getAllDocEntries()
@@ -1364,6 +1426,7 @@ const sidebarCollectionsCache = new Map<string, Array<SidebarCollection>>()
  * reader may not open are omitted, and groups left empty disappear.
  */
 export function getSidebarCollections(locale?: string, reader: ReaderContext = ANONYMOUS_READER): Array<SidebarCollection> {
+  observeFrontmatterMode()
   const config = docsConfig()
   const policy = getReaderAuthConfig()
   const cacheKey = `${locale ?? '__default__'}\u0001${readerVisibilityKey(reader, policy)}`
@@ -1376,7 +1439,7 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
   // be shown, so the access rules decide (a translation without its primary
   // page is closed).
   const isVisible: PageVisibility = (pageId, pageLocale) =>
-    (readFrontmatter(pageId) === MISSING_FRONTMATTER &&
+    (!isAssetContent() && readFrontmatter(pageId) === MISSING_FRONTMATTER &&
       (!pageLocale || readFrontmatter(pageId, pageLocale) === MISSING_FRONTMATTER)) ||
     canReaderAccessPage(getPageAccess(pageId, pageLocale), reader, policy)
 
@@ -1440,9 +1503,7 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
  * too large for a Worker text binding.
  */
 export async function loadSidebarCollections(locale?: string, reader: ReaderContext = ANONYMOUS_READER): Promise<Array<SidebarCollection>> {
-  await ensureDocPublication()
-  const index = await loadContentIndex()
-  if (index) hydrateContentIndex(index)
+  await ensurePublishedFrontmatter()
   return getSidebarCollections(locale, reader)
 }
 
@@ -1606,9 +1667,7 @@ export function getNavContext(pageId: string, locale?: string, reader: ReaderCon
 
 /** Async managed-release twin of {@link getNavContext}. */
 export async function loadNavContext(pageId: string, locale?: string, reader: ReaderContext = ANONYMOUS_READER): Promise<NavContext> {
-  await ensureDocPublication()
-  const index = await loadContentIndex()
-  if (index) hydrateContentIndex(index)
+  await ensurePublishedFrontmatter()
   return getNavContext(pageId, locale, reader)
 }
 

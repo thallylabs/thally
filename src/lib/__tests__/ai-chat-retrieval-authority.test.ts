@@ -98,7 +98,8 @@ describe('strict Ask AI published metadata and canonical body authority', () => 
   it('recovers actual listing/publication state and never forwards new private/noindex bodies under old embedded metadata', async () => {
     const data = await fixture()
     const docs = await import('@/data/docs')
-    expect((await docs.loadDocEntries()).map(({ id }) => id)).toContain('guide')
+    // Missing release authority no longer permits an embedded page listing.
+    await expect(docs.loadDocEntries()).rejects.toMatchObject({ code: 'THALLY_PUBLISHED_CONTENT_UNAVAILABLE' })
     const { loadContentDocument } = await import('@/lib/content/document')
     expect((await loadContentDocument('public'))?.rawBody).toContain('Embedded stale public')
     const { handleCloudAiChat } = await import('@/lib/cloud-link/services')
@@ -125,7 +126,7 @@ describe('strict Ask AI published metadata and canonical body authority', () => 
   it('fails closed if a canonical body becomes unavailable after strict metadata succeeds, then recovers without embedded content', async () => {
     const data = await fixture()
     const docs = await import('@/data/docs')
-    await docs.loadDocEntries()
+    await expect(docs.loadDocEntries()).rejects.toMatchObject({ code: 'THALLY_PUBLISHED_CONTENT_UNAVAILABLE' })
     const { loadContentDocument } = await import('@/lib/content/document')
     await loadContentDocument('public')
     data.restore()
